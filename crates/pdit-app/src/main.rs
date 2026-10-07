@@ -34,6 +34,7 @@ mod table_ui;
 mod theme;
 mod thumbnails;
 mod tools_ui;
+mod update_ui;
 mod zoom_ui;
 
 use context_menu::{ContextMenu, ContextMenuState};
@@ -84,6 +85,7 @@ fn App() -> Element {
     find_fields_ui::FindFields::provide();
     let ai = ai_ui::Ai::provide();
     ask_ui::Ask::provide();
+    update_ui::Updates::provide();
     doc_ui::DocTools::provide();
     use_close_on_outside(editing);
     use_hook(|| {
@@ -160,6 +162,7 @@ fn App() -> Element {
         zoom_ui::ZoomBar {}
         search_ui::FindCard {}
         print_ui::PrintUi {}
+        update_ui::UpdateUi {}
         find_fields_ui::FindFieldsBar {}
         if document.read().is_some() {
             ai_ui::AiUi {}

@@ -1,0 +1,21 @@
+{
+  "build": {
+    "beforeBuildCommand": "./desktop/scripts/fetch-ocr.sh && cd crates/pdit-app && \"${CARGO_HOME:-$HOME/.cargo}/bin/dx\" build --release --platform web"
+  },
+  "bundle": {
+    "targets": [
+      "dmg",
+      "app"
+    ],
+    "resources": {
+      "resources/ocr/lib/": "ocr/lib/",
+      "resources/ocr/tessdata/": "ocr/tessdata/",
+      "../LICENSE": "LICENSE",
+      "../THIRD_PARTY_NOTICES.md": "THIRD_PARTY_NOTICES.md",
+      "../licenses/": "licenses/"
+    },
+    "macOS": {
+      "minimumSystemVersion": "11.0"
+    }
+  }
+}

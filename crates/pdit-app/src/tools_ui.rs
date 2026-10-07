@@ -243,6 +243,7 @@ fn highlight(mut hl: Signal<Option<(f64, f64)>>, event: &Event<MouseData>) {
 #[component]
 pub fn ToolRail() -> Element {
     let tools = use_context::<Tools>();
+    let updates = use_context::<crate::update_ui::Updates>();
     let shapes = use_context::<crate::shapes_ui::ShapeDraw>();
     let mut rail_hl = use_signal(|| None::<(f64, f64)>);
     let mut fly_hl = use_signal(|| None::<(f64, f64)>);
@@ -292,6 +293,20 @@ pub fn ToolRail() -> Element {
                         },
                         span { dangerous_inner_html: icon, style: "display: contents" }
                         span { "{short}" }
+                    }
+                }
+            }
+            // An update is waiting (D-058): its row brings the prompt back.
+            if let Some(label) = updates.waiting() {
+                span { class: "pdit-rail-grow" }
+                div { class: "sb-nav",
+                    button {
+                        class: "sb-item pdit-rail-update",
+                        r#type: "button",
+                        title: if label == "Restart" { "Restart to use the update" } else { "A new version of pdit is available" },
+                        onclick: move |_| updates.show(),
+                        span { class: "dot" }
+                        span { "{label}" }
                     }
                 }
             }

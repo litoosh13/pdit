@@ -257,8 +257,8 @@ pub fn AskUi() -> Element {
                     Models::Unknown => rsx! {},
                     Models::Unsupported => rsx! {
                         div { class: "pdit-ask-card",
-                            b { "Asking questions needs an Apple-silicon Mac" }
-                            div { "leafmind's question models run on ONNX Runtime, which is published for Apple-silicon Macs only." }
+                            b { "Asking questions works on Apple-silicon Macs for now" }
+                            div { "leafmind's question models need ONNX Runtime, which pdit downloads for Apple-silicon Macs only so far." }
                         }
                     },
                     Models::Missing { progress, error } => rsx! {

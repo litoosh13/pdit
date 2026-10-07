@@ -1,4 +1,4 @@
-# pdit
+# <img src=".github/pdit-icon.png" alt="" width="40" align="top"> pdit
 
 A private PDF editor. Your PDFs stay on your computer: nothing is uploaded.
 

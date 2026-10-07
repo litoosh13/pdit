@@ -4,7 +4,10 @@
   "version": "0.1.0",
   "identifier": "app.pdit.desktop",
   "build": {
-    "beforeBuildCommand": "./desktop/scripts/fetch-ocr.sh && cd crates/pdit-app && \"${CARGO_HOME:-$HOME/.cargo}/bin/dx\" build --release --platform web",
+    "beforeBuildCommand": {
+      "script": "dx build --release --platform web",
+      "cwd": "../crates/pdit-app"
+    },
     "frontendDist": "../target/dx/pdit-app/release/web/public"
   },
   "app": {
@@ -15,14 +18,9 @@
   },
   "bundle": {
     "active": true,
-    "targets": [
-      "dmg",
-      "app"
-    ],
+    "createUpdaterArtifacts": true,
     "category": "Productivity",
     "resources": {
-      "resources/ocr/lib/": "ocr/lib/",
-      "resources/ocr/tessdata/": "ocr/tessdata/",
       "../LICENSE": "LICENSE",
       "../THIRD_PARTY_NOTICES.md": "THIRD_PARTY_NOTICES.md",
       "../licenses/": "licenses/"
@@ -35,9 +33,14 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ],
-    "macOS": {
-      "minimumSystemVersion": "11.0"
+    ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEI3OERBNkFBREZFODBDRDcKUldUWERPamZxcWFOdDAyWWhFdWI0YUZpK1BtclIyVnF2cCswK3hWbHJyU0RSYnB3R3JYOXN5SjUK",
+      "endpoints": [
+        "https://github.com/litoosh13/pdit/releases/latest/download/latest.json"
+      ]
     }
   }
 }

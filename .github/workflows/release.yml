@@ -1,0 +1,103 @@
+# Pushing a version tag builds the desktop app for macOS (Apple silicon + Intel),
+# Windows and Linux and publishes them as one GitHub Release, with the signed
+# update files (latest.json) the app checks for updates.
+#   git tag v0.1.0-beta.1 && git push origin v0.1.0-beta.1
+# The macOS app is ad-hoc signed only (users allow it once: System Settings →
+# Privacy & Security → Open Anyway); the Windows installer is unsigned (Windows
+# SmartScreen: More info → Run anyway).
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            args: --target universal-apple-darwin
+            targets: aarch64-apple-darwin x86_64-apple-darwin
+          - os: windows-latest
+            args: ""
+            targets: ""
+          - os: ubuntu-22.04
+            args: ""
+            targets: ""
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Linux libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+
+      - name: Rust toolchain
+        run: |
+          rustup toolchain install
+          rustup component add llvm-tools
+          if [ -n "${{ matrix.targets }}" ]; then rustup target add ${{ matrix.targets }}; fi
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            desktop
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: PDFium (pinned, checksum-verified)
+        run: scripts/fetch-pdfium.sh
+
+      - name: React island
+        working-directory: web/gooey-island
+        run: npm ci --no-audit --no-fund && npm run build
+
+      - uses: cargo-bins/cargo-binstall@main
+
+      - name: Build tools
+        run: cargo binstall dioxus-cli@0.7.10 tauri-cli@2.12.1 --no-confirm
+
+      # The app's version comes from the tag: v0.1.0-beta.1 → 0.1.0-beta.1.
+      - name: Version from the tag
+        run: |
+          node -e '
+            const fs = require("fs"), f = "desktop/tauri.conf.json";
+            const c = JSON.parse(fs.readFileSync(f, "utf8"));
+            c.version = process.env.GITHUB_REF_NAME.replace(/^v/, "");
+            fs.writeFileSync(f, JSON.stringify(c, null, 2) + "\n");'
+
+      # Builds the web app first (tauri.conf.json's beforeBuildCommand; on macOS it also
+      # fetches the OCR files), then the app, the installers and the signed update files.
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: desktop
+          tauriScript: cargo tauri
+          args: ${{ matrix.args }}
+          tagName: ${{ github.ref_name }}
+          releaseName: pdit ${{ github.ref_name }}
+          releaseBody: |
+            Download the file for your computer below.
+            - macOS (Apple silicon and Intel): the .dmg. First start: System Settings → Privacy & Security → Open Anyway.
+            - Windows: the -setup.exe. If SmartScreen warns: More info → Run anyway.
+            - Linux: the .AppImage (or the .deb).
+            pdit checks for new versions itself and asks before updating.
+          releaseDraft: false
+          # Not marked "pre-release", so the app's update check (releases/latest) finds it.
+          prerelease: false

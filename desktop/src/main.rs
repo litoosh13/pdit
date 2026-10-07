@@ -8,6 +8,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod qa;
+mod update;
 
 use leafmind_ocr::{OcrEngine, OcrLanguage, OcrModels};
 use std::sync::OnceLock;
@@ -73,6 +74,13 @@ fn debug_log(message: String) {
     println!("{message}");
 }
 
+/// OCR works here: the macOS app bundles Tesseract (Windows and Linux builds
+/// don't yet).
+#[tauri::command]
+fn ocr_available(app: AppHandle) -> bool {
+    cfg!(target_os = "macos") && ocr(&app).is_ok()
+}
+
 /// The language of a scanned page ("eng", "deu", "fas", "ara"), if Tesseract can tell.
 #[tauri::command]
 async fn ocr_language(app: AppHandle, request: Request<'_>) -> Result<Option<String>, String> {
@@ -136,6 +144,11 @@ fn handlers() -> impl Fn(tauri::ipc::Invoke) -> bool {
         qa::qa_cancel,
         qa::qa_index,
         qa::qa_ask,
+        update::update_check,
+        update::update_install,
+        update::update_progress,
+        update::update_restart,
+        ocr_available,
         debug_log
     ]
 }
@@ -149,12 +162,18 @@ fn handlers() -> impl Fn(tauri::ipc::Invoke) -> bool {
         qa::qa_download,
         qa::qa_cancel,
         qa::qa_index,
-        qa::qa_ask
+        qa::qa_ask,
+        update::update_check,
+        update::update_install,
+        update::update_progress,
+        update::update_restart,
+        ocr_available
     ]
 }
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(handlers())
         .setup(|app| {
             WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))

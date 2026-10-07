@@ -11,6 +11,8 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = [] }
+# Updates from GitHub Releases (D-058), signed.
+tauri-plugin-updater = "2"
 # The native Save dialog: WebKit has no showSaveFilePicker, so pdit's Save falls
 # back to a download, which this app turns into a Save dialog.
 rfd = "0.17"
@@ -18,6 +20,7 @@ rfd = "0.17"
 # scripts/fetch-ocr.sh); the web app sends page images through the commands in main.rs.
 leafmind-ocr = { git = "https://github.com/litoosh13/leafmind", tag = "v0.2.0" }
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 # Asking questions (D-056): leafmind picks the answering sentence; its models are downloaded on first
 # use (qa.rs), ONNX Runtime is loaded at run time.
 leafmind-qa = { git = "https://github.com/litoosh13/leafmind", tag = "v0.2.0" }

@@ -1,0 +1,40 @@
+/* The update prompt (D-058, approved mockup .claude/research/update-ui/): the
+   app's toast pill (toast.css) placed under the top bar, so it never meets the
+   Undo toast, with Selection Actions buttons; and its row at the bottom of the
+   tools rail (tools.css). */
+
+.pdit-toast-host.pdit-update-host {
+  top: 92px;
+  bottom: auto;
+  z-index: 26;
+}
+.pdit-update .sa-control {
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+}
+.pdit-update .sa-primary {
+  border: 0;
+  cursor: pointer;
+  font: inherit;
+}
+.pdit-update-dim {
+  opacity: 0.6;
+}
+.pdit-update-pct {
+  font-variant-numeric: tabular-nums;
+}
+
+/* The rail's row (until the user's Koboyo icon arrives: a dot). */
+.pdit-rail .pdit-rail-grow {
+  flex: 1;
+}
+.pdit-rail .pdit-rail-update .dot {
+  width: 8px;
+  height: 8px;
+  margin: 4px 0 2px;
+  border-radius: 50%;
+  background: #0285ff;
+  box-shadow: 0 0 0 3px #0285ff33;
+}

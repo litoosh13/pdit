@@ -149,6 +149,13 @@ impl Ai {
         });
         spawn(async move {
             let desktop = desktop::available();
+            // OCR comes with the macOS app; other systems' builds don't have it yet.
+            let ocr = desktop
+                && desktop::invoke("ocr_available", &js_sys::Object::new())
+                    .await
+                    .ok()
+                    .and_then(|v| v.as_bool())
+                    == Some(true);
             // 1. What each page is.
             let pages = pdit_core::page_ops::page_sizes().unwrap_or_default();
             let kinds: Vec<PageKind> = (0..pages.len() as u16)
@@ -165,7 +172,7 @@ impl Ai {
                     .position(|k| *k == PageKind::Text)
                     .map(|p| p as u16)
             });
-            let language = match (desktop, probe) {
+            let language = match (ocr, probe) {
                 (true, Some(page)) => desktop::language(page).await,
                 _ => None,
             };
@@ -190,6 +197,18 @@ impl Ai {
                         "OCR not needed",
                         State::Skip,
                         "Every page has its own text; it is read directly.",
+                    ),
+                );
+            } else if desktop && !ocr {
+                self.set_step(
+                    1,
+                    Step::new(
+                        "OCR isn't in this version yet",
+                        State::Skip,
+                        format!(
+                            "{} scanned pages can be read in the macOS app for now.",
+                            scans.len()
+                        ),
                     ),
                 );
             } else if !desktop {
