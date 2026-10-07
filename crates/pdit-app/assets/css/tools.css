@@ -1,0 +1,135 @@
+/*
+ * Tools rail and flyout (D-050, approved mockup .claude/research/sidebar-ui/).
+ *   - Surface and motion: the Pages panel's (thumbnails.css: Gooey surface,
+ *     Transitions.dev "Panel reveal").
+ *   - Rows: Beautiful UI "Sidebar nav" (https://www.beautifului.dev, MIT,
+ *     (c) 2026 Shane Levine): section rows, the sliding hover highlight
+ *     (top/height 220ms cubic-bezier(0.23,1,0.32,1), opacity 150ms), the
+ *     active row in full ink, active:scale(0.96).
+ */
+
+.pdit-rail {
+  width: 60px;
+  padding: 8px 6px;
+  z-index: 11;
+}
+
+.pdit-fly {
+  left: 84px;
+  width: 208px;
+  bottom: auto;
+  max-height: calc(100vh - 36px);
+  overflow-y: auto;
+  z-index: 10;
+}
+
+.pdit-rail,
+.pdit-fly {
+  --sb-hover: #f4f5f6;
+  --sb-accent: #0170dd;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) :is(.pdit-rail, .pdit-fly) {
+    --sb-hover: #2a2b2e;
+    --sb-accent: #7ec0ff;
+  }
+}
+:root[data-theme='dark'] :is(.pdit-rail, .pdit-fly) {
+  --sb-hover: #2a2b2e;
+  --sb-accent: #7ec0ff;
+}
+
+/* ---- Sidebar nav ---- */
+.pdit-rail .sb-nav,
+.pdit-fly .sb-nav {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.sb-hl {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-radius: 7px;
+  background: var(--sb-hover);
+  pointer-events: none;
+  transition:
+    top 220ms cubic-bezier(0.23, 1, 0.32, 1),
+    height 220ms cubic-bezier(0.23, 1, 0.32, 1),
+    opacity 150ms ease;
+}
+.sb-item {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  color: var(--ink-2);
+  cursor: pointer;
+  transition:
+    color 150ms,
+    transform 150ms;
+}
+.sb-item:active {
+  transform: scale(0.96);
+}
+.sb-item svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+.sb-item.cm-mirror svg {
+  transform: scaleX(-1);
+}
+.sb-item[aria-pressed='true'],
+.sb-item[aria-expanded='true'] {
+  color: var(--ink);
+  font-weight: 500;
+}
+/* An armed placing tool says what to do next. */
+.sb-item[data-places='true'][aria-pressed='true']::after {
+  content: 'click the page';
+  margin-left: auto;
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--sb-accent);
+}
+
+/* The rail: icon over a small name. */
+.pdit-rail .sb-item {
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 2px 6px;
+  font-size: 9.5px;
+  text-align: center;
+}
+.pdit-rail .sb-item svg {
+  width: 17px;
+  height: 17px;
+}
+.pdit-rail .sb-item[aria-expanded='true'] {
+  font-weight: 600;
+}
+
+.pdit-fly-close {
+  margin-left: auto;
+  border: 0;
+  font: inherit;
+  cursor: pointer;
+}
+
+/* Narrow windows: below the full-width top bar, as the panels. */
+@media (max-width: 720px) {
+  .pdit-rail {
+    top: 96px;
+  }
+}

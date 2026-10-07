@@ -1,0 +1,96 @@
+/* The AI button's menu and the Analysis panel (D-055, approved mockup
+   .claude/research/ai-ui/). The menu is the app's menu (context-menu.css:
+   Beautiful UI records-filter menu + Transitions.dev "Menu dropdown") under the
+   round button; the panel is the comments list's panel (thumbnails.css panel
+   surface + Transitions.dev "Panel reveal") on the right. */
+
+.cm-menu.pdit-ai-menu {
+  position: fixed;
+  min-width: 230px;
+  z-index: 45;
+}
+.pdit-ai-menu button:disabled {
+  opacity: 0.4;
+  cursor: default;
+  background: none;
+}
+.pdit-ai-primary {
+  font-weight: 600;
+  color: var(--ink);
+}
+.pdit-ai-why {
+  margin-left: auto;
+  font-size: 10.5px;
+  opacity: 0.8;
+}
+
+.pdit-panel.pdit-ai {
+  left: auto;
+  right: 16px;
+  top: 92px;
+  bottom: auto;
+  width: 270px;
+  max-height: calc(100vh - 110px);
+  overflow-y: auto;
+  z-index: 12;
+  --panel-translate-x: 32px;
+}
+.pdit-ai .pdit-panel-head .grow {
+  flex: 1;
+}
+.pdit-ai-x {
+  border: 0;
+  background: none;
+  color: var(--ink-3);
+  font: inherit;
+  cursor: pointer;
+}
+.pdit-ai-step {
+  display: flex;
+  gap: 9px;
+  padding: 7px 8px;
+  border-radius: 6px;
+  font-size: 12.5px;
+  color: var(--ink-2);
+}
+.pdit-ai-step .st {
+  width: 14px;
+  flex-shrink: 0;
+  text-align: center;
+  color: var(--ink-3);
+}
+.pdit-ai-step.is-done .st {
+  color: #189a4d;
+}
+.pdit-ai-step.is-run,
+.pdit-ai-step.is-run .st {
+  color: #0285ff;
+}
+.pdit-ai-step .what {
+  font-weight: 550;
+  color: var(--ink);
+}
+.pdit-ai-step.is-skip .what {
+  font-weight: 500;
+  color: var(--ink-3);
+}
+.pdit-ai-step .detail {
+  margin-top: 2px;
+  font-size: 11.5px;
+  color: var(--ink-2);
+}
+.pdit-ai-sum {
+  margin: 6px 8px 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+  font-size: 11.5px;
+  color: var(--ink-3);
+}
+.pdit-ai-sum button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #0285ff;
+  font: inherit;
+  cursor: pointer;
+}

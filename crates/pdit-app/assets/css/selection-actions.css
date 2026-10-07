@@ -1,0 +1,305 @@
+/*
+ * "Selection Actions" from Beautiful UI (https://www.beautifului.dev; source
+ * github.com/TurboKach/ai-native-react-components, components/selection-actions.tsx
+ * and app/globals.css, MIT, Copyright (c) 2026 Turbo). The component's Tailwind
+ * classes are translated one-to-one into plain CSS below, with the theme's
+ * token values. pdit changes: iconoir icons replaced by Koboyo icons; only the
+ * component's editing actions are kept (D-019).
+ */
+
+.sa-root {
+  --canvas: #f1f2f3;
+  --surface: #fff;
+  --hover: #f4f5f6;
+  --ink: #1f2124;
+  --ink-3: #9a9da3;
+  --line: #ecedef;
+  --line-strong: #e0e2e5;
+  --accent: #0285ff;
+  --accent-tint: #e9f3ff;
+  --shadow-hairline: 0 0 0 1px var(--line);
+  --shadow-overlay: 0 0 0 1px var(--line), 0 8px 28px #0001;
+}
+
+/* Dark: follows the system unless the user picked a theme (D-022). */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .sa-root {
+    --canvas: #1c1d1f;
+    --surface: #232427;
+    --hover: #2a2b2e;
+    --ink: #f2f3f4;
+    --ink-3: #6c6f75;
+    --line: #2e3033;
+    --line-strong: #3a3c40;
+    --accent: #3d9aff;
+    --accent-tint: #3d9aff29;
+    --shadow-overlay: 0 0 0 1px var(--line-strong), 0 8px 28px #00000057;
+  }
+}
+
+:root[data-theme='dark'] .sa-root {
+  --canvas: #1c1d1f;
+  --surface: #232427;
+  --hover: #2a2b2e;
+  --ink: #f2f3f4;
+  --ink-3: #6c6f75;
+  --line: #2e3033;
+  --line-strong: #3a3c40;
+  --accent: #3d9aff;
+  --accent-tint: #3d9aff29;
+  --shadow-overlay: 0 0 0 1px var(--line-strong), 0 8px 28px #00000057;
+}
+
+/* The selected text: box-decoration-clone rounded-[3px]
+   bg-[color-mix(in_srgb,var(--accent)_14%,var(--surface))] dark:bg-accent-tint */
+.sa-highlight {
+  position: absolute;
+  z-index: 3;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface));
+  mix-blend-mode: multiply;
+  pointer-events: none;
+}
+
+/* Dark: follows the system unless the user picked a theme (D-022). */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .sa-highlight {
+    background: var(--accent-tint);
+  }
+}
+
+:root[data-theme='dark'] .sa-highlight {
+  background: var(--accent-tint);
+}
+
+/* absolute top-0 left-0 z-10 + the inline transform/transition of the source */
+.sa-anchor {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 10;
+  transition: transform 320ms cubic-bezier(0.77, 0, 0.175, 1), opacity 180ms ease-out;
+  will-change: transform;
+}
+
+/* flex h-9 w-fit max-w-[calc(100vw-48px)] items-center justify-center gap-0.5
+   overflow-hidden rounded-full bg-surface p-1 font-sans font-normal text-ink
+   antialiased shadow-overlay */
+.sa-bar {
+  display: flex;
+  height: 36px;
+  width: fit-content;
+  max-width: calc(100vw - 48px);
+  box-sizing: border-box;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  overflow: hidden;
+  border-radius: 9999px;
+  background: var(--surface);
+  padding: 4px;
+  font-family: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+  font-weight: 400;
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+  box-shadow: var(--shadow-overlay);
+  animation: pop-in 220ms cubic-bezier(0.23, 1, 0.32, 1) both;
+}
+
+/* flex w-fit shrink-0 items-center justify-center gap-0.5 */
+.sa-content {
+  display: flex;
+  width: fit-content;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+}
+
+/* form: flex h-7 shrink-0 items-center */
+.sa-form {
+  display: flex;
+  height: 28px;
+  flex-shrink: 0;
+  align-items: center;
+}
+
+/* h-7 w-full bg-transparent pr-2.5 pl-3 text-[12.5px] text-ink placeholder:text-ink-3 */
+.sa-input {
+  height: 28px;
+  width: 100%;
+  box-sizing: border-box;
+  border: 0;
+  outline: none;
+  background: transparent;
+  padding: 0 10px 0 12px;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--ink);
+}
+
+.sa-input::placeholder {
+  color: var(--ink-3);
+}
+
+/* Shared button reset (Tailwind preflight). */
+.sa-bar button {
+  border: 0;
+  margin: 0;
+  font: inherit;
+  background: transparent;
+  color: inherit;
+}
+
+/* flex size-7 shrink-0 items-center justify-center rounded-full bg-ink text-surface
+   transition-[opacity,transform] duration-200 active:scale-[0.94] */
+.sa-send {
+  display: flex;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border-radius: 9999px;
+  background: var(--ink) !important;
+  color: var(--surface) !important;
+  transition: opacity 200ms, transform 200ms;
+}
+
+.sa-send:active {
+  transform: scale(0.94);
+}
+
+/* primary: inline-flex h-7 shrink-0 items-center gap-1 rounded-full bg-ink px-2.5
+   text-[12.5px] font-normal text-canvas shadow-hairline transition-[opacity,transform]
+   duration-150 hover:opacity-90 active:scale-[0.96] */
+.sa-primary {
+  display: inline-flex;
+  height: 28px;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 4px;
+  border-radius: 9999px;
+  background: var(--ink) !important;
+  padding: 0 10px;
+  font-size: 12.5px;
+  font-weight: 400;
+  color: var(--canvas) !important;
+  box-shadow: var(--shadow-hairline);
+  transition: opacity 150ms, transform 150ms;
+}
+
+.sa-primary:hover {
+  opacity: 0.9;
+}
+
+.sa-primary:active {
+  transform: scale(0.96);
+}
+
+/* control: inline-flex h-7 shrink-0 items-center gap-1 rounded-full px-2.5
+   text-[12px] font-normal text-ink transition-[background-color,color,transform]
+   duration-150 hover:bg-hover active:scale-[0.96] */
+.sa-control {
+  display: inline-flex;
+  height: 28px;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 4px;
+  border-radius: 9999px;
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--ink);
+  transition: background-color 150ms, color 150ms, transform 150ms;
+}
+
+.sa-control:hover {
+  background: var(--hover) !important;
+}
+
+.sa-control:active {
+  transform: scale(0.96);
+}
+
+/* Icon sizes from the source: 16px send, 14px elsewhere. */
+.sa-send svg {
+  width: 16px;
+  height: 16px;
+}
+
+.sa-primary svg,
+.sa-control svg {
+  width: 14px;
+  height: 14px;
+}
+
+@keyframes pop-in {
+  0% {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* ---- Zoom (D-049): the Selection Actions bar, bottom right ---- */
+.pdit-zoom {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 35;
+}
+.pdit-zoom .sa-bar {
+  gap: 2px;
+}
+.pdit-zoom .sa-control {
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+}
+.pdit-zoom .sa-control:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.pdit-zoom .pdit-zoom-pct {
+  min-width: 64px;
+  justify-content: center;
+  font-variant-numeric: tabular-nums;
+}
+.pdit-zoom svg {
+  width: 15px;
+  height: 15px;
+}
+/* The presets menu (context-menu.css surface) opens upward from the pill. */
+.cm-menu.pdit-zoom-menu {
+  position: fixed;
+  right: 20px;
+  bottom: 70px;
+  left: auto;
+  top: auto;
+  min-width: 150px;
+  z-index: 36;
+}
+.pdit-zoom-tick {
+  margin-left: auto;
+  opacity: 0.7;
+}
+/* Beside the comments panel (right side), the pill moves left of it; with a
+   document open it stays left of the Pages panel's room (D-050). */
+@media (min-width: 721px) {
+  body:has(.pdit-rail) .pdit-zoom,
+  body:has(.pdit-rail) .cm-menu.pdit-zoom-menu {
+    right: 248px;
+  }
+  body:has(.pdit-comments[data-open='true']) .pdit-zoom,
+  body:has(.pdit-comments[data-open='true']) .cm-menu.pdit-zoom-menu {
+    right: 296px;
+  }
+}

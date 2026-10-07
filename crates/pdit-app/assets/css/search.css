@@ -1,0 +1,309 @@
+/*
+ * Find & replace (D-051, approved mockup .claude/research/search-ui/).
+ *   - The card: Beautiful UI "Search" (https://www.beautifului.dev, MIT,
+ *     (c) 2026 Shane Levine): rounded-card surface + shadow-raised, the h-10
+ *     input row (hover:bg-hover), the clear button (fade-in 150ms), result rows
+ *     h-8 (fade-in 200ms), the "No results found" empty state (fade-in 250ms);
+ *     opens with its pop-in keyframes. Token values from the site's themes.
+ *   - Buttons: Beautiful UI records-quiet-button / records-primary-button.
+ */
+
+.pdit-find {
+  --surface: #fff;
+  --inset: #f7f8f9;
+  --hover: #f4f5f6;
+  --ink: #1f2124;
+  --ink-2: #62656b;
+  --ink-3: #9a9da3;
+  --line: #ecedef;
+  --accent: #0285ff;
+  --accent-ink: #0170dd;
+  --accent-tint: #e9f3ff;
+  --shadow-raised: 0 0 0 1px var(--line), 0 2px 10px #0000000b;
+  --ease-out-strong: cubic-bezier(0.23, 1, 0.32, 1);
+
+  position: fixed;
+  top: 92px;
+  right: 16px;
+  z-index: 30;
+  width: 340px;
+  max-width: calc(100vw - 32px);
+  overflow: hidden;
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: var(--shadow-raised);
+  color: var(--ink);
+  font-family: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  transform-origin: top right;
+  animation: pdit-find-pop-in 160ms var(--ease-out-strong) both;
+}
+.pdit-find.is-closing {
+  animation: pdit-find-pop-out 120ms ease-in both;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .pdit-find {
+    --surface: #232427;
+    --inset: #1f2022;
+    --hover: #2a2b2e;
+    --ink: #f2f3f4;
+    --ink-2: #a5a8ad;
+    --ink-3: #6c6f75;
+    --line: #2e3033;
+    --accent: #3d9aff;
+    --accent-ink: #7ec0ff;
+    --accent-tint: #3d9aff29;
+    --shadow-raised: 0 0 0 1px var(--line), 0 2px 10px #00000038;
+  }
+}
+:root[data-theme='dark'] .pdit-find {
+  --surface: #232427;
+  --inset: #1f2022;
+  --hover: #2a2b2e;
+  --ink: #f2f3f4;
+  --ink-2: #a5a8ad;
+  --ink-3: #6c6f75;
+  --line: #2e3033;
+  --accent: #3d9aff;
+  --accent-ink: #7ec0ff;
+  --accent-tint: #3d9aff29;
+  --shadow-raised: 0 0 0 1px var(--line), 0 2px 10px #00000038;
+}
+/* Beside the Pages panel's room on wide windows (D-050). */
+@media (min-width: 721px) {
+  body:has(.pdit-rail) .pdit-find {
+    right: 264px;
+  }
+}
+
+.pdit-find-row {
+  display: flex;
+  height: 40px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--line);
+  transition: background-color 100ms;
+}
+.pdit-find-row:hover {
+  background: var(--hover);
+}
+.pdit-find-mag {
+  display: inline-flex;
+  width: 14px;
+  flex-shrink: 0;
+  color: var(--ink-3);
+}
+.pdit-find-row input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  outline: none;
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  color: var(--ink);
+}
+.pdit-find-row input::placeholder {
+  color: var(--ink-3);
+}
+.pdit-find-count {
+  font-size: 11.5px;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.pdit-find-icon {
+  display: flex;
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 99px;
+  background: transparent;
+  color: var(--ink-3);
+  cursor: pointer;
+  transition:
+    background-color 100ms,
+    color 100ms;
+}
+.pdit-find-icon:hover {
+  background: color-mix(in srgb, var(--line) 70%, transparent);
+  color: var(--ink);
+}
+.pdit-find-icon:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.pdit-find-clear {
+  animation: pdit-find-fade-in 150ms ease-out both;
+}
+
+.pdit-find-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--line);
+}
+.pdit-find-grow {
+  flex: 1;
+}
+.pdit-find-qb {
+  height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 550;
+  white-space: nowrap;
+  color: var(--ink-2);
+  cursor: pointer;
+  transition:
+    background-color 0.14s var(--ease-out-strong),
+    color 0.14s var(--ease-out-strong),
+    transform 0.14s var(--ease-out-strong);
+}
+.pdit-find-qb:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.pdit-find-qb.is-active {
+  background: var(--accent-tint);
+  color: var(--accent-ink);
+}
+.pdit-find-qb.is-primary {
+  background: var(--accent);
+  color: #fff;
+}
+.pdit-find-qb.is-primary:hover {
+  filter: saturate(0.9) brightness(1.04);
+}
+.pdit-find-qb:active {
+  transform: scale(0.96);
+}
+.pdit-find-qb:disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+.pdit-find-results {
+  max-height: 300px;
+  overflow: auto;
+  padding: 4px;
+}
+.pdit-find-res {
+  display: flex;
+  width: 100%;
+  height: 32px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  color: var(--ink);
+  cursor: pointer;
+  transition: background-color 100ms;
+  animation: pdit-find-fade-in 200ms ease-out both;
+}
+.pdit-find-res:hover,
+.pdit-find-res.is-cur {
+  background: var(--hover);
+}
+.pdit-find-res .pg {
+  width: 34px;
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--ink-3);
+}
+.pdit-find-res .ctx {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink-2);
+}
+.pdit-find-res b {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.pdit-find-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 32px 16px;
+  animation: pdit-find-fade-in 250ms ease-out both;
+}
+.pdit-find-empty .ic {
+  display: flex;
+  width: 32px;
+  height: 32px;
+  margin-bottom: 6px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: var(--inset);
+  color: var(--ink-3);
+  box-shadow: 0 0 0 1px var(--line);
+}
+.pdit-find-empty .t1 {
+  font-size: 13px;
+  font-weight: 500;
+}
+.pdit-find-empty .t2 {
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.pdit-find-note {
+  padding: 8px 12px 10px;
+  font-size: 11.5px;
+  color: var(--ink-3);
+}
+
+/* Matches on the page (always white, so the same in both themes). */
+.pdit-find-hit {
+  position: absolute;
+  z-index: 3;
+  border-radius: 3px;
+  background: color-mix(in srgb, #0285ff 22%, transparent);
+  mix-blend-mode: multiply;
+  pointer-events: none;
+}
+.pdit-find-hit.is-cur {
+  background: color-mix(in srgb, #0285ff 45%, transparent);
+  box-shadow: 0 0 0 1.5px #0285ff;
+}
+
+@keyframes pdit-find-fade-in {
+  0% {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes pdit-find-pop-in {
+  0% {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+@keyframes pdit-find-pop-out {
+  to {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+}

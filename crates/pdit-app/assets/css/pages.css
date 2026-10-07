@@ -1,0 +1,71 @@
+/*
+ * Page framing from Beautiful UI (https://www.beautifului.dev, MIT,
+ * Copyright (c) 2026 Shane Levine): the page background and the `shadow-card`
+ * surface, values read from the site's light and dark themes (2026-09-18),
+ * with its 18px card radius. The 24px gap between pages is the grid gap used by
+ * Transitions.dev and the Gooey playground. Approved by the user (D-018).
+ */
+
+:root {
+  --page-bg: oklch(0.97 0 0);
+  --shadow-card: 0 0 0 1px oklch(0.946 0.003 264.542),
+    0 18px 47px rgba(0, 0, 0, 0.03), 0 7.5px 19px rgba(0, 0, 0, 0.02),
+    0 4px 10.5px rgba(0, 0, 0, 0.02), 0 2.3px 5.8px rgba(0, 0, 0, 0.01),
+    0 1.2px 3.1px rgba(0, 0, 0, 0.01), 0 0.5px 1.3px rgba(0, 0, 0, 0.01);
+}
+
+/* Dark: follows the system unless the user picked a theme (D-022). */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --page-bg: oklch(0.226 0.004 264.485);
+    --shadow-card: 0 0 0 1px oklch(100% 0 0 / 0.11), 0 1px 2px oklch(0% 0 0 / 0.2),
+      0 2px 6px oklch(0% 0 0 / 0.2);
+  }
+}
+
+:root[data-theme='dark'] {
+  --page-bg: oklch(0.226 0.004 264.485);
+  --shadow-card: 0 0 0 1px oklch(100% 0 0 / 0.11), 0 1px 2px oklch(0% 0 0 / 0.2),
+    0 2px 6px oklch(0% 0 0 / 0.2);
+}
+
+html,
+body {
+  margin: 0;
+  background: var(--page-bg);
+}
+
+.page-list {
+  display: flex;
+  flex-direction: column;
+  /* Pages centre with auto margins (below), so a zoomed-in page wider than the
+     window starts at the left edge and the window scrolls sideways (D-049). */
+  align-items: flex-start;
+  gap: 24px;
+  padding: 24px;
+  /* Room for the top bar (D-031: at 20px, 56px tall, then a 20px gap). */
+  padding-top: 96px;
+}
+
+/* A thumbnail click scrolls its page to the top, below the top bar (same
+   room as the list's padding-top). */
+.page-list .page {
+  margin-inline: auto;
+  flex-shrink: 0;
+  scroll-margin-top: 96px;
+}
+
+.page {
+  border-radius: 18px;
+  box-shadow: var(--shadow-card);
+  /* PDF pages are white paper, also in dark mode. */
+  background: #ffffff;
+}
+
+/* Clip the page image (not the page) to the rounded corners, so the editing
+   bar can extend past the page edge. */
+.page > .t-skel-skeleton,
+.page > .t-skel-content {
+  border-radius: inherit;
+  overflow: hidden;
+}

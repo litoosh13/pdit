@@ -1,0 +1,96 @@
+//! Hosts the React island bundled from `web/gooey-island` into
+//! `assets/islands` (see `docker compose run --rm islands`): the metal top bar
+//! (D-031) and the format bar (D-027, format_bar.rs).
+
+use dioxus::prelude::*;
+use js_sys::{Function, Object, Promise, Reflect};
+use std::cell::RefCell;
+use std::rc::Rc;
+use wasm_bindgen::JsCast;
+use wasm_bindgen::prelude::*;
+use wasm_bindgen_futures::JsFuture;
+
+const ISLAND_JS: Asset = asset!("/assets/islands/gooey-island.js");
+const ISLAND_CSS: Asset = asset!("/assets/islands/gooey-island.css");
+
+/// The top bar (D-031): the round AI button (D-055), then Open, New, Pages,
+/// Light/Dark and Save. The island handles Light/Dark itself.
+#[component]
+pub fn TopBar(
+    has_doc: bool,
+    pages_shown: bool,
+    on_ai: EventHandler<()>,
+    on_open: EventHandler<()>,
+    on_new: EventHandler<()>,
+    on_save: EventHandler<()>,
+    on_toggle_pages: EventHandler<()>,
+) -> Element {
+    // The island's `update` function, once mounted.
+    let update = use_hook(|| Rc::new(RefCell::new(None::<Function>)));
+    let mut ready = use_signal(|| false);
+
+    let push = update.clone();
+    use_effect(use_reactive!(|(has_doc, pages_shown)| {
+        let _ = ready();
+        if let Some(update) = push.borrow().as_ref() {
+            let state = Object::new();
+            let _ = Reflect::set(&state, &"hasDoc".into(), &has_doc.into());
+            let _ = Reflect::set(&state, &"pagesShown".into(), &pages_shown.into());
+            let _ = update.call1(&JsValue::NULL, &state);
+        }
+    }));
+
+    rsx! {
+        document::Stylesheet { href: ISLAND_CSS }
+        div {
+            // Positioned by top-bar.css (it moves over the pages when the
+            // pages panel is shown).
+            class: "pdit-top-bar-host",
+            onmounted: move |event| {
+                let update = update.clone();
+                async move {
+                    let Some(element) = event.data().downcast::<web_sys::Element>().cloned() else {
+                        return;
+                    };
+                    let options = Object::new();
+                    for (name, handler) in [
+                        ("onAi", on_ai),
+                        ("onOpen", on_open),
+                        ("onNew", on_new),
+                        ("onSave", on_save),
+                        ("onTogglePages", on_toggle_pages),
+                    ] {
+                        let closure = Closure::<dyn Fn()>::new(move || handler.call(()));
+                        let _ = Reflect::set(&options, &name.into(), closure.as_ref());
+                        // The bar lives as long as the page.
+                        closure.forget();
+                    }
+                    match mount_with(&element, "mountTopBar", &options).await {
+                        Ok(controller) => {
+                            *update.borrow_mut() = Reflect::get(&controller, &"update".into())
+                                .ok()
+                                .and_then(|f| f.dyn_into::<Function>().ok());
+                            ready.set(true);
+                        }
+                        Err(error) => crate::log(&format!("pdit: could not load the top bar: {error:?}")),
+                    }
+                }
+            },
+        }
+    }
+}
+
+/// Loads the island and calls its `export(element, options)`.
+pub(crate) async fn mount_with(
+    element: &web_sys::Element,
+    export: &str,
+    options: &Object,
+) -> Result<JsValue, JsValue> {
+    let import = Function::new_with_args("url", "return import(url)");
+    let module = JsFuture::from(Promise::from(
+        import.call1(&JsValue::NULL, &ISLAND_JS.to_string().into())?,
+    ))
+    .await?;
+    let mount: Function = Reflect::get(&module, &export.into())?.dyn_into()?;
+    mount.call2(&JsValue::NULL, element, options)
+}

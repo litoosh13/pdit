@@ -1,0 +1,16 @@
+[package]
+name = "pdit-app"
+description = "pdit's web app (Dioxus)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+dioxus.workspace = true
+pdit-core.workspace = true
+js-sys.workspace = true
+wasm-bindgen.workspace = true
+wasm-bindgen-futures.workspace = true
+web-sys = { workspace = true, features = ["AddEventListenerOptions", "Blob", "BlobPropertyBag", "CanvasRenderingContext2d", "console", "CssStyleDeclaration", "Document", "DomTokenList", "Element", "DomRect", "HtmlAnchorElement", "HtmlCanvasElement", "HtmlElement", "HtmlInputElement", "ImageData", "IntersectionObserver", "IntersectionObserverEntry", "IntersectionObserverInit", "KeyboardEvent", "MouseEvent", "PointerEvent", "ResizeObserver", "Response", "WheelEvent", "Storage", "Url", "Window"] }

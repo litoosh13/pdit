@@ -1,0 +1,48 @@
+[workspace]
+resolver = "3"
+members = ["crates/pdit-core", "crates/pdit-app"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0-only"
+repository = "https://github.com/litoosh13/pdit"
+publish = false
+
+[workspace.dependencies]
+pdit-core = { path = "crates/pdit-core" }
+pdfium-render = { version = "=0.9.4", default-features = false, features = ["pdfium_latest", "thread_safe", "image_latest"] }
+dioxus = { version = "=0.7.10", features = ["web"] }
+serde = { version = "1", features = ["derive"] }
+# Decodes user-added images (Add image, D-023). PNG + JPEG only; must match
+# pdfium-render's image 0.25 so PdfPageImageObject sees the same DynamicImage.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+# Font subsetting that keeps a Unicode cmap, so PDFium can still map text (D-028).
+allsorts = { version = "=0.17.0", default-features = false, features = ["flate2_rust"] }
+# Writes what PDFium can't — page links (/Dest) and bookmarks (outlines) — as an
+# incremental update on PDFium's saved bytes (D-045). wasm_js: getrandom for its
+# encryption code in the browser.
+leafmind-fields = { git = "https://github.com/litoosh13/leafmind", tag = "v0.2.0" }
+lopdf = { version = "0.45", default-features = false, features = ["wasm_js"] }
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+web-sys = "0.3"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+# wasm-opt (binaryen 129, run by dx) crashes on the DWARF debug info std ships with.
+strip = "debuginfo"
+
+# pdfium-render 0.9.4 with its form-fill handles made public (visibility only; see
+# third_party/pdfium-render/PDIT_PATCH.md), so form fields can be filled the way typing does.
+[patch.crates-io]
+pdfium-render = { path = "third_party/pdfium-render" }
+
+# Dev builds: no debug info for dependencies. With tract (leafmind's field finder,
+# D-053) the debug wasm reached 406 MB and wasm-bindgen ran out of memory in the
+# Docker dev server; our own crates keep theirs.
+[profile.dev.package."*"]
+debug = false

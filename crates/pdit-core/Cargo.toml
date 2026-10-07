@@ -1,0 +1,22 @@
+[package]
+name = "pdit-core"
+description = "pdit's PDF engine layer: loading, inspecting and editing PDFs on top of PDFium."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+allsorts.workspace = true
+image.workspace = true
+leafmind-fields.workspace = true
+lopdf.workspace = true
+pdfium-render.workspace = true
+serde.workspace = true
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen.workspace = true
+wasm-bindgen-futures.workspace = true
+js-sys.workspace = true
+web-sys = { workspace = true, features = ["Document", "Element", "HtmlHeadElement", "HtmlScriptElement", "ImageData", "Node", "NodeList", "Window"] }

@@ -1,0 +1,156 @@
+/*
+ * Right-click menu (D-023, D-025).
+ *
+ * Motion: Transitions.dev "Menu dropdown" (https://transitions.dev, prototype
+ * p2), the copied `.t-dropdown` snippet verbatim with the site's values for its
+ * variables.
+ *
+ * Rows: Beautiful UI's records-table filter menu (https://www.beautifului.dev;
+ * source github.com/TurboKach/ai-native-react-components, app/globals.css:
+ * .records-filter-menu, .records-filter-label and its buttons; MIT, Copyright
+ * (c) 2026 Turbo), with the theme's token values.
+ *
+ * Surface: the Gooey plus menu's colours and "Figma soft" shadow (Libraries.dev
+ * Gooey playground theme.ts, MIT, Copyright (c) 2026 Jakub Antalik), as the user
+ * chose (surface A). pdit changes: fixed at the pointer instead of under a
+ * trigger, and the Gooey colours in place of Beautiful UI's surface.
+ */
+
+/* ---- Transitions.dev "Menu dropdown" ---- */
+.t-dropdown {
+  --dropdown-open-dur: 250ms; /* --duration-fast */
+  --dropdown-close-dur: 150ms; /* --duration-quick */
+  --dropdown-pre-scale: 0.97; /* --scale-medium */
+  --dropdown-closing-scale: 0.99; /* --scale-tiny */
+  --dropdown-ease: cubic-bezier(0.22, 1, 0.36, 1); /* --ease-smooth-out */
+}
+
+.t-dropdown {
+  transform-origin: top left;
+  transform: scale(var(--dropdown-pre-scale));
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    transform var(--dropdown-open-dur) var(--dropdown-ease),
+    opacity   var(--dropdown-open-dur) var(--dropdown-ease);
+  will-change: transform, opacity;
+}
+.t-dropdown[data-origin="top-right"]     { transform-origin: top right; }
+.t-dropdown[data-origin="top-center"]    { transform-origin: top center; }
+.t-dropdown[data-origin="bottom-left"]   { transform-origin: bottom left; }
+.t-dropdown[data-origin="bottom-center"] { transform-origin: bottom center; }
+.t-dropdown[data-origin="bottom-right"]  { transform-origin: bottom right; }
+
+.t-dropdown.is-open {
+  transform: scale(1);
+  opacity: 1;
+  pointer-events: auto;
+}
+.t-dropdown.is-closing {
+  transform: scale(var(--dropdown-closing-scale));
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    transform var(--dropdown-close-dur) var(--dropdown-ease),
+    opacity   var(--dropdown-close-dur) var(--dropdown-ease);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .t-dropdown { transition: none !important; }
+}
+
+/* ---- Surface tokens: Gooey light, Beautiful UI text colours ---- */
+.cm-menu {
+  --cm-surface: #ffffff;
+  --cm-shadow: 0 0 0 1px rgba(0, 0, 0, 0.06), 0 2px 6px rgba(0, 0, 0, 0.05),
+    0 4px 42px rgba(0, 0, 0, 0.06);
+  --cm-hover: rgba(0, 0, 0, 0.04);
+  --ink: #1f2124;
+  --ink-2: #62656b;
+  --ink-3: #9a9da3;
+}
+
+/* Dark: follows the system unless the user picked a theme (D-022). */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .cm-menu {
+    --cm-surface: #202020;
+    --cm-shadow: 0 0 0 1px rgba(255, 255, 255, 0.04) inset, 0 1px 0 0 rgba(255, 255, 255, 0.03) inset,
+      0 0 0 1px rgba(0, 0, 0, 0.06), 0 2px 6px 0 rgba(0, 0, 0, 0.05), 0 4px 42px 0 rgba(0, 0, 0, 0.24);
+    --cm-hover: rgba(255, 255, 255, 0.06);
+    --ink: #f2f3f4;
+    --ink-2: #a5a8ad;
+    --ink-3: #6c6f75;
+  }
+}
+
+:root[data-theme='dark'] .cm-menu {
+  --cm-surface: #202020;
+  --cm-shadow: 0 0 0 1px rgba(255, 255, 255, 0.04) inset, 0 1px 0 0 rgba(255, 255, 255, 0.03) inset,
+    0 0 0 1px rgba(0, 0, 0, 0.06), 0 2px 6px 0 rgba(0, 0, 0, 0.05), 0 4px 42px 0 rgba(0, 0, 0, 0.24);
+  --cm-hover: rgba(255, 255, 255, 0.06);
+  --ink: #f2f3f4;
+  --ink-2: #a5a8ad;
+  --ink-3: #6c6f75;
+}
+
+/* ---- Beautiful UI .records-filter-menu ---- */
+.cm-menu {
+  position: fixed;
+  z-index: 30;
+  box-sizing: border-box;
+  border-radius: 10px; /* --radius-card */
+  background: var(--cm-surface);
+  width: 190px;
+  box-shadow: var(--cm-shadow);
+  padding: 6px;
+  font-family: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* .records-filter-label */
+.cm-label {
+  color: var(--ink-3);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 5px 8px 6px;
+  font-size: 10.5px;
+  font-weight: 650;
+}
+
+/* .records-filter-menu button */
+.cm-menu button {
+  border: 0;
+  margin: 0;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+  border-radius: 6px; /* --radius-chip */
+  width: 100%;
+  color: var(--ink-2);
+  text-align: left;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 8px;
+  font-size: 12px;
+  transition: background-color 0.12s ease-out, color 0.12s ease-out;
+  display: flex;
+}
+
+.cm-menu button:hover,
+.cm-menu button:focus-visible {
+  background: var(--cm-hover);
+  color: var(--ink);
+  outline: none;
+}
+
+/* Koboyo icons at the Selection Actions icon size. */
+.cm-menu button svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+/* Rotate right uses the Rotate left icon mirrored (D-029). */
+.cm-menu .cm-mirror svg {
+  transform: scaleX(-1);
+}

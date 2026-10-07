@@ -1,0 +1,138 @@
+/*
+ * Add signature (D-039).
+ * Motion: Transitions.dev "Modal open/close" (https://transitions.dev/transitions/modal-open-close/)
+ * and "Tabs sliding" (https://transitions.dev/transitions/tabs-sliding/), both free, copied verbatim
+ * below; pdit changes: dark-mode values for the tabs' colour tokens. Window surface: the right-click
+ * menu's approved surface A (Gooey plus-menu colours, "Figma soft" shadow). Buttons: Selection Actions
+ * (selection-actions.css). The pad and image previews are paper: white in both themes.
+ */
+
+/* Transitions.dev — Modal open / close (https://transitions.dev/transitions/modal-open-close/, free), verbatim. */
+:root {
+  --modal-open-dur: 250ms;
+  --modal-close-dur: 150ms;
+  --modal-scale: 0.96;
+  --modal-scale-close: 0.96;
+  --modal-ease: cubic-bezier(0.22, 1, 0.36, 1);
+}
+.t-modal {
+  transform-origin: center;
+  transform: scale(var(--modal-scale));
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    transform var(--modal-open-dur) var(--modal-ease),
+    opacity   var(--modal-open-dur) var(--modal-ease);
+  will-change: transform, opacity;
+}
+.t-modal.is-open {
+  transform: scale(1);
+  opacity: 1;
+  pointer-events: auto;
+}
+.t-modal.is-closing {
+  transform: scale(var(--modal-scale-close));
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    transform var(--modal-close-dur) var(--modal-ease),
+    opacity   var(--modal-close-dur) var(--modal-ease);
+}
+@media (prefers-reduced-motion: reduce) {
+  .t-modal { transition: none !important; }
+}
+
+/* Transitions.dev — Tabs sliding (https://transitions.dev/transitions/tabs-sliding/, free), verbatim. */
+:root {
+  --tabs-dur: 250ms;
+  --tabs-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --tabs-text-muted: rgba(15, 15, 15, 0.8);
+  --tabs-text-active: #0f0f0f;
+  --tabs-bar-bg: #f1f1f1;
+  --tabs-pill-bg: #ffffff;
+}
+.t-tabs {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px;
+  border-radius: 48px;
+  background: var(--tabs-bar-bg);
+}
+.t-tab {
+  position: relative;
+  appearance: none;
+  border: 0;
+  background: transparent;
+  height: 30px;
+  padding: 4px 12px;
+  color: var(--tabs-text-muted);
+  cursor: pointer;
+  border-radius: 48px;
+  z-index: 1;
+  transition: color var(--tabs-dur) var(--tabs-ease);
+}
+.t-tab:not([aria-selected="true"]):hover,
+.t-tab[aria-selected="true"] {
+  color: var(--tabs-text-active);
+}
+.t-tabs-pill {
+  position: absolute;
+  top: 3px;
+  left: 0;
+  height: 30px;
+  width: 0;
+  background: var(--tabs-pill-bg);
+  border-radius: 48px;
+  transform: translateX(0);
+  transition:
+    transform var(--tabs-dur) var(--tabs-ease),
+    width     var(--tabs-dur) var(--tabs-ease);
+  will-change: transform, width;
+  z-index: 0;
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .t-tabs-pill, .t-tab { transition: none !important; }
+}
+
+/* ---- pdit layout ---- */
+  /* Window: Transitions.dev modal motion on the menu's surface A. */
+  .sig-layer { position: fixed; inset: 0; z-index: 40; display: grid; place-items: center; padding: 16px; }
+  .sig-backdrop { position: absolute; inset: 0; }
+  .sig-box { position: relative; }
+  .sig-box { width: min(480px, 100%); border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 12px;
+             background: var(--cm-surface); box-shadow: var(--cm-shadow); color: var(--ink); font-size: 13px;
+             font-family: 'Inter Variable', ui-sans-serif, system-ui, sans-serif; -webkit-font-smoothing: antialiased;
+             --cm-surface: #ffffff; --cm-shadow: 0 0 0 1px rgba(0,0,0,.06), 0 2px 6px rgba(0,0,0,.05), 0 4px 42px rgba(0,0,0,.06); }
+  :root[data-theme='dark'] .sig-box { --cm-surface: #202020;
+    --cm-shadow: 0 0 0 1px rgba(255,255,255,.04) inset, 0 1px 0 0 rgba(255,255,255,.03) inset, 0 0 0 1px rgba(0,0,0,.06), 0 2px 6px 0 rgba(0,0,0,.05), 0 4px 42px 0 rgba(0,0,0,.24);
+    --tabs-text-muted: rgba(242,243,244,.75); --tabs-text-active: #f2f3f4; --tabs-bar-bg: #2a2b2e; --tabs-pill-bg: #3a3c40; }
+  .sig-head { display: flex; align-items: center; justify-content: space-between; }
+  .sig-head .title { font-weight: 600; }
+  /* The pad and the upload preview are paper: white in both themes, like the page. */
+  .sig-pad { position: relative; height: 170px; border-radius: 8px; background: #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.08) inset; overflow: hidden; touch-action: none; cursor: crosshair; }
+  .sig-pad canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .sig-pad .empty { position: absolute; inset: 0; display: grid; place-items: center; color: #9a9da3; font-size: 12.5px; pointer-events: none; }
+  .sig-image { cursor: default; display: grid; place-items: center; }
+  .sig-image img { max-width: 90%; max-height: 90%; }
+  .sig-foot { display: flex; align-items: center; gap: 6px; }
+  .sig-foot .grow { flex: 1; }
+  .sig-foot .sa-control { cursor: pointer; border: 0; background: transparent; font: inherit; }
+  .sig-foot .sa-primary { cursor: pointer; border: 0; font: inherit; }
+  .sig-foot .sa-primary[disabled] { opacity: .4; cursor: default; }
+  .sig-ink { display: inline-flex; gap: 6px; align-items: center; font-size: 12px; color: var(--ink-2); }
+  .sig-ink button { width: 18px; height: 18px; border-radius: 50%; border: 0; cursor: pointer; box-shadow: 0 0 0 1px rgba(0,0,0,.15); }
+  .sig-ink button[aria-pressed='true'] { box-shadow: 0 0 0 2px var(--cm-surface), 0 0 0 3.5px var(--ink); }
+  .sig-root { --ink: #1f2124; --ink-2: #62656b; --canvas: #fff; }
+  :root[data-theme='dark'] .sig-root { --ink: #f2f3f4; --ink-2: #a5a8ad; --canvas: #1f2124; }
+  /* Dark mode: a light outline keeps the black swatch visible on the dark window. */
+  :root[data-theme='dark'] .sig-ink button:not([aria-pressed='true']) { box-shadow: 0 0 0 1px rgba(255,255,255,.3); }
+@media (prefers-color-scheme: dark) {
+:root:not([data-theme='light']) .sig-box { --cm-surface: #202020;
+    --cm-shadow: 0 0 0 1px rgba(255,255,255,.04) inset, 0 1px 0 0 rgba(255,255,255,.03) inset, 0 0 0 1px rgba(0,0,0,.06), 0 2px 6px 0 rgba(0,0,0,.05), 0 4px 42px 0 rgba(0,0,0,.24);
+    --tabs-text-muted: rgba(242,243,244,.75); --tabs-text-active: #f2f3f4; --tabs-bar-bg: #2a2b2e; --tabs-pill-bg: #3a3c40; }
+  :root:not([data-theme='light']) .sig-root { --ink: #f2f3f4; --ink-2: #a5a8ad; --canvas: #1f2124; }
+  :root:not([data-theme='light']) .sig-ink button:not([aria-pressed='true']) { box-shadow: 0 0 0 1px rgba(255,255,255,.3); }
+}

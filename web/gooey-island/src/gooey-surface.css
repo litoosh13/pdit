@@ -1,0 +1,35 @@
+/*
+ * Gooey surface colour tokens, copied from the Libraries.dev Gooey playground
+ * (sites/gooey/playground/styles.css, MIT, Copyright (c) 2026 Jakub Antalik).
+ * Used by the format bar (format-bar.css). Adapted only in how the theme is
+ * chosen: the playground switches on [data-theme] alone, pdit follows the
+ * system colour scheme unless the user picked a theme (D-022). The plus menu,
+ * theme and Save buttons that also used them were replaced by the top bar
+ * (D-031, top-bar.css).
+ */
+
+.pdit-plus-menu {
+  /* Light values (playground :root). */
+  --modal-bg: #ffffff;
+  --btn-text: #17181c;
+  --accent: #17181c;
+  --hover-veil: rgba(0, 0, 0, 0.04);
+}
+
+/* Dark values (playground [data-theme='dark']): with the system in dark mode
+   unless the user chose light, or when the user chose dark (D-022). */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .pdit-plus-menu {
+    --modal-bg: #202020;
+    --btn-text: #fbfbfb;
+    --accent: #ffffff;
+    --hover-veil: rgba(255, 255, 255, 0.06);
+  }
+}
+
+:root[data-theme='dark'] .pdit-plus-menu {
+  --modal-bg: #202020;
+  --btn-text: #fbfbfb;
+  --accent: #ffffff;
+  --hover-veil: rgba(255, 255, 255, 0.06);
+}

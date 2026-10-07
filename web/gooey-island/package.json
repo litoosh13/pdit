@@ -1,0 +1,19 @@
+{
+  "name": "pdit-gooey-island",
+  "private": true,
+  "type": "module",
+  "license": "AGPL-3.0-only",
+  "description": "Bundles the Gooey (liquid-gooey) React plus menu into one local ES module for the pdit app.",
+  "scripts": {
+    "build": "esbuild src/index.jsx --bundle --format=esm --minify --target=es2020 --jsx=automatic --loader:.svg=text --define:process.env.NODE_ENV=\\\"production\\\" --legal-comments=external --outfile=../../crates/pdit-app/assets/islands/gooey-island.js"
+  },
+  "dependencies": {
+    "liquid-gooey": "0.2.1",
+    "metal-fx": "2.0.10",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  }
+}

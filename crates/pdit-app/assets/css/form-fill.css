@@ -1,0 +1,194 @@
+/* Fill-form UI (D-036). Form fields overlay the PDF page, which stays white in
+   both themes ([[pdit-ui-match-app-theme]]), so fields use a fixed light-paper
+   palette (dark text on the white page) in both modes. The combo dropdown is
+   chrome and uses context-menu.css, which adapts to the theme. Field highlight
+   + input reuse the Beautiful UI selection tint / t-input look. */
+
+.pdit-form-field {
+  position: absolute;
+  /* Above the page canvas so the tint shows and the field takes clicks
+     (the canvas paints the rendered widgets; without this it intercepts). */
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  background: rgba(2, 133, 255, 0.09);
+  box-shadow: inset 0 0 0 1px rgba(2, 133, 255, 0.35);
+  border-radius: 3px;
+  color: #1f2124;
+  font-size: 12px;
+  padding: 0 6px;
+  cursor: text;
+  transition: box-shadow 0.12s;
+}
+.pdit-form-field:hover {
+  box-shadow: inset 0 0 0 1px #0285ff;
+}
+.pdit-form-field.is-active {
+  box-shadow: 0 0 0 2px #0285ff;
+  background: #fff;
+}
+.pdit-form-field input.ffinput {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: transparent;
+  color: #1f2124;
+  font: inherit;
+  font-size: 12px;
+  outline: none;
+  padding: 0;
+}
+/* Checkbox / radio / combo are click-only hotspots (the canvas renders the
+   widget's mark, value and arrow). */
+.pdit-form-field.ffcheck,
+.pdit-form-field.ffradio,
+.pdit-form-field.ffcombo {
+  cursor: pointer;
+}
+.pdit-form-field.ffradio {
+  border-radius: 50%;
+}
+.pdit-form-field.is-readonly {
+  opacity: 0.55;
+  cursor: default;
+  background: transparent;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.15);
+}
+
+/* ---- Creating and editing fields (D-047, approved mockup) ---- */
+/* In edit mode every field shows a dashed outline and its name; the page's
+   pointer events place, select, move and resize (pages.rs → form_edit_ui). */
+.pdit-fe-field {
+  position: absolute;
+  z-index: 5;
+  pointer-events: none;
+  outline: 1px dashed #0285ff;
+  outline-offset: 2px;
+}
+.pdit-fe-field.is-required::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #d33a2c;
+}
+.pdit-fe-tag {
+  position: absolute;
+  left: 0;
+  top: -2px;
+  transform: translateY(-100%);
+  padding-bottom: 3px;
+  pointer-events: none;
+  white-space: nowrap;
+  font: 10px 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+  color: #0285ff;
+}
+.pdit-fe-draft {
+  position: absolute;
+  z-index: 6;
+  pointer-events: none;
+  border: 1.5px dashed #0285ff;
+  background: #0285ff10;
+}
+/* A field type is armed: crosshair over the whole page. */
+.pdit-fe-arming {
+  position: absolute;
+  inset: 0;
+  z-index: 7;
+  cursor: crosshair;
+}
+/* The edit-mode bar: the shapes bar with toggle buttons for the field types. */
+.pdit-form-bar .tool,
+.pdit-form-bar button.t {
+  white-space: nowrap;
+}
+.pdit-form-bar .tool svg,
+.pdit-form-bar button.t svg {
+  width: 15px;
+  height: 15px;
+}
+.pdit-form-bar .sep {
+  width: 1px;
+  height: 22px;
+  background: var(--sb-line);
+}
+.pdit-form-bar button.t {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  padding: 6px 10px;
+  border-radius: 9999px;
+  cursor: pointer;
+}
+.pdit-form-bar button.t:hover {
+  background: var(--sb-hover);
+}
+.pdit-form-bar button.t[aria-pressed='true'] {
+  background: var(--sb-ink);
+  color: var(--sb-surface);
+}
+.pdit-form-bar button.t[aria-pressed='true'] svg {
+  color: var(--sb-surface);
+}
+/* The Settings box is the link box (annotations.css), plus a list field. */
+.pdit-fe-box.cm-menu {
+  width: 290px;
+}
+.pdit-fe-options {
+  min-height: 70px;
+  resize: vertical;
+}
+.pdit-fe-note {
+  font-size: 11.5px;
+  opacity: 0.65;
+}
+
+/* ---- Find fields (D-053, approved mockup .claude/research/find-fields-ui/) ---- */
+/* Suggestions: the form editor's dashed outline + name tag; clicked off, they fade. */
+.pdit-ff-sug {
+  position: absolute;
+  z-index: 6;
+  cursor: pointer;
+  outline: 1px dashed #0285ff;
+  outline-offset: 2px;
+  background: #0285ff0d;
+  transition: opacity 0.15s, background-color 0.15s;
+}
+.pdit-ff-sug:hover {
+  background: #0285ff1f;
+}
+.pdit-ff-sug.is-off {
+  opacity: 0.35;
+  background: none;
+}
+.pdit-ff-sug.is-off .pdit-fe-tag {
+  text-decoration: line-through;
+}
+/* The bar: the form editor's, with a status line and a primary Add. */
+.pdit-ff-bar .msg {
+  padding: 0 6px;
+  white-space: nowrap;
+}
+.pdit-ff-bar .msg b {
+  font-weight: 600;
+}
+.pdit-ff-bar .act.is-primary {
+  background: #0285ff;
+  color: #fff;
+}
+.pdit-ff-bar .act.is-primary:hover {
+  background: #0285ff;
+  filter: brightness(1.05);
+}
+.pdit-ff-bar .act:disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}

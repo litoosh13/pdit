@@ -1,0 +1,18 @@
+# Rust crates and their licences
+
+Generated with [cargo-about](https://github.com/EmbarkStudios/cargo-about) from Cargo.lock. Each licence text
+below covers the crates listed above it.
+
+{{#each licenses}}
+## {{name}}
+
+Used by:
+{{#each used_by}}
+- {{crate.name}} {{crate.version}}{{#if crate.repository}} — {{crate.repository}}{{/if}}
+{{/each}}
+
+```
+{{text}}
+```
+
+{{/each}}

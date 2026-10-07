@@ -1,0 +1,117 @@
+/* Shapes draw mode (D-023, feature parity). The live preview is drawn on the
+   page (which stays white in both themes, [[pdit-ui-match-app-theme]]), so it
+   uses the chosen stroke colour directly. The style bar is chrome and follows
+   the theme (selection-actions palette). */
+
+.pdit-shape-preview {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 6;
+}
+
+/* While a shape tool is armed, the page shows a crosshair. */
+.page.pdit-arming {
+  cursor: crosshair;
+}
+
+/* Floating style bar shown while a tool is armed. */
+.pdit-shape-bar {
+  position: fixed;
+  left: 50%;
+  bottom: 26px;
+  transform: translateX(-50%);
+  z-index: 40;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 44px;
+  padding: 6px 10px;
+  border-radius: 9999px;
+  font-family: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+  font-size: 12.5px;
+  background: var(--sb-surface);
+  color: var(--sb-ink);
+  box-shadow: 0 0 0 1px var(--sb-line), 0 10px 30px #14181f2e;
+}
+:root {
+  --sb-surface: #fff;
+  --sb-ink: #1f2124;
+  --sb-line: #e0e2e5;
+  --sb-hover: #f4f5f6;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --sb-surface: #232427;
+    --sb-ink: #f2f3f4;
+    --sb-line: #3a3c40;
+    --sb-hover: #2a2b2e;
+  }
+}
+:root[data-theme='dark'] {
+  --sb-surface: #232427;
+  --sb-ink: #f2f3f4;
+  --sb-line: #3a3c40;
+  --sb-hover: #2a2b2e;
+}
+.pdit-shape-bar .grp {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 6px;
+}
+.pdit-shape-bar .grp + .grp {
+  border-left: 1px solid var(--sb-line);
+}
+.pdit-shape-bar .tool {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+}
+.pdit-shape-bar .tool svg {
+  width: 16px;
+  height: 16px;
+}
+.pdit-shape-bar label {
+  opacity: 0.7;
+}
+.pdit-shape-bar input[type='color'] {
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--sb-line);
+  border-radius: 6px;
+  padding: 0;
+  background: none;
+  cursor: pointer;
+}
+.pdit-shape-bar .sw-none {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  border: 1px solid var(--sb-line);
+  cursor: pointer;
+  background: repeating-conic-gradient(#bbb 0 25%, #fff 0 50%) 50% / 8px 8px;
+}
+.pdit-shape-bar input[type='range'] {
+  width: 72px;
+}
+.pdit-shape-bar .wv {
+  min-width: 26px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.pdit-shape-bar button.act {
+  border: 0;
+  background: transparent;
+  color: var(--sb-ink);
+  cursor: pointer;
+  font: inherit;
+  border-radius: 9999px;
+  padding: 6px 12px;
+}
+.pdit-shape-bar button.act:hover {
+  background: var(--sb-hover);
+}

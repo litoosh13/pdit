@@ -1,0 +1,192 @@
+/* Header & footer, watermark (D-042). The window is the signature window
+   (signature.css: Transitions.dev "Modal open/close" + "Tabs sliding", the
+   menu's surface A), docked at the bottom so the pages stay visible. Fields:
+   the note box's field look; sliders and swatches from the shapes style bar;
+   buttons: Selection Actions. The preview on the page is paper (dark on white
+   in both themes) with a dashed outline. */
+
+.doc-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: end center;
+  padding: 16px 16px 24px;
+  pointer-events: none;
+}
+.doc-box {
+  pointer-events: auto;
+  width: min(520px, 100%);
+  box-sizing: border-box;
+  border-radius: 10px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: var(--cm-surface);
+  box-shadow: var(--cm-shadow);
+  color: var(--ink);
+  font: 12.5px 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  --cm-surface: #ffffff;
+  --cm-shadow: 0 0 0 1px rgba(0, 0, 0, 0.06), 0 2px 6px rgba(0, 0, 0, 0.05), 0 4px 42px rgba(0, 0, 0, 0.12);
+  --field: rgba(0, 0, 0, 0.04);
+  --ink: #1f2124;
+  --ink-2: #62656b;
+  --ink-3: #9a9da3;
+  --canvas: #fff;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .doc-box {
+    --cm-surface: #202020;
+    --cm-shadow: 0 0 0 1px rgba(255, 255, 255, 0.04) inset, 0 1px 0 0 rgba(255, 255, 255, 0.03) inset,
+      0 0 0 1px rgba(0, 0, 0, 0.06), 0 2px 6px 0 rgba(0, 0, 0, 0.05), 0 4px 42px 0 rgba(0, 0, 0, 0.24);
+    --field: rgba(255, 255, 255, 0.06);
+    --ink: #f2f3f4;
+    --ink-2: #a5a8ad;
+    --ink-3: #6c6f75;
+    --canvas: #1f2124;
+    --tabs-text-muted: rgba(242, 243, 244, 0.75);
+    --tabs-text-active: #f2f3f4;
+    --tabs-bar-bg: #2a2b2e;
+    --tabs-pill-bg: #3a3c40;
+  }
+}
+:root[data-theme='dark'] .doc-box {
+  --cm-surface: #202020;
+  --cm-shadow: 0 0 0 1px rgba(255, 255, 255, 0.04) inset, 0 1px 0 0 rgba(255, 255, 255, 0.03) inset,
+    0 0 0 1px rgba(0, 0, 0, 0.06), 0 2px 6px 0 rgba(0, 0, 0, 0.05), 0 4px 42px 0 rgba(0, 0, 0, 0.24);
+  --field: rgba(255, 255, 255, 0.06);
+  --ink: #f2f3f4;
+  --ink-2: #a5a8ad;
+  --ink-3: #6c6f75;
+  --canvas: #1f2124;
+  --tabs-text-muted: rgba(242, 243, 244, 0.75);
+  --tabs-text-active: #f2f3f4;
+  --tabs-bar-bg: #2a2b2e;
+  --tabs-pill-bg: #3a3c40;
+}
+.doc-head .title {
+  font-weight: 600;
+  font-size: 13px;
+}
+.doc-lbl {
+  margin: 0 0 4px;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.doc-grid3 {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+.doc-field {
+  width: 100%;
+  box-sizing: border-box;
+  border: 0;
+  outline: none;
+  border-radius: 6px;
+  padding: 7px 8px;
+  font: 12.5px 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+  background: var(--field);
+  color: var(--ink);
+}
+.doc-field:focus {
+  box-shadow: 0 0 0 1.5px #0285ff66;
+}
+.doc-range {
+  width: 58px;
+  text-align: center;
+}
+.doc-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+.doc-chips .doc-lbl {
+  margin: 0 4px 0 0;
+}
+.doc-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.doc-row label {
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.doc-row .doc-gap {
+  margin-left: 8px;
+}
+.doc-row input[type='range'] {
+  width: 110px;
+}
+.doc-wv {
+  min-width: 34px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-2);
+}
+.doc-box .sa-control {
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+}
+.doc-box .sa-primary {
+  border: 0;
+  cursor: pointer;
+  font: inherit;
+}
+.doc-box .pdit-swatch[aria-pressed='true'] {
+  box-shadow: 0 0 0 2px var(--cm-surface), 0 0 0 3.5px var(--ink);
+}
+.doc-foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.doc-foot .grow {
+  flex: 1;
+}
+
+/* Live preview on the page (paper: dark on white in both themes). */
+.doc-preview-hf {
+  position: absolute;
+  z-index: 4;
+  display: flex;
+  font-family: Helvetica, Arial, sans-serif;
+  color: #333;
+  pointer-events: none;
+  outline: 1px dashed #0285ff99;
+  outline-offset: 3px;
+}
+.doc-preview-hf span {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.doc-preview-hf span:nth-child(2) {
+  text-align: center;
+}
+.doc-preview-hf span:nth-child(3) {
+  text-align: right;
+}
+.doc-preview-wm {
+  position: absolute;
+  z-index: 4;
+  left: 50%;
+  top: 50%;
+  white-space: nowrap;
+  font-family: Helvetica, Arial, sans-serif;
+  font-weight: 700;
+  pointer-events: none;
+  transform-origin: center;
+  outline: 1px dashed #0285ff99;
+  outline-offset: 3px;
+}

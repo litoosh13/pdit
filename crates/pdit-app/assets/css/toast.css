@@ -1,0 +1,120 @@
+/*
+ * Undo toast (D-030).
+ *
+ * Motion: Transitions.dev "Toast open / close" (https://transitions.dev,
+ * prototype p22), the copied `.t-toast` snippet verbatim with the site's values
+ * for its variables. Shape: the demo's pill (.p22-toast: 46px high, radius 52,
+ * 10px gap, 16px padding). pdit changes: the Gooey plus menu's surface and
+ * "Figma soft" shadow (like the right-click menu), fixed at the bottom centre,
+ * and an Undo button in the Selection Actions .sa-primary style.
+ */
+
+/* ---- Transitions.dev "Toast open / close" ---- */
+.t-toast {
+  --toast-open: 350ms; /* --p22-open-dur */
+  --toast-close: 250ms; /* --p22-close-dur */
+  --toast-distance: 16px; /* --p22-distance */
+  --toast-blur: 2px; /* --p22-blur */
+  --toast-scale: 0.97; /* --p22-scale */
+  --toast-ease: cubic-bezier(0.22, 1, 0.36, 1); /* --p22-ease */
+}
+
+.t-toast {
+  opacity: 0;
+  transform: translateY(var(--toast-distance)) scale(var(--toast-scale));
+  filter: blur(var(--toast-blur));
+  will-change: transform, opacity, filter;
+  transition:
+    opacity var(--toast-close) var(--toast-ease),
+    transform var(--toast-close) var(--toast-ease),
+    filter var(--toast-close) var(--toast-ease);
+}
+.t-toast.is-open {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  filter: blur(0);
+  transition:
+    opacity var(--toast-open) var(--toast-ease),
+    transform var(--toast-open) var(--toast-ease),
+    filter var(--toast-open) var(--toast-ease);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .t-toast { transition: none !important; }
+}
+
+/* ---- Placement and the demo's pill, on the Gooey surface ---- */
+.pdit-toast-host {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 24px;
+  z-index: 25;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.pdit-toast {
+  --toast-surface: #ffffff;
+  --toast-shadow: 0 0 0 1px rgba(0, 0, 0, 0.06), 0 2px 6px rgba(0, 0, 0, 0.05),
+    0 4px 42px rgba(0, 0, 0, 0.06);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 46px;
+  max-width: calc(100vw - 32px);
+  box-sizing: border-box;
+  padding: 0 6px 0 16px;
+  border-radius: 52px;
+  background: var(--toast-surface);
+  box-shadow: var(--toast-shadow);
+  color: var(--ink);
+  font-family: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+  white-space: nowrap;
+}
+
+.pdit-toast.is-open {
+  pointer-events: auto;
+}
+
+/* Dark: follows the system unless the user picked a theme (D-022). */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .pdit-toast {
+    --toast-surface: #202020;
+    --toast-shadow: 0 0 0 1px rgba(255, 255, 255, 0.04) inset,
+      0 1px 0 0 rgba(255, 255, 255, 0.03) inset, 0 0 0 1px rgba(0, 0, 0, 0.06),
+      0 2px 6px 0 rgba(0, 0, 0, 0.05), 0 4px 42px 0 rgba(0, 0, 0, 0.24);
+  }
+}
+
+:root[data-theme='dark'] .pdit-toast {
+  --toast-surface: #202020;
+  --toast-shadow: 0 0 0 1px rgba(255, 255, 255, 0.04) inset,
+    0 1px 0 0 rgba(255, 255, 255, 0.03) inset, 0 0 0 1px rgba(0, 0, 0, 0.06),
+    0 2px 6px 0 rgba(0, 0, 0, 0.05), 0 4px 42px 0 rgba(0, 0, 0, 0.24);
+}
+
+.pdit-toast .toast-icon {
+  display: grid;
+  place-items: center;
+}
+
+.pdit-toast .toast-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.pdit-toast button {
+  border: 0;
+  margin: 0;
+  font: inherit;
+  cursor: pointer;
+}
+
+.pdit-toast .sa-primary svg {
+  width: 14px;
+  height: 14px;
+}

@@ -1,0 +1,39 @@
+/* Print (D-052). The window is doc.css's; this adds its status line and the
+   print-only container (#pdit-print-root, a direct child of <body>): on paper
+   only the prepared pages show, one per sheet, edge to edge. */
+
+.pdit-print-status {
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+#pdit-print-root {
+  display: none;
+}
+
+@media print {
+  @page {
+    margin: 0;
+  }
+  html,
+  body {
+    background: #fff !important;
+    overflow: visible !important;
+    height: auto !important;
+  }
+  body > :not(#pdit-print-root) {
+    display: none !important;
+  }
+  #pdit-print-root {
+    display: block;
+  }
+  #pdit-print-root canvas {
+    display: block;
+    width: 100%;
+    height: auto;
+    break-after: page;
+  }
+  #pdit-print-root canvas:last-child {
+    break-after: auto;
+  }
+}

@@ -1,0 +1,37 @@
+%PDF-1.4
+1 0 obj
+<</Type/Catalog/Pages 2 0 R>>
+endobj
+2 0 obj
+<</Type/Pages/Kids[3 0 R]/Count 1>>
+endobj
+3 0 obj
+<</Type/Page/Parent 2 0 R/MediaBox[0 0 595 842]/Resources<</Font<</F1 5 0 R>>>>/Contents 4 0 R>>
+endobj
+4 0 obj
+<</Length 531>>
+stream
+BT /F1 11 Tf 72 740 Td (This wrapped clause continues across multiple lines purely to exercise the) Tj ET
+BT /F1 11 Tf 72 724 Td (reflow editor, so selecting any single line should capture the whole block) Tj ET
+BT /F1 11 Tf 72 708 Td (down to this closing period.) Tj ET
+BT /F1 11 Tf 72 672 Td (A separate short note stands alone.) Tj ET
+BT /F1 11 Tf 72 636 Td (Another wrapped block appears lower on the page with two long lines that the) Tj ET
+BT /F1 11 Tf 72 620 Td (grouping should also keep together as one paragraph.) Tj ET
+endstream
+endobj
+5 0 obj
+<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000054 00000 n 
+0000000105 00000 n 
+0000000217 00000 n 
+0000000796 00000 n 
+trailer
+<</Size 6/Root 1 0 R>>
+startxref
+859
+%%EOF

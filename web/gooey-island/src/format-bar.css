@@ -1,0 +1,149 @@
+/*
+ * Format bar (D-027): the Gooey DragCard demo (Libraries.dev playground
+ * demos/DragCard.tsx and demo.css .dgc-card, .dgc-chip and the content-deform
+ * rules, MIT, Copyright (c) 2026 Jakub Antalik). pdit changes: fixed to the
+ * window and dragged only by its chip, so the controls stay clickable; the
+ * card sits above the liquid layer (position/z-index); the theme follows pdit's
+ * light/dark choice. Controls use the Selection Actions buttons
+ * (selection-actions.css) and the right-click menu's dropdown (context-menu.css),
+ * both loaded by the app.
+ */
+
+.pdit-format-bar {
+  position: fixed;
+  z-index: 20;
+  color: var(--ink);
+  font-family: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+  font-size: 12px;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* The Selection Actions button reset (.sa-bar button), inside the bar. */
+.pdit-format-bar button {
+  border: 0;
+  margin: 0;
+  font: inherit;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.pdit-format-bar .dgc-card {
+  position: relative;
+  z-index: 1;
+  /* Figma 1221:5117 "Dropdown": radius 54, height 46. */
+  height: 46px;
+  border-radius: 54px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 16px 0 8px;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.pdit-format-bar .dgc-chip {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 40px;
+  background: rgba(235, 235, 236, 0.3);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.05);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+}
+
+.pdit-format-bar .dgc-chip:active {
+  cursor: grabbing;
+}
+
+/* Dark: follows the system unless the user picked a theme (D-022). */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .pdit-format-bar .dgc-chip {
+    background: rgba(255, 255, 255, 0.06);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  }
+}
+
+:root[data-theme='dark'] .pdit-format-bar .dgc-chip {
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+.pdit-format-bar .dgc-card > * {
+  --dgc-k: calc(var(--dgc-cb, 0) * var(--dgc-arc, 1));
+  transform: translate(
+      calc(var(--lg-bend-x, 0px) * var(--dgc-k) * 2.4),
+      calc(var(--lg-bend-y, 0px) * var(--dgc-k) * 2.4)
+    )
+    rotate(calc(var(--lg-bend-yn, 0) * var(--dgc-rot, 0) * var(--dgc-cb, 0) * 1deg))
+    skewX(calc(var(--lg-bend-xn, 0) * var(--dgc-cb, 0) * -0.55deg))
+    scaleX(calc(1 - var(--lg-bend-xn, 0) * var(--dgc-cb, 0) * var(--dgc-sqx, 0.006)))
+    scaleY(calc(1 + var(--lg-bend-yn, 0) * var(--dgc-cb, 0) * var(--dgc-sqy, 0)));
+  transform-origin: center;
+}
+.pdit-format-bar .dgc-card > :nth-child(1) { --dgc-arc: 0.45; --dgc-rot: 1.6; --dgc-sqx: 0.014; }
+.pdit-format-bar .dgc-card > :nth-child(2) { --dgc-arc: 1; --dgc-rot: 0; --dgc-sqy: 0.01; }
+.pdit-format-bar .dgc-card > :nth-child(3) { --dgc-arc: 0.6; --dgc-rot: -1.6; }
+
+.pdit-format-bar .dgc-chip svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* Control groups (the DragCard's second and third children). */
+.pdit-format-bar .fb-group {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.pdit-format-bar .sa-control {
+  padding: 0 8px;
+}
+
+/* A toggle that is on: Beautiful UI's selected-row background (--hover). */
+.pdit-format-bar .sa-control.is-on {
+  background: var(--hover);
+}
+
+.pdit-format-bar .fb-size {
+  min-width: 22px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The dropdowns open under their button, inside the bar. */
+.pdit-format-bar .cm-menu {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 8px);
+}
+
+/* Colour dot in the colour button and menu rows. */
+.pdit-format-bar .fb-swatch {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  border-radius: 99px;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12);
+}
+
+/* Inline (D-035): inside the edit panel, which supplies the surface (one box
+   with the text row), so the bar is not fixed and draws no surface of its own. */
+.pdit-format-bar.is-inline {
+  position: static;
+}
+
+.pdit-format-bar.is-inline svg[data-gooey-svg],
+.pdit-format-bar.is-inline svg[data-gooey-overlay] {
+  display: none;
+}
+
+.pdit-format-bar.is-inline .dgc-chip {
+  cursor: default;
+}

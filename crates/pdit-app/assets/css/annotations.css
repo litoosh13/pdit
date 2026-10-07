@@ -1,0 +1,435 @@
+/* Annotations, part 1 (D-040). The selection tint and the markup bar are
+   Beautiful UI Selection Actions (.sa-highlight, .sa-bar, .sa-control); the
+   note box is the right-click menu's surface (.cm-menu) with Transitions.dev
+   "Menu dropdown" motion (.t-dropdown), both from the existing CSS. The marks
+   and note icons themselves are drawn by PDFium into the page. */
+
+/* Clickable areas over existing notes and marks. */
+.pdit-annot-hit {
+  position: absolute;
+  z-index: 5;
+  cursor: pointer;
+}
+
+/* The markup bar under the selection or a clicked mark. */
+.pdit-markup-anchor {
+  z-index: 12;
+}
+.pdit-markup-anchor .sa-control {
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+}
+.pdit-markup-anchor .sa-control svg {
+  width: 14px;
+  height: 14px;
+}
+.pdit-bar-sep {
+  width: 1px;
+  height: 18px;
+  margin: 0 4px;
+  background: var(--line-strong);
+}
+.pdit-swatch {
+  width: 16px;
+  height: 16px;
+  margin: 0 2px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  cursor: pointer;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.12);
+}
+.pdit-swatch[aria-pressed='true'] {
+  box-shadow: 0 0 0 2px var(--surface), 0 0 0 3.5px var(--ink);
+}
+/* Dark: a light outline keeps the swatches' edges visible on the dark bar. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .pdit-swatch:not([aria-pressed='true']) {
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.3);
+  }
+}
+:root[data-theme='dark'] .pdit-swatch:not([aria-pressed='true']) {
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.3);
+}
+
+/* The note box: the menu's surface, positioned on the page. */
+.pdit-note-box.cm-menu {
+  position: absolute;
+  z-index: 30;
+  width: 250px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.pdit-note-box textarea {
+  width: 100%;
+  min-height: 84px;
+  resize: vertical;
+  box-sizing: border-box;
+  border: 0;
+  outline: none;
+  border-radius: 6px;
+  padding: 8px;
+  font: 13px/1.4 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+  background: var(--cm-hover);
+  color: var(--ink);
+}
+.pdit-note-box .row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.pdit-note-box .grow {
+  flex: 1;
+}
+/* The menu's rows are full-width buttons; these are not. */
+.pdit-note-box.cm-menu button {
+  width: auto;
+  border: 0;
+  cursor: pointer;
+  font: inherit;
+}
+.pdit-note-box .sa-control {
+  background: transparent;
+}
+
+/* ---- Part 2 (D-041) ---- */
+
+/* A selected drawing or stamp: dashed ring (as in the approved mockup). */
+.pdit-annot-ring {
+  position: absolute;
+  z-index: 6;
+  border: 1.5px dashed #2a2f36;
+  border-radius: 4px;
+  pointer-events: none;
+}
+
+/* A comment picked in the list flashes briefly. */
+.pdit-annot-hit.pdit-flash {
+  animation: pdit-flash 1.2s ease-out;
+  border-radius: 3px;
+}
+@keyframes pdit-flash {
+  0% {
+    box-shadow: 0 0 0 3px #0285ff88;
+  }
+  100% {
+    box-shadow: 0 0 0 3px #0285ff00;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pdit-annot-hit.pdit-flash {
+    animation: none;
+    box-shadow: 0 0 0 3px #0285ff88;
+  }
+}
+
+/* All comments: the Pages panel (thumbnails.css) on the RIGHT. */
+.pdit-panel.pdit-comments {
+  left: auto;
+  right: 16px;
+  width: 260px;
+  --panel-translate-x: 32px;
+}
+.pdit-comments .pdit-panel-head .grow {
+  flex: 1;
+}
+.pdit-cmt-list {
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+/* Rows in the right-click menu's row look. */
+.pdit-cmt-row,
+.pdit-cmt-close {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  width: 100%;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink-2);
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+.pdit-cmt-close {
+  width: auto;
+  padding: 2px 8px;
+}
+.pdit-cmt-row:hover,
+.pdit-cmt-close:hover {
+  background: var(--inset);
+  color: var(--ink);
+}
+.pdit-cmt-row svg {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  margin-top: 2px;
+}
+.pdit-cmt-row .what {
+  flex: 1;
+  min-width: 0;
+}
+.pdit-cmt-row .what b {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.pdit-cmt-row .what span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pdit-cmt-row .pg {
+  font-size: 11px;
+  color: var(--ink-3);
+}
+.pdit-cmt-empty {
+  padding: 8px;
+  font-size: 12.5px;
+  color: var(--ink-3);
+}
+/* On wide windows the pages make room for the panel, like the Pages panel. */
+@media (min-width: 721px) {
+  body:has(.pdit-rail):has(.pdit-comments[data-open='true']) .page-list {
+    padding-right: 300px;
+  }
+}
+
+/* ---- Links (D-043) ---- */
+
+/* A link has no look of its own in the PDF; pdit shows an outline on hover
+   (and while its bar is open) plus the pointer, as in the approved mockup. */
+.pdit-link-hit {
+  position: absolute;
+  z-index: 4;
+  cursor: pointer;
+  border-radius: 3px;
+}
+.pdit-link-hit:hover,
+.pdit-link-hit.is-on {
+  box-shadow: 0 0 0 1.5px #0285ff99;
+  background: #0285ff12;
+}
+/* The clicked link's address at the start of its bar. */
+/* An icon before the text (a form field's kind, D-047): the bar's icon size. */
+.pdit-link-url svg {
+  width: 14px;
+  height: 14px;
+  vertical-align: -2px;
+}
+.pdit-link-url {
+  max-width: 180px;
+  padding: 0 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+/* The link box: the note box's surface (menu surface + dropdown motion). */
+.pdit-link-box.cm-menu {
+  position: absolute;
+  z-index: 30;
+  width: 280px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.pdit-link-label {
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.pdit-link-field {
+  width: 100%;
+  box-sizing: border-box;
+  border: 0;
+  outline: none;
+  border-radius: 6px;
+  padding: 7px 8px;
+  font: 12.5px 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+  background: var(--cm-hover);
+  color: var(--ink);
+}
+.pdit-link-field:focus {
+  box-shadow: 0 0 0 1.5px #0285ff66;
+}
+.pdit-link-field[aria-invalid='true'] {
+  box-shadow: 0 0 0 1.5px #d33a2c99;
+}
+.pdit-link-error {
+  font-size: 11.5px;
+  color: #d33a2c;
+}
+.pdit-link-box .row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.pdit-link-box .grow {
+  flex: 1;
+}
+.pdit-link-box.cm-menu button {
+  width: auto;
+  border: 0;
+  cursor: pointer;
+  font: inherit;
+}
+.pdit-link-box .sa-control {
+  background: transparent;
+}
+/* The link box's tabs (Transitions.dev "Tabs sliding", signature.css) take the
+   dark surface's tokens in dark mode, as in the header & footer window. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .pdit-link-box {
+    --tabs-text-muted: rgba(242, 243, 244, 0.75);
+    --tabs-text-active: #f2f3f4;
+    --tabs-bar-bg: #2a2b2e;
+    --tabs-pill-bg: #3a3c40;
+  }
+}
+:root[data-theme='dark'] .pdit-link-box {
+  --tabs-text-muted: rgba(242, 243, 244, 0.75);
+  --tabs-text-active: #f2f3f4;
+  --tabs-bar-bg: #2a2b2e;
+  --tabs-pill-bg: #3a3c40;
+}
+.pdit-link-box .t-tabs {
+  align-self: flex-start;
+}
+.pdit-link-box .t-tab {
+  font: inherit;
+  font-size: 12.5px;
+}
+.pdit-link-page {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--ink-2);
+}
+.pdit-link-page .pdit-link-number {
+  width: 64px;
+  text-align: center;
+}
+
+/* ---- Bookmarks (D-043) ---- */
+/* The Pages panel (thumbnails.css) in the Pages panel's place, with the
+   comment list's row look, as in the approved mockup. */
+.pdit-bookmarks .pdit-panel-head .grow {
+  flex: 1;
+}
+.pdit-bm-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.pdit-bm-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12.5px;
+  color: var(--ink-2);
+}
+.pdit-bm-row:hover,
+.pdit-bm-row:focus-visible {
+  background: var(--inset);
+  color: var(--ink);
+  outline: none;
+}
+.pdit-bm-row svg {
+  width: 14px;
+  height: 14px;
+  flex: none;
+}
+.pdit-bm-row .t {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pdit-bm-row .pg {
+  font-size: 11px;
+  color: var(--ink-3);
+}
+.pdit-bm-act {
+  display: none;
+  padding: 2px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+}
+.pdit-bm-row:hover .pdit-bm-act,
+.pdit-bm-row:focus-within .pdit-bm-act {
+  display: inline-flex;
+}
+.pdit-bm-row:hover .pg {
+  display: none;
+}
+.pdit-bm-act:hover {
+  background: var(--inset);
+}
+.pdit-bm-input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  border-radius: 5px;
+  padding: 3px 6px;
+  font: inherit;
+  background: var(--inset);
+  color: var(--ink);
+  box-shadow: 0 0 0 1.5px #0285ff66;
+}
+.pdit-bm-empty {
+  padding: 8px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--ink-3);
+}
+.pdit-bm-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+}
+.pdit-bm-btn {
+  width: auto;
+  padding: 2px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink-2);
+  font: inherit;
+  font-size: 12.5px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.pdit-bm-btn:hover {
+  background: var(--inset);
+  color: var(--ink);
+}

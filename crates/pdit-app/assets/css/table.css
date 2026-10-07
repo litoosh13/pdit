@@ -1,0 +1,44 @@
+/* Table "+" buttons (D-038). The metal disc of the image handles
+   (image-select.css `.pdit-img-handle`, echoing the top bar's `.tb-round`),
+   enlarged to 20px to hold the Koboyo `blockprint-bold-plus` icon. The ring is
+   the image selection's `.pdit-img-ring`. */
+
+.pdit-table-plus {
+  position: absolute;
+  z-index: 7;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  transform: translate(-50%, -50%);
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: radial-gradient(circle at 50% 35%, #353a42, #1c1f24 70%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    0 1px 3px rgba(20, 24, 31, 0.45);
+  border: 0.5px solid rgba(255, 255, 255, 0.14);
+  color: #fff;
+  cursor: pointer;
+}
+.pdit-table-plus:active {
+  transform: translate(-50%, -50%) scale(0.94);
+}
+.pdit-table-plus svg {
+  width: 10px;
+  height: 10px;
+}
+
+/* Line grab strips (D-038 resize): invisible, only the native resize cursor
+   shows where a line can be dragged. */
+.pdit-table-line {
+  position: absolute;
+  z-index: 6;
+  touch-action: none;
+}
+.pdit-table-line.is-col {
+  cursor: col-resize;
+}
+.pdit-table-line.is-row {
+  cursor: row-resize;
+}

@@ -1,0 +1,34 @@
+# Private working area: Claude instructions, notes, research, references,
+# personal files. Never publish.
+.claude/
+CLAUDE.md
+CLAUDE.local.md
+/*.pdf
+/*.PDF
+
+# Rust
+/target/
+**/*.rs.bk
+
+# WebAssembly / web build output
+/pkg/
+/dist/
+node_modules/
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Downloaded by scripts/fetch-pdfium.sh (pinned by checksum)
+/crates/pdit-app/assets/pdfium/
+
+# Built by `docker compose run --rm islands`
+/crates/pdit-app/assets/islands/
+node_modules/
+
+# Desktop app (Tauri) build output and generated schemas
+/desktop/target/
+/desktop/gen/
+/desktop/resources/

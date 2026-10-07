@@ -1,0 +1,109 @@
+/*
+ * "Error state shake" from Transitions.dev (https://transitions.dev, free item;
+ * terms: https://transitions.dev/terms.html). Snippet and :root defaults copied
+ * verbatim from cli/free/error-state-shake.md. pdit additions, marked below,
+ * map it onto the Selection Actions bar (D-019): the bar is the `.t-input`, its
+ * anchor the `.t-input-wrap`; error colour = Beautiful UI's --red token.
+ */
+
+:root {
+  --shake-distance: 6px;
+  --shake-overshoot: 4px;
+  --shake-dur-a: 80ms;
+  --shake-dur-b: 60ms;
+  --shake-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --revert-hold: 3000ms;
+  --revert-dur: 280ms;
+}
+
+/* Border-color tween. Define your input's default / focused
+   / error border-color in your own component CSS — this rule
+   only owns the interpolation. Use a constant border-width
+   across states so the tween never shifts inner content. */
+.t-input {
+  transition: border-color 150ms ease-out;
+  will-change: transform;
+}
+.t-input.is-error {
+  /* Error border auto-reverts on the hold timer, so the
+     fade-out uses the slower revert duration (matches the
+     message fade). */
+  transition: border-color var(--revert-dur, 280ms) ease-out;
+}
+
+/* Error message reveal. Visibility is delayed by --revert-dur
+   on hide so the message stays painted for the full opacity
+   fade-out. Entering .is-error drops the delay to 0 so the
+   message becomes visible immediately. */
+.t-error-msg {
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity    var(--revert-dur, 280ms) ease-out,
+    visibility 0s linear var(--revert-dur, 280ms);
+}
+.t-input-wrap.is-error .t-error-msg {
+  opacity: 1;
+  visibility: visible;
+  transition:
+    opacity    var(--revert-dur, 280ms) ease-out,
+    visibility 0s linear 0s;
+}
+
+/* Multi-segment keyframe with per-stop easing so each leg
+   of the shake follows its own cubic-bezier independently.
+   %-stops are cumulative durations as a fraction of the
+   total (80, 60, 80, 60 = 280ms): 28.57%, 57.14%, 78.57%,
+   100%. Recompute if any segment duration changes. */
+.t-input.is-shaking {
+  animation: t-input-shake calc(
+      var(--shake-dur-a) * 2 + var(--shake-dur-b) * 2
+    ) linear;
+}
+@keyframes t-input-shake {
+  0%      { transform: translateX(0);                                 animation-timing-function: var(--shake-ease); }
+  28.57%  { transform: translateX(var(--shake-distance));             animation-timing-function: var(--shake-ease); }
+  57.14%  { transform: translateX(calc(var(--shake-distance) * -1)); animation-timing-function: var(--shake-ease); }
+  78.57%  { transform: translateX(var(--shake-overshoot));            animation-timing-function: var(--shake-ease); }
+  100%    { transform: translateX(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .t-input { animation: none !important; transform: none !important; }
+}
+
+/* ---- pdit additions ---- */
+
+.sa-root { --red: #e3474c; }
+/* Dark: follows the system unless the user picked a theme (D-022). */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .sa-root { --red: #ee5c61; }
+}
+
+:root[data-theme='dark'] .sa-root { --red: #ee5c61; }
+
+/* The bar's "border" is the 1px ring in its shadow, so the error colour and
+   the tween apply to box-shadow (same timings as the snippet's border-color). */
+.sa-bar.t-input {
+  transition: box-shadow 150ms ease-out;
+}
+.sa-bar.t-input.is-error {
+  box-shadow: 0 0 0 1px var(--red), 0 8px 28px #0001;
+  transition: box-shadow var(--revert-dur, 280ms) ease-out;
+}
+
+/* The message beneath the bar, in the bar's type (12.5px) and the error colour.
+   Out of flow so the anchor stays exactly as wide as the bar (the anchor is
+   centred with translateX(-50%) of its own width). */
+.sa-error-msg {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin: 6px 0 0;
+  text-align: center;
+  white-space: nowrap;
+  font-family: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+  font-size: 12.5px;
+  color: var(--red);
+}

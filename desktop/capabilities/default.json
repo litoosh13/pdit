@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "pdit's window: printing (D-052) through the system print window on macOS.",
+  "windows": ["main"],
+  "permissions": ["core:webview:allow-print"]
+}

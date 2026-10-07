@@ -1,0 +1,5 @@
+[application]
+name = "pdit"
+
+[web.app]
+title = "pdit"
