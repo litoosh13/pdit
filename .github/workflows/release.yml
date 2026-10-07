@@ -67,8 +67,16 @@ jobs:
 
       - uses: cargo-bins/cargo-binstall@main
 
+      # The prebuilt dx needs glibc 2.39 (Ubuntu 24.04); the Linux app is built on 22.04 so it
+      # runs on older distributions too, so there dx is compiled from source.
       - name: Build tools
-        run: cargo binstall dioxus-cli@0.7.10 tauri-cli@2.12.1 --no-confirm
+        run: |
+          cargo binstall tauri-cli@2.12.1 --no-confirm
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            cargo install dioxus-cli --version 0.7.10 --locked
+          else
+            cargo binstall dioxus-cli@0.7.10 --no-confirm
+          fi
 
       # The app's version comes from the tag: v0.1.0-beta.1 → 0.1.0-beta.1.
       - name: Version from the tag
