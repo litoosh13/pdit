@@ -15,6 +15,11 @@
   z-index: 11;
 }
 
+/* No document: no zoom control, so no room for it. */
+.pdit-rail.is-bare {
+  padding-bottom: 8px;
+}
+
 .pdit-fly {
   left: 84px;
   width: 208px;

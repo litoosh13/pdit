@@ -80,3 +80,33 @@ pub fn update_progress() -> Progress {
 pub fn update_restart(app: AppHandle) {
     app.restart();
 }
+
+/// The running app's version (set from the release tag when it is built).
+#[tauri::command]
+pub fn app_version(app: AppHandle) -> String {
+    app.package_info().version.to_string()
+}
+
+/// Opens one of pdit's own pages on GitHub (the About panel's links) in the
+/// system browser. Only these fixed addresses: the web side names a page, not
+/// a URL.
+#[tauri::command]
+pub fn open_project_page(page: String) -> Result<(), String> {
+    let url = match page.as_str() {
+        "source" => "https://github.com/litoosh13/pdit",
+        "licence" => "https://github.com/litoosh13/pdit/blob/main/LICENSE",
+        "notices" => "https://github.com/litoosh13/pdit/blob/main/THIRD_PARTY_NOTICES.md",
+        _ => return Err("unknown page".into()),
+    };
+    #[cfg(target_os = "macos")]
+    let mut command = std::process::Command::new("open");
+    #[cfg(target_os = "windows")]
+    let mut command = {
+        let mut c = std::process::Command::new("rundll32");
+        c.arg("url.dll,FileProtocolHandler");
+        c
+    };
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let mut command = std::process::Command::new("xdg-open");
+    command.arg(url).spawn().map(|_| ()).map_err(|e| e.to_string())
+}

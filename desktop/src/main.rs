@@ -150,6 +150,8 @@ fn handlers() -> impl Fn(tauri::ipc::Invoke) -> bool {
         update::update_install,
         update::update_progress,
         update::update_restart,
+        update::app_version,
+        update::open_project_page,
         ocr_available,
         cache::analysis_get,
         cache::analysis_put,
@@ -171,6 +173,8 @@ fn handlers() -> impl Fn(tauri::ipc::Invoke) -> bool {
         update::update_install,
         update::update_progress,
         update::update_restart,
+        update::app_version,
+        update::open_project_page,
         ocr_available,
         cache::analysis_get,
         cache::analysis_put

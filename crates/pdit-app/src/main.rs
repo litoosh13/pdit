@@ -154,8 +154,9 @@ fn App() -> Element {
         if document.read().is_some() {
             // Ask and Analysis open in the Pages panel's place (D-059).
             ThumbnailsPanel { open: pages_panel_open() && !ai.panel_open() && !ask.is_open() }
-            tools_ui::ToolRail {}
         }
+        // Without a document the rail holds only About (and an update row).
+        tools_ui::ToolRail { has_document: document.read().is_some() }
         ContextMenu {}
         PageToolsUi {}
         FormUi {}

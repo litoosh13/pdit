@@ -978,7 +978,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -1189,7 +1189,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2255,16 +2255,16 @@ dependencies = [
 
 [[package]]
 name = "leafmind-ocr"
-version = "0.3.0"
-source = "git+https://github.com/litoosh13/leafmind?tag=v0.3.0#16feeb4fce9ee5c00749793fbe4da2cd880cc6ec"
+version = "0.3.1"
+source = "git+https://github.com/litoosh13/leafmind?tag=v0.3.1#14e58882dba5742cd1b9add468e7cf0a144eba29"
 dependencies = [
  "libloading 0.9.0",
 ]
 
 [[package]]
 name = "leafmind-qa"
-version = "0.3.0"
-source = "git+https://github.com/litoosh13/leafmind?tag=v0.3.0#16feeb4fce9ee5c00749793fbe4da2cd880cc6ec"
+version = "0.3.1"
+source = "git+https://github.com/litoosh13/leafmind?tag=v0.3.1#14e58882dba5742cd1b9add468e7cf0a144eba29"
 dependencies = [
  "lingua",
  "ort",
@@ -3111,7 +3111,7 @@ checksum = "2ee67f1008b1ba2321834326597b8e186293b049a023cdef258527550b9935b4"
 [[package]]
 name = "pdf-inspector"
 version = "1.24.0"
-source = "git+https://github.com/litoosh13/leafmind?tag=v0.3.0#16feeb4fce9ee5c00749793fbe4da2cd880cc6ec"
+source = "git+https://github.com/litoosh13/leafmind?tag=v0.3.1#14e58882dba5742cd1b9add468e7cf0a144eba29"
 dependencies = [
  "env_logger",
  "include_dir",
@@ -3671,7 +3671,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3727,7 +3727,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4714,7 +4714,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -5533,7 +5533,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]

@@ -13,11 +13,17 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 
 const TOOLS_CSS: Asset = asset!("/assets/css/tools.css");
+/// The rail's surface (shared with the Pages panel), also before any PDF.
+const PANEL_CSS: Asset = asset!("/assets/css/thumbnails.css");
 const ICON_TEXT: &str = include_str!("../assets/icons/cartoon-type.svg");
 const ICON_IMAGE: &str = include_str!("../assets/icons/cartoon-image-plus.svg");
 const ICON_SHAPES: &str = include_str!("../assets/icons/cartoon-rectangle-sides.svg");
 const ICON_DOCUMENT: &str = include_str!("../assets/icons/cartoon-layout-template.svg");
 const ICON_PAGE: &str = include_str!("../assets/icons/cartoon-blank-page.svg");
+const ICON_ABOUT: &str = include_str!("../assets/icons/blockprint-crown-above-head.svg");
+/// About: the rail's last section, at its bottom; its flyout holds the About
+/// panel (update_ui.rs) instead of tool rows.
+const ABOUT: usize = SECTIONS.len();
 
 /// Rail sections: (title, rail label, icon).
 const SECTIONS: [(&str, &str, &str); 8] = [
@@ -241,7 +247,7 @@ fn highlight(mut hl: Signal<Option<(f64, f64)>>, event: &Event<MouseData>) {
 }
 
 #[component]
-pub fn ToolRail() -> Element {
+pub fn ToolRail(has_document: bool) -> Element {
     let tools = use_context::<Tools>();
     let updates = use_context::<crate::update_ui::Updates>();
     let shapes = use_context::<crate::shapes_ui::ShapeDraw>();
@@ -255,6 +261,7 @@ pub fn ToolRail() -> Element {
     let armed = shapes.armed();
     let title = match (section, stamps) {
         (_, true) => "Stamp",
+        (Some(ABOUT), false) => "About",
         (Some(i), false) => SECTIONS[i].0,
         (None, false) => "",
     };
@@ -263,16 +270,18 @@ pub fn ToolRail() -> Element {
         None => "opacity: 0;".to_owned(),
     };
     rsx! {
+        document::Stylesheet { href: PANEL_CSS }
         document::Stylesheet { href: TOOLS_CSS }
+        document::Stylesheet { href: crate::update_ui::UPDATE_CSS }
         aside {
-            class: "pdit-rail t-panel-slide",
+            class: if has_document { "pdit-rail t-panel-slide" } else { "pdit-rail t-panel-slide is-bare" },
             "data-open": "true",
             "aria-label": "Tools",
             div {
                 class: "sb-nav",
                 onmouseleave: move |_| rail_hl.set(None),
                 span { class: "sb-hl", style: hl_style(rail_hl()) }
-                for (i, (name, short, icon)) in SECTIONS.into_iter().enumerate() {
+                for (i, (name, short, icon)) in SECTIONS.into_iter().enumerate().filter(|_| has_document) {
                     button {
                         key: "{i}",
                         class: "sb-item",
@@ -296,9 +305,9 @@ pub fn ToolRail() -> Element {
                     }
                 }
             }
+            span { class: "pdit-rail-grow" }
             // An update is waiting (D-058): its row brings the prompt back.
             if let Some(label) = updates.waiting() {
-                span { class: "pdit-rail-grow" }
                 div { class: "sb-nav",
                     button {
                         class: "sb-item pdit-rail-update",
@@ -310,9 +319,27 @@ pub fn ToolRail() -> Element {
                     }
                 }
             }
+            div { class: "sb-nav",
+                button {
+                    class: "sb-item",
+                    r#type: "button",
+                    title: "About pdit",
+                    "data-section": "{ABOUT}",
+                    "aria-expanded": if section == Some(ABOUT) && shown { "true" } else { "false" },
+                    onclick: move |_| {
+                        if *tools.section.peek() == Some(ABOUT) && *tools.shown.peek() {
+                            tools.close();
+                        } else {
+                            tools.open(ABOUT);
+                        }
+                    },
+                    span { dangerous_inner_html: ICON_ABOUT, style: "display: contents" }
+                    span { "About" }
+                }
+            }
         }
         aside {
-            class: "pdit-fly t-panel-slide",
+            class: if section == Some(ABOUT) { "pdit-fly t-panel-slide is-about" } else { "pdit-fly t-panel-slide" },
             "data-open": if shown { "true" } else { "false" },
             "aria-label": "{title} tools",
             style: "top: {(tools.top)()}px;",
@@ -326,7 +353,9 @@ pub fn ToolRail() -> Element {
                     "✕"
                 }
             }
-            if let Some(i) = section {
+            if section == Some(ABOUT) {
+                crate::update_ui::AboutPanel {}
+            } else if let Some(i) = section {
                 div {
                     class: "sb-nav",
                     onmouseleave: move |_| fly_hl.set(None),

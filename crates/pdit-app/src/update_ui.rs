@@ -3,6 +3,8 @@
 //! If so, the toast pill under the top bar offers it (Later / Update →
 //! "Downloading… n %" → Later / Restart); after Later, a row at the bottom of
 //! the tools rail brings the pill back. Nothing downloads before "Update".
+//! The About panel (the rail's last section) shows the version and checks on
+//! demand, with the same Update → Restart steps.
 //! Look: toast.css (+ assets/css/update.css).
 
 use crate::ai_ui::desktop;
@@ -13,7 +15,7 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 
 const TOAST_CSS: Asset = asset!("/assets/css/toast.css");
-const UPDATE_CSS: Asset = asset!("/assets/css/update.css");
+pub(crate) const UPDATE_CSS: Asset = asset!("/assets/css/update.css");
 /// How often to look again while the app stays open.
 const CHECK_EVERY_MS: i32 = 6 * 60 * 60 * 1000;
 /// The pill's close time (Transitions.dev "Toast open / close").
@@ -35,6 +37,12 @@ pub struct Updates {
     /// The pill is on screen (otherwise the rail row stands in for it).
     shown: Signal<bool>,
     open: Signal<bool>,
+    /// A check is running.
+    checking: Signal<bool>,
+    /// When the last check answered (local time, "HH:MM").
+    checked: Signal<Option<String>>,
+    /// The last check could not reach GitHub.
+    check_failed: Signal<bool>,
 }
 
 impl Updates {
@@ -43,6 +51,9 @@ impl Updates {
             stage: Signal::new(Stage::None),
             shown: Signal::new(false),
             open: Signal::new(false),
+            checking: Signal::new(false),
+            checked: Signal::new(None),
+            check_failed: Signal::new(false),
         })
     }
 
@@ -71,14 +82,31 @@ impl Updates {
         set_timeout(CLOSE_MS, move || shown.set(false));
     }
 
-    async fn check(mut self) {
-        if matches!(*self.stage.peek(), Stage::Downloading(_) | Stage::Ready) {
+    /// Asks GitHub for a newer version. The timer's checks bring up the pill;
+    /// About's (`manual`) show the answer in the panel.
+    async fn check(mut self, manual: bool) {
+        if *self.checking.peek()
+            || matches!(*self.stage.peek(), Stage::Downloading(_) | Stage::Ready)
+        {
             return;
         }
-        let found = match desktop::invoke("update_check", &Object::new()).await {
+        self.checking.set(true);
+        let answer = desktop::invoke("update_check", &Object::new()).await;
+        self.checking.set(false);
+        let found = match answer {
             Ok(found) => found,
-            Err(error) => return crate::log(&format!("pdit: update check: {error:?}")),
+            Err(error) => {
+                self.check_failed.set(true);
+                return crate::log(&format!("pdit: update check: {error:?}"));
+            }
         };
+        self.check_failed.set(false);
+        let now = js_sys::Date::new_0();
+        self.checked.set(Some(format!(
+            "{:02}:{:02}",
+            now.get_hours(),
+            now.get_minutes()
+        )));
         if found.is_null() || found.is_undefined() {
             return;
         }
@@ -95,11 +123,18 @@ impl Updates {
         crate::log(&format!("pdit: update available: {}", get("version")));
         if *self.stage.peek() != next {
             self.stage.set(next);
-            self.show();
+            if !manual {
+                self.show();
+            }
         }
     }
 
-    fn update(mut self) {
+    /// About's "Check for updates".
+    pub fn check_now(self) {
+        spawn(async move { self.check(true).await });
+    }
+
+    pub(crate) fn update(mut self) {
         self.stage.set(Stage::Downloading(0));
         // The download runs in the desktop app; its progress is read meanwhile.
         let mut stage = self.stage;
@@ -142,7 +177,7 @@ impl Updates {
         });
     }
 
-    fn restart(self) {
+    pub(crate) fn restart(self) {
         spawn(async move {
             let _ = desktop::invoke("update_restart", &Object::new()).await;
         });
@@ -158,7 +193,7 @@ pub fn UpdateUi() -> Element {
     let mut ticks = use_signal(|| 0u32);
     use_effect(move || {
         if ticks() > 0 {
-            spawn(async move { ui.check().await });
+            spawn(async move { ui.check(false).await });
         }
     });
     use_hook(move || {
@@ -215,7 +250,7 @@ pub fn UpdateUi() -> Element {
                             onclick: move |_| {
                                 let mut ui = ui;
                                 ui.stage.set(Stage::None);
-                                spawn(async move { ui.check().await });
+                                spawn(async move { ui.check(false).await });
                             },
                             "Try again"
                         }
@@ -223,6 +258,141 @@ pub fn UpdateUi() -> Element {
                     Stage::None => rsx! {},
                 }
             }
+        }
+    }
+}
+
+pub const PROJECT: &str = "https://github.com/litoosh13/pdit";
+// A copy of the app icon (desktop/icons/app-icon.svg, D-048).
+const APP_ICON: Asset = asset!("/assets/app-icon.svg");
+
+/// Opens one of pdit's pages on GitHub: through the desktop app (the system
+/// browser), or a new tab online.
+fn open_page(page: &'static str) {
+    if desktop::available() {
+        spawn(async move {
+            let args = Object::new();
+            let _ = Reflect::set(&args, &"page".into(), &page.into());
+            if let Err(error) = desktop::invoke("open_project_page", &args).await {
+                crate::log(&format!("pdit: could not open the page: {error:?}"));
+            }
+        });
+        return;
+    }
+    let url = match page {
+        "licence" => format!("{PROJECT}/blob/main/LICENSE"),
+        "notices" => format!("{PROJECT}/blob/main/THIRD_PARTY_NOTICES.md"),
+        _ => PROJECT.to_owned(),
+    };
+    if let Some(window) = web_sys::window() {
+        let _ = window.open_with_url_and_target_and_features(&url, "_blank", "noopener,noreferrer");
+    }
+}
+
+/// The About panel's content (in the tools rail's flyout): the app, its
+/// version, updating by hand (desktop app), and pdit's pages on GitHub.
+/// Approved mockup: .claude/research/about-ui/.
+#[component]
+pub fn AboutPanel() -> Element {
+    let ui = use_context::<Updates>();
+    let on_desktop = desktop::available();
+    let mut version = use_signal(|| env!("CARGO_PKG_VERSION").to_owned());
+    use_hook(move || {
+        if on_desktop {
+            spawn(async move {
+                if let Some(v) = desktop::invoke("app_version", &Object::new())
+                    .await
+                    .ok()
+                    .and_then(|v| v.as_string())
+                {
+                    version.set(v);
+                }
+            });
+        }
+    });
+    let stage = (ui.stage)();
+    let checked = (ui.checked)();
+    let update_row = if !on_desktop {
+        rsx! {
+            span { class: "msg",
+                "The online version is always the newest."
+                small { "Reload the page to get it." }
+            }
+        }
+    } else if (ui.checking)() {
+        rsx! { span { class: "msg", "Checking…" } }
+    } else {
+        match stage {
+            Stage::Available { version, .. } => rsx! {
+                span { class: "msg", "pdit {version} is available" }
+                button { class: "sa-primary", r#type: "button", onclick: move |_| ui.update(), "Update" }
+            },
+            Stage::Downloading(pct) => rsx! {
+                span { class: "msg", "Downloading… " span { class: "pct", "{pct}" } " %" }
+            },
+            Stage::Ready => rsx! {
+                span { class: "msg", "Installed. Restart pdit to use it." }
+                button { class: "sa-primary", r#type: "button", onclick: move |_| ui.restart(), "Restart" }
+            },
+            Stage::Failed(error) => rsx! {
+                span { class: "msg", "The update stopped" small { "{error}" } }
+                button {
+                    class: "sa-control",
+                    r#type: "button",
+                    onclick: move |_| {
+                        let mut ui = ui;
+                        ui.stage.set(Stage::None);
+                        ui.check_now();
+                    },
+                    "Try again"
+                }
+            },
+            Stage::None if (ui.check_failed)() => rsx! {
+                span { class: "msg", "Couldn't reach GitHub" small { "Check the internet connection" } }
+                button { class: "sa-control", r#type: "button", onclick: move |_| ui.check_now(), "Try again" }
+            },
+            Stage::None => match checked {
+                Some(at) => rsx! {
+                    span { class: "msg",
+                        span { class: "ok", "✓ " }
+                        "You have the newest version"
+                        small { "Checked at {at}" }
+                    }
+                    button { class: "sa-control", r#type: "button", onclick: move |_| ui.check_now(), "Check again" }
+                },
+                None => rsx! {
+                    span { class: "msg", "Updates" }
+                    button { class: "sa-primary", r#type: "button", onclick: move |_| ui.check_now(), "Check for updates" }
+                },
+            },
+        }
+    };
+    let link = |page: &'static str, label: &'static str, ext: &'static str| {
+        rsx! {
+            button {
+                class: "sb-item",
+                r#type: "button",
+                onclick: move |_| open_page(page),
+                span { "{label}" }
+                span { class: "ext", "{ext}" }
+            }
+        }
+    };
+    rsx! {
+        document::Stylesheet { href: UPDATE_CSS }
+        div { class: "about-id",
+            img { src: APP_ICON, alt: "" }
+            div {
+                b { "pdit" }
+                span { if on_desktop { "Version {version}" } else { "Version {version} · online" } }
+            }
+        }
+        div { class: "about-note", "A private PDF editor. Your PDFs stay on this computer." }
+        div { class: "about-update sa-root", {update_row} }
+        div { class: "sb-nav about-links",
+            {link("source", "Source code", "GitHub ↗")}
+            {link("licence", "Licence", "AGPL-3.0")}
+            {link("notices", "Third-party notices", "")}
         }
     }
 }

@@ -74,6 +74,7 @@ pub async fn run(font_url: &str) {
     fields_session().await;
     scan_session().await;
     ask_session().await;
+    about_session().await;
     page_session();
     expose_page_ops();
 }
@@ -987,6 +988,42 @@ async fn scan_session() {
 /// Ask a question (D-056), desktop app only: the models' download finishes
 /// (files already there are kept), the synthetic rental PDF is read, and
 /// questions get the document's own sentence, or none.
+/// About (desktop app): the version comes from the app, a check reaches
+/// GitHub's latest.json, and only pdit's own pages can be opened.
+async fn about_session() {
+    use crate::ai_ui::desktop;
+    use js_sys::{Object, Reflect};
+    let check = |name: &str, ok: bool, detail: String| {
+        log(&format!(
+            "pdit self-check {}: about: {name}: {detail}",
+            if ok { "PASS" } else { "FAIL" }
+        ))
+    };
+    if !desktop::available() {
+        return log("pdit self-check: about: skipped (not the desktop app)");
+    }
+    let version = desktop::invoke("app_version", &Object::new()).await;
+    check(
+        "the app's version",
+        matches!(&version, Ok(v) if v.as_string().is_some_and(|v| !v.is_empty())),
+        format!("{version:?}"),
+    );
+    let found = desktop::invoke("update_check", &Object::new()).await;
+    check(
+        "a check answers (newer version or none)",
+        found.is_ok(),
+        format!("{:?}", found.map(|f| js_sys::JSON::stringify(&f).ok())),
+    );
+    let args = Object::new();
+    let _ = Reflect::set(&args, &"page".into(), &"https://example.com".into());
+    let refused = desktop::invoke("open_project_page", &args).await;
+    check(
+        "any other address is refused",
+        refused.is_err(),
+        format!("{refused:?}"),
+    );
+}
+
 async fn ask_session() {
     use crate::ai_ui::desktop;
     use js_sys::{Object, Reflect};

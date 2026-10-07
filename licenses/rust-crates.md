@@ -6,7 +6,7 @@ below covers the crates listed above it.
 ## GNU Affero General Public License v3.0 only
 
 Used by:
-- leafmind-fields 0.2.0 — https://github.com/litoosh13/leafmind
+- leafmind-fields 0.3.1 — https://github.com/litoosh13/leafmind
 - pdit-app 0.1.0 — https://github.com/litoosh13/pdit
 - pdit-core 0.1.0 — https://github.com/litoosh13/pdit
 

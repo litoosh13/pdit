@@ -20,6 +20,7 @@
 | `person-selecting-note.svg` | https://koboyo.com/icons/person-selecting-note | Right-click menu: Select image (D-023a). Downloaded 2026-09-24, unmodified (`fill="currentColor"`). |
 | `cartoon-rectangle-sides.svg` | https://koboyo.com/icons/cartoon-rectangle-sides | Right-click menu: Shapes → Rectangle. Downloaded 2026-09-27, unmodified (`fill="currentColor"`). |
 | `circle-small.svg` | https://koboyo.com/icons/circle-small | Right-click menu: Shapes → Ellipse. Downloaded 2026-09-27, unmodified. |
+| `blockprint-crown-above-head.svg` | https://koboyo.com/icons/blockprint-crown-above-head | Tools rail: About (D-061). Downloaded 2026-10-07, unmodified. |
 | `pen-line.svg` | https://koboyo.com/icons/pen-line | Right-click menu: Shapes → Line. Downloaded 2026-09-27, unmodified. |
 | `arrow-up-right.svg` | https://koboyo.com/icons/arrow-up-right | Right-click menu: Shapes → Arrow. Downloaded 2026-09-27, unmodified. |
 | `fact-table.svg` | https://koboyo.com/icons/fact-table | Right-click menu / toast: Table (D-038). Downloaded 2026-09-30, unmodified. |
