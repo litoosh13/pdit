@@ -67,12 +67,14 @@ jobs:
 
       - uses: cargo-bins/cargo-binstall@main
 
-      # The prebuilt dx needs glibc 2.39 (Ubuntu 24.04); the Linux app is built on 22.04 so it
-      # runs on older distributions too, so there dx is compiled from source.
+      # dx is compiled from source on Linux and macOS: the prebuilt Linux dx needs glibc 2.39
+      # (Ubuntu 24.04; the app is built on 22.04 so it runs on older distributions too), and the
+      # prebuilt macOS dx looks for OpenSSL where Homebrew puts it on Intel Macs (/usr/local),
+      # not on the Apple-silicon runner (/opt/homebrew).
       - name: Build tools
         run: |
           cargo binstall tauri-cli@2.12.1 --no-confirm
-          if [ "$RUNNER_OS" = "Linux" ]; then
+          if [ "$RUNNER_OS" != "Windows" ]; then
             cargo install dioxus-cli --version 0.7.10 --locked
           else
             cargo binstall dioxus-cli@0.7.10 --no-confirm
