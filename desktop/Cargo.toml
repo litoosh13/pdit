@@ -18,12 +18,14 @@ tauri-plugin-updater = "2"
 rfd = "0.17"
 # OCR for scanned pages (D-055): leafmind runs the bundled Tesseract (resources/ocr, fetched by
 # scripts/fetch-ocr.sh); the web app sends page images through the commands in main.rs.
-leafmind-ocr = { git = "https://github.com/litoosh13/leafmind", tag = "v0.2.0" }
+leafmind-ocr = { git = "https://github.com/litoosh13/leafmind", tag = "v0.3.0" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # Asking questions (D-056): leafmind picks the answering sentence; its models are downloaded on first
 # use (qa.rs), ONNX Runtime is loaded at run time.
-leafmind-qa = { git = "https://github.com/litoosh13/leafmind", tag = "v0.2.0" }
+leafmind-qa = { git = "https://github.com/litoosh13/leafmind", tag = "v0.3.0" }
+# Keys the kept question index by the PDF's bytes.
+sha2 = "0.11"
 
 # Own workspace: Tauri's native dependencies stay out of the web (wasm) build.
 [workspace]

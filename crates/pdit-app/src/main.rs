@@ -201,6 +201,11 @@ fn show_document(
                 name,
                 page_sizes,
             }));
+            // A new document starts at its first page, below the top bar, not
+            // at the scroll position of the one before.
+            if let Some(window) = web_sys::window() {
+                window.scroll_to_with_x_and_y(0.0, 0.0);
+            }
         }
         Err(error) => log(&format!("pdit: could not open the PDF: {error}")),
     }

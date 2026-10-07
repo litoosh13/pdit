@@ -13,6 +13,7 @@ const SUBSET: &[u8] = include_bytes!("../../../fixtures/synthetic-subset-font.pd
 const IMAGE: &[u8] = include_bytes!("../../../fixtures/synthetic-image.png");
 const WRAPPED: &[u8] = include_bytes!("../../../fixtures/synthetic-wrapped.pdf");
 const FORM: &[u8] = include_bytes!("../../../fixtures/synthetic-form.pdf");
+const SPLIT: &[u8] = include_bytes!("../../../fixtures/synthetic-split-lines.pdf");
 
 pub async fn run(font_url: &str) {
     let font = match fetch_bytes(font_url).await {
@@ -140,6 +141,48 @@ fn paragraph_session(font: &[u8]) {
             format!("{after_short:?}"),
         );
     }
+
+    // Lines split into pieces, even inside words, with a shape between two
+    // pieces (fixtures/synthetic-split-lines.pdf): grouped as they look.
+    if let Err(error) = pdit_core::open_document(SPLIT.to_vec()) {
+        return check("split: open", false, error.to_string());
+    }
+    let sentence = "The garden club keeps a shared shed where members borrow tools, provided each tool is cleaned and hung on its hook before dusk.";
+    let p = pdit_core::paragraph_at(0, 420.0, 742.0);
+    check(
+        "split: a click on a piece picks the whole wrapped sentence",
+        matches!(&p, Ok(Some(p)) if p.object_indices == [0, 2, 3, 4] && p.text == sentence),
+        format!("{p:?}"),
+    );
+    let v = pdit_core::paragraph_at(0, 150.0, 692.0);
+    check(
+        "split: a line in three pieces is one line",
+        matches!(&v, Ok(Some(p)) if p.object_indices == [5, 6, 7] && p.text == "Visitors sign the book."),
+        format!("{v:?}"),
+    );
+    let objects = || pdit_core::text_lines(0).map(|l| l.len()).unwrap_or(0);
+    let before = objects();
+    let edited = "Members borrow tools for one day.";
+    let preview = pdit_core::preview_reflow(0, &[0, 2, 3, 4], edited, None, &fonts);
+    let _ = pdit_core::discard_edit();
+    let back = pdit_core::paragraph_at(0, 420.0, 742.0);
+    check(
+        "split: discard puts every piece back",
+        preview.is_ok()
+            && objects() == before
+            && matches!(&back, Ok(Some(p)) if p.object_indices == [0, 2, 3, 4] && p.text == sentence),
+        format!("{preview:?}; {before} → {} objects; {back:?}", objects()),
+    );
+    let _ = pdit_core::preview_reflow(0, &[0, 2, 3, 4], edited, None, &fonts);
+    pdit_core::keep_edit();
+    let kept = pdit_core::paragraph_at(0, 100.0, 742.0);
+    let visitors = pdit_core::paragraph_at(0, 150.0, 692.0);
+    check(
+        "split: keep leaves one line at the top, the next line untouched",
+        matches!(&kept, Ok(Some(p)) if p.text == edited && (p.bounds[3] - 746.0).abs() < 3.0)
+            && matches!(&visitors, Ok(Some(p)) if p.text == "Visitors sign the book."),
+        format!("{kept:?}; {visitors:?}"),
+    );
     pdit_core::close_document();
 }
 

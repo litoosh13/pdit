@@ -6,6 +6,7 @@
 //! and shasum (macOS has them); nothing else goes online.
 
 use leafmind_qa::{Answer, Document, QaEngine, QaModels, QaOptions};
+use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -234,7 +235,35 @@ pub async fn qa_index(app: AppHandle, request: Request<'_>) -> Result<Option<Str
     let InvokeBody::Raw(pdf) = request.body() else {
         return Err("expected the PDF as raw bytes".into());
     };
-    let doc = engine(&app)?.index_pdf(pdf).map_err(|e| e.to_string())?;
+    let engine = engine(&app)?;
+    // The index is kept per PDF (D-060, leafmind 0.3 save/load), so a PDF read
+    // before isn't read again; a kept index from other models is refused and
+    // the PDF read again.
+    let kept = app.path().app_data_dir().ok().map(|d| d.join("qa-index"));
+    let file = kept.as_ref().map(|d| {
+        let hash: String = Sha256::digest(pdf)
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        d.join(format!("{hash}.lmqa"))
+    });
+    let loaded = file
+        .as_ref()
+        .and_then(|f| std::fs::read(f).ok())
+        .and_then(|bytes| engine.load_document(&bytes).ok());
+    let doc = match loaded {
+        Some(doc) => doc,
+        None => {
+            let doc = engine.index_pdf(pdf).map_err(|e| e.to_string())?;
+            if let (Some(dir), Some(file)) = (&kept, &file)
+                && std::fs::create_dir_all(dir).is_ok()
+                && std::fs::write(file, engine.save_document(&doc)).is_ok()
+            {
+                crate::cache::keep_newest(dir);
+            }
+            doc
+        }
+    };
     let language = doc.language().map(|l| format!("{l:?}"));
     *DOC.lock().map_err(|e| e.to_string())? = Some(doc);
     Ok(language)

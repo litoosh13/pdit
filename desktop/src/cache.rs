@@ -2,7 +2,7 @@
 //! folder (`analysis/<sha256>.json`), written and read by the web app
 //! (pdit-app/src/analysis_cache.rs). Only the newest KEEP files stay.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager};
 
 const KEEP: usize = 300;
@@ -33,9 +33,16 @@ pub fn analysis_put(app: AppHandle, hash: String, json: String) -> Result<(), St
     let dir = file.parent().ok_or("no folder")?.to_path_buf();
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     std::fs::write(&file, json).map_err(|e| e.to_string())?;
-    // Oldest first out, past KEEP records.
-    let mut all: Vec<_> = std::fs::read_dir(&dir)
-        .map_err(|e| e.to_string())?
+    keep_newest(&dir);
+    Ok(())
+}
+
+/// Removes the oldest files in `dir`, past KEEP.
+pub fn keep_newest(dir: &Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    let mut all: Vec<_> = entries
         .filter_map(|e| e.ok())
         .filter_map(|e| Some((e.metadata().ok()?.modified().ok()?, e.path())))
         .collect();
@@ -45,5 +52,4 @@ pub fn analysis_put(app: AppHandle, hash: String, json: String) -> Result<(), St
             let _ = std::fs::remove_file(old);
         }
     }
-    Ok(())
 }

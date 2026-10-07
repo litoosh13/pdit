@@ -39,6 +39,7 @@ fn ocr(app: &AppHandle) -> Result<&'static OcrEngine, String> {
 
 /// A page image sent by the web app: RGBA bytes as the raw body, its size and
 /// resolution in the x-width / x-height / x-dpi headers.
+#[allow(clippy::type_complexity)]
 fn page_image<'a>(request: &'a Request<'_>) -> Result<(&'a [u8], u32, u32, Option<u32>), String> {
     let InvokeBody::Raw(rgba) = request.body() else {
         return Err("expected the page image as raw bytes".into());

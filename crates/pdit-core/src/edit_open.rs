@@ -4,6 +4,8 @@
 
 use crate::edit::EditMethod;
 use crate::inspect::rect;
+pub use crate::lines::Paragraph;
+use crate::lines::{Piece, paragraph_in, visual_lines};
 use crate::render::with_open;
 use crate::{Error, reserve_for_pdfium_copy};
 use pdfium_render::prelude::*;
@@ -43,9 +45,9 @@ pub struct AddPreview {
 struct Pending {
     page: u16,
     index: usize,
-    /// Objects taken off the page from `index` on (the text, then its pdit
-    /// underline if it had one), to put back in order.
-    removed: Vec<PdfPageObject<'static>>,
+    /// Objects taken off the page with the place each had in the object list
+    /// (ascending), to put back there.
+    removed: Vec<(usize, PdfPageObject<'static>)>,
     /// How many objects the preview put at `index` (the text, plus its
     /// underline when underlined).
     added: usize,
@@ -83,131 +85,29 @@ pub fn text_lines(page: u16) -> Result<Vec<TextLine>, Error> {
     })
 }
 
-/// A paragraph block: consecutive text lines that share a left margin, font size
-/// and line spacing, joined into one editable unit for reflow (D-035 later item).
-#[derive(Debug, Clone, Serialize)]
-pub struct Paragraph {
-    /// The block's text-object indices, in reading order (top to bottom).
-    pub object_indices: Vec<usize>,
-    /// The lines joined into one string (a space at each wrap; a trailing hyphen
-    /// joins with none).
-    pub text: String,
-    /// Combined bounds [left, bottom, right, top] in PDF points.
-    pub bounds: [f32; 4],
-}
-
 /// The paragraph block containing the text line at (`x`, `y`) PDF points on
-/// `page`, if any. The clicked line is grown up and down while the neighbour
-/// shares its left margin and font size, is spaced like a text line, and the
-/// line it wraps from is "full" (reaches near the block's right margin) — so a
-/// wrapped sentence groups into one block, but a short standalone line, a
-/// blank-line gap, or a differently-placed line ends it.
+/// `page`, if any, over visual lines (see [`crate::lines`]). The clicked
+/// line is grown up and down while the neighbour shares its left margin and
+/// font size, is spaced like a text line, and the line it wraps from is "full"
+/// (reaches near the block's right margin) — so a wrapped sentence groups into
+/// one block, but a short standalone line, a blank-line gap, or a
+/// differently-placed line ends it.
 pub fn paragraph_at(page: u16, x: f32, y: f32) -> Result<Option<Paragraph>, Error> {
     with_open(|document| {
         let pdf_page = document.pages().get(page.into())?;
-        struct Line {
-            index: usize,
-            text: String,
-            l: f32,
-            b: f32,
-            r: f32,
-            t: f32,
-            size: f32,
-        }
-        let mut lines = Vec::new();
+        let mut pieces = Vec::new();
         for (index, object) in pdf_page.objects().iter().enumerate() {
             if let Some(text) = object.as_text_object() {
-                let [l, b, r, t] = rect(object.bounds()?);
-                lines.push(Line {
+                pieces.push(Piece {
                     index,
                     text: text.text(),
-                    l,
-                    b,
-                    r,
-                    t,
+                    bounds: rect(object.bounds()?),
+                    baseline: object.matrix()?.f(),
                     size: text.scaled_font_size().value,
                 });
             }
         }
-        // The clicked line: topmost (last in object order) whose bounds hold the point.
-        let Some(click) = lines
-            .iter()
-            .rposition(|ln| x >= ln.l && x <= ln.r && y >= ln.b && y <= ln.t)
-        else {
-            return Ok(None);
-        };
-        // Reading order: top to bottom (descending top).
-        let mut order: Vec<usize> = (0..lines.len()).collect();
-        order.sort_by(|&a, &b| lines[b].t.total_cmp(&lines[a].t));
-        let pos = order.iter().position(|&i| i == click).unwrap();
-        let base = &lines[click];
-        let size = base.size.max(1.0);
-        let aligned = |a: &Line| (a.l - base.l).abs() <= 3.0 && (a.size - size).abs() <= 0.2 * size;
-        let spaced = |upper: &Line, lower: &Line| {
-            let d = upper.t - lower.t;
-            d > 0.6 * size && d < 2.2 * size
-        };
-        // The raw run of consecutive aligned, text-spaced lines around the click.
-        let mut run_start = pos;
-        while run_start > 0
-            && aligned(&lines[order[run_start - 1]])
-            && spaced(&lines[order[run_start - 1]], &lines[order[run_start]])
-        {
-            run_start -= 1;
-        }
-        let mut run_end = pos;
-        while run_end + 1 < order.len()
-            && aligned(&lines[order[run_end + 1]])
-            && spaced(&lines[order[run_end]], &lines[order[run_end + 1]])
-        {
-            run_end += 1;
-        }
-        // Within the run, group by sentence: a line continues onto the next only
-        // when it is "full" (reaches near the run's right margin, so it wrapped
-        // for lack of room) and does not already finish a sentence (. ! ?). So a
-        // wrapped sentence groups down to its period, while separate sentences or
-        // a short line each stand alone.
-        let run_max = order[run_start..=run_end]
-            .iter()
-            .map(|&i| lines[i].r)
-            .fold(f32::MIN, f32::max);
-        let slack = (2.5 * size).max(0.12 * (run_max - base.l));
-        let wraps =
-            |a: &Line| a.r >= run_max - slack && !a.text.trim_end().ends_with(['.', '!', '?']);
-        let mut start = pos;
-        while start > run_start && wraps(&lines[order[start - 1]]) {
-            start -= 1;
-        }
-        let mut end = pos;
-        while end < run_end && wraps(&lines[order[end]]) {
-            end += 1;
-        }
-        let mut text = String::new();
-        let (mut l, mut b, mut r, mut t) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
-        for (k, &oi) in order[start..=end].iter().enumerate() {
-            let ln = &lines[oi];
-            if k > 0 {
-                if text.ends_with('-') {
-                    text.pop();
-                } else {
-                    text.push(' ');
-                }
-            }
-            text.push_str(ln.text.trim());
-            l = l.min(ln.l);
-            b = b.min(ln.b);
-            r = r.max(ln.r);
-            t = t.max(ln.t);
-        }
-        let object_indices = order[start..=end]
-            .iter()
-            .map(|&oi| lines[oi].index)
-            .collect();
-        Ok(Some(Paragraph {
-            object_indices,
-            text,
-            bounds: [l, b, r, t],
-        }))
+        Ok(paragraph_in(visual_lines(pieces), x, y))
     })
 }
 
@@ -627,10 +527,13 @@ fn preview_replace(
     with_open(|document| {
         let mut pdf_page = document.pages().get(page.into())?;
         let base = with_underline(&pdf_page, index)?;
-        let mut removed = vec![pdf_page.objects_mut().remove_object_at_index(index)?];
+        let mut removed = vec![(index, pdf_page.objects_mut().remove_object_at_index(index)?)];
         if base.underline {
             // The old underline goes too; a new one follows the new text.
-            removed.push(pdf_page.objects_mut().remove_object_at_index(index)?);
+            removed.push((
+                index + 1,
+                pdf_page.objects_mut().remove_object_at_index(index)?,
+            ));
         }
         match insert_text(
             document,
@@ -661,11 +564,7 @@ fn preview_replace(
                 })
             }
             Err(read_back) => {
-                for (offset, object) in removed.into_iter().enumerate() {
-                    pdf_page
-                        .objects_mut()
-                        .insert_object_at_index(index + offset, object)?;
-                }
+                put_back(&mut pdf_page, removed)?;
                 Err(Error::UnsupportedCharacters {
                     intended: new_text.to_owned(),
                     reads_back_as: read_back,
@@ -750,9 +649,9 @@ fn wrap_lines(
 /// Replaces a wrapped paragraph (the text objects `indices`, from
 /// [`paragraph_at`]) with `new_text` re-wrapped across lines at the block's
 /// column width, as one preview (reflow). Each line keeps the block's left
-/// margin, baseline spacing, font, size and colour. Only works on a block whose
-/// objects are contiguous in the page's object list; otherwise it edits the
-/// topmost line alone. Discarding restores the originals; keeping frees them.
+/// margin, baseline spacing, font, size and colour. The block's objects may
+/// be several per line and need not be next to each other in the page's object
+/// list. Discarding restores the originals; keeping frees them.
 pub fn preview_reflow(
     page: u16,
     indices: &[usize],
@@ -767,8 +666,8 @@ pub fn preview_reflow(
     let Some(&min) = idx.first() else {
         return Err(Error::Pdfium("no lines to reflow".into()));
     };
-    // A single object, or a non-contiguous block, is edited as one line.
-    if idx.len() < 2 || *idx.last().unwrap() != min + idx.len() - 1 {
+    // A single object is edited as one line.
+    if idx.len() < 2 {
         return preview_replace(page, min, new_text, style, fonts);
     }
     with_open(|document| {
@@ -793,6 +692,8 @@ pub fn preview_reflow(
         base.underline = false; // v1: reflow doesn't carry per-line underlines.
         let style = style.copied().unwrap_or(base.style());
         baselines.sort_by(|a, b| b.total_cmp(a));
+        // Pieces of one line share its baseline: one per line.
+        baselines.dedup_by(|a, b| (*b - *a).abs() < 0.3 * base.size.value * base.scale());
         let line_height = if baselines.len() >= 2 {
             baselines[0] - baselines[1]
         } else {
@@ -815,12 +716,13 @@ pub fn preview_reflow(
                 reads_back_as: String::new(),
             });
         };
-        // Take the block's objects off the page (contiguous at `min`), to restore
-        // on discard or free on keep.
+        // Take the block's objects off the page (last first, so the places
+        // stay right), to restore on discard or free on keep.
         let mut removed = Vec::new();
-        for _ in 0..idx.len() {
-            removed.push(pdf_page.objects_mut().remove_object_at_index(min)?);
+        for &i in idx.iter().rev() {
+            removed.push((i, pdf_page.objects_mut().remove_object_at_index(i)?));
         }
+        removed.reverse();
         // Place each wrapped line at the block's left, one line-height apart.
         let mut method = EditMethod::Native;
         let mut added = 0usize;
@@ -856,11 +758,7 @@ pub fn preview_reflow(
                     for _ in 0..added {
                         pdf_page.objects_mut().remove_object_at_index(min)?;
                     }
-                    for (offset, object) in removed.into_iter().enumerate() {
-                        pdf_page
-                            .objects_mut()
-                            .insert_object_at_index(min + offset, object)?;
-                    }
+                    put_back(&mut pdf_page, removed)?;
                     return Err(Error::UnsupportedCharacters {
                         intended: new_text.to_owned(),
                         reads_back_as: read_back,
@@ -1000,15 +898,22 @@ pub fn discard_edit() -> Result<(), Error> {
     };
     with_open(|document| {
         let mut page = document.pages().get(pending.page.into())?;
-        let objects = page.objects_mut();
         for _ in 0..pending.added {
-            objects.remove_object_at_index(pending.index)?;
+            page.objects_mut().remove_object_at_index(pending.index)?;
         }
-        for (offset, object) in pending.removed.into_iter().enumerate() {
-            objects.insert_object_at_index(pending.index + offset, object)?;
-        }
-        Ok(())
+        put_back(&mut page, pending.removed)
     })
+}
+
+/// Puts objects taken off `page` back at their places (ascending).
+fn put_back(
+    page: &mut PdfPage<'static>,
+    removed: Vec<(usize, PdfPageObject<'static>)>,
+) -> Result<(), Error> {
+    for (at, object) in removed {
+        page.objects_mut().insert_object_at_index(at, object)?;
+    }
+    Ok(())
 }
 
 /// Saves the open document (including kept edits) to bytes.
