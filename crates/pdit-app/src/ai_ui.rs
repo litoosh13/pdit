@@ -6,18 +6,14 @@
 //! says whether questions can be asked. Its steps show in a panel on the right.
 //! Look: assets/css/ai.css (+ context-menu.css, thumbnails.css).
 
-use crate::page_tools::{PageTools, next_frame, set_timeout};
+use crate::page_tools::PageTools;
 use dioxus::prelude::*;
 use pdit_core::analysis::{PageKind, page_kind};
 use std::rc::Rc;
-use wasm_bindgen::JsCast;
-use wasm_bindgen::prelude::*;
 
 const AI_CSS: Asset = asset!("/assets/css/ai.css");
 /// Scans are read at this resolution.
 const OCR_DPI: f32 = 300.0;
-/// The menu's close time (Transitions.dev "Menu dropdown").
-const CLOSE_MS: i32 = 150;
 
 #[derive(Clone, Copy, PartialEq)]
 enum State {
@@ -54,64 +50,199 @@ struct Analysis {
     before: Option<Rc<Vec<u8>>>,
 }
 
+/// What the top bar's AI menu (island, D-060) shows: the model card, or drops
+/// (id, label, disabled, title).
+#[derive(Clone, PartialEq, Default)]
+pub struct AiView {
+    pub needs_models: bool,
+    /// (done, total) bytes while the models download.
+    pub progress: Option<(f64, f64)>,
+    pub error: Option<String>,
+    pub drops: Vec<(&'static str, &'static str, bool, String)>,
+}
+
 /// Shared AI state.
 #[derive(Clone, Copy)]
 pub struct Ai {
-    /// The menu is open (left, top of the button's bottom edge), and closing.
-    menu: Signal<Option<(f64, f64)>>,
-    closing: Signal<bool>,
-    shown: Signal<bool>,
     panel: Signal<bool>,
     analysis: Signal<Analysis>,
+    /// The document's id (it grows with every change) when it was analysed
+    /// (D-060): another id means it changed since, and "Analyze again" is offered.
+    analyzed: Signal<Option<u64>>,
+    /// Which file opening this state belongs to (OPEN_SEQ).
+    seen_open: Signal<u64>,
+    changed: Signal<bool>,
+    /// What the analysis found (D-060), kept for this file and its saves.
+    record: Signal<Option<Rc<crate::analysis_cache::Record>>>,
+}
+
+thread_local! {
+    /// The SHA-256 of the file as it was opened (D-060: the record's key).
+    static OPENED: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+    /// Counts file openings (page refreshes after edits don't count).
+    static OPEN_SEQ: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// A file is being opened: its key for the analysis record.
+pub fn opened_file(bytes: &[u8]) {
+    let hash = crate::analysis_cache::file_hash(bytes);
+    OPENED.with_borrow_mut(|h| *h = Some(hash));
+    OPEN_SEQ.set(OPEN_SEQ.get() + 1);
+}
+
+/// How many files have been opened so far (edits don't count).
+pub fn open_seq() -> u64 {
+    OPEN_SEQ.get()
+}
+
+/// The open document's id (it grows with every change).
+fn document_id() -> Option<u64> {
+    consume_context::<Signal<Option<crate::pages::OpenDocument>>>()
+        .peek()
+        .as_ref()
+        .map(|d| d.id)
+}
+
+/// The document was saved as `bytes`: its record goes under the saved file's
+/// key too, so opening the saved file needs no new analysis.
+pub fn saved_file(bytes: &[u8]) {
+    let Some(record) = try_consume_context::<Ai>().and_then(|ai| ai.record.peek().clone()) else {
+        return;
+    };
+    let hash = crate::analysis_cache::file_hash(bytes);
+    spawn(async move { crate::analysis_cache::store(&hash, &record).await });
 }
 
 impl Ai {
     pub fn provide() -> Self {
         use_context_provider(|| Ai {
-            menu: Signal::new(None),
-            closing: Signal::new(false),
-            shown: Signal::new(false),
             panel: Signal::new(false),
             analysis: Signal::new(Analysis::default()),
+            analyzed: Signal::new(None),
+            changed: Signal::new(false),
+            record: Signal::new(None),
+            seen_open: Signal::new(0),
         })
     }
 
-    /// The round button: opens the menu under it, or closes it.
-    pub fn toggle_menu(mut self) {
-        if self.menu.peek().is_some() {
-            return self.close_menu();
-        }
-        let rect = web_sys::window()
-            .and_then(|w| w.document())
-            .and_then(|d| d.query_selector(".tb-ai").ok().flatten())
-            .map(|b| b.get_bounding_client_rect());
-        let Some(rect) = rect else { return };
-        self.closing.set(false);
-        self.shown.set(false);
-        self.menu.set(Some((rect.left(), rect.bottom() + 10.0)));
-        let mut shown = self.shown;
-        next_frame(move || next_frame(move || shown.set(true)));
+    /// The Analysis panel is open (the Pages panel makes way, D-059).
+    pub fn panel_open(&self) -> bool {
+        (self.panel)()
     }
 
-    pub fn close_menu(mut self) {
-        if self.menu.peek().is_none() || *self.closing.peek() {
-            return;
-        }
-        self.closing.set(true);
-        let (mut menu, mut closing) = (self.menu, self.closing);
-        set_timeout(CLOSE_MS, move || {
-            if *closing.peek() {
-                menu.set(None);
-                closing.set(false);
+    /// The menu's contents (read during render).
+    pub fn view(&self) -> AiView {
+        let ask = consume_context::<crate::ask_ui::Ask>();
+        let (needs_models, progress, error) = ask.download_state();
+        let a = self.analysis.read();
+        let drops = if a.running {
+            Vec::new()
+        } else if self.analyzed.read().is_none() {
+            vec![("analyze", "Analyze PDF", false, String::new())]
+        } else {
+            let mut drops = vec![if ask.can_ask() {
+                ("ask", "Ask a question", false, String::new())
+            } else {
+                (
+                    "ask",
+                    "Ask a question",
+                    true,
+                    "Asking works on Apple-silicon Macs for now".into(),
+                )
+            }];
+            if (self.changed)() {
+                drops.push((
+                    "reanalyze",
+                    "Analyze again",
+                    false,
+                    "The PDF changed since its analysis".into(),
+                ));
             }
-        });
+            drops
+        };
+        AiView {
+            needs_models,
+            progress,
+            error,
+            drops,
+        }
     }
 
-    /// Esc: the menu, then the panel.
+    /// The round button was pressed: fresh model status, and whether the PDF
+    /// changed since its analysis.
+    pub fn opened(mut self) {
+        let ask = consume_context::<crate::ask_ui::Ask>();
+        spawn(async move { ask.refresh().await });
+        if let Some(at) = *self.analyzed.peek() {
+            self.changed.set(document_id() != Some(at));
+        }
+    }
+
+    pub fn pick(self, id: &str) {
+        match id {
+            "analyze" | "reanalyze" => self.analyze(),
+            "ask" => {
+                let mut ai = self;
+                ai.panel.set(false);
+                consume_context::<crate::ask_ui::Ask>().open();
+            }
+            _ => {}
+        }
+    }
+
+    /// Opening a file analysed before (D-060): its record comes back — the
+    /// unsaved OCR text goes on its scanned pages again, the field suggestions
+    /// wait for review, and Analyze isn't offered.
+    async fn restore(mut self) {
+        let Some(hash) = OPENED.with_borrow(|h| h.clone()) else {
+            return;
+        };
+        let Some(record) = crate::analysis_cache::load(&hash).await else {
+            return;
+        };
+        if !record.ocr.is_empty() {
+            // The fallback font loads at start; wait for it a little.
+            let editing = consume_context::<crate::editing::Editing>();
+            let mut noto = editing.fallback_font.peek().clone();
+            for _ in 0..50 {
+                if noto.is_some() {
+                    break;
+                }
+                crate::print_ui::pause(100).await;
+                noto = editing.fallback_font.peek().clone();
+            }
+            if let Some(noto) = noto {
+                let mut laid = false;
+                for p in &record.ocr {
+                    if matches!(page_kind(p.page), Ok(PageKind::Scan)) {
+                        let words: Vec<pdit_core::LayerWord> = p
+                            .words
+                            .iter()
+                            .map(|(text, rect)| pdit_core::LayerWord {
+                                text: text.clone(),
+                                rect: *rect,
+                            })
+                            .collect();
+                        laid |= pdit_core::add_text_layer(p.page, &words, &noto).is_ok();
+                    }
+                }
+                if laid {
+                    consume_context::<PageTools>().refresh_pages();
+                }
+            }
+        }
+        let found = record.found();
+        if !found.is_empty() {
+            consume_context::<crate::find_fields_ui::FindFields>().set_prepared(Some(found));
+        }
+        self.analyzed.set(document_id());
+        self.record.set(Some(Rc::new(record)));
+        crate::log("pdit: analysis remembered for this file");
+    }
+
+    /// Esc: the panel (when not running).
     pub fn escape(mut self) {
-        if self.menu.peek().is_some() {
-            self.close_menu();
-        } else if *self.panel.peek() && !self.analysis.peek().running {
+        if *self.panel.peek() && !self.analysis.peek().running {
             self.panel.set(false);
         }
     }
@@ -120,6 +251,9 @@ impl Ai {
     fn reset(mut self) {
         self.analysis.set(Analysis::default());
         self.panel.set(false);
+        self.analyzed.set(None);
+        self.changed.set(false);
+        self.record.set(None);
         consume_context::<crate::find_fields_ui::FindFields>().set_prepared(None);
     }
 
@@ -176,6 +310,19 @@ impl Ai {
                 (true, Some(page)) => desktop::language(page).await,
                 _ => None,
             };
+            let mut record = crate::analysis_cache::Record::new();
+            record.kinds = kinds
+                .iter()
+                .map(|k| {
+                    match k {
+                        PageKind::Text => "text",
+                        PageKind::Scan => "scan",
+                        PageKind::Blank => "blank",
+                    }
+                    .to_owned()
+                })
+                .collect();
+            record.language = language.map(str::to_owned);
             let mut found = format!(
                 "{} page{}: {texts} with text",
                 pages.len(),
@@ -241,6 +388,10 @@ impl Ai {
                     crate::print_ui::pause(30).await;
                     match desktop::read(page, lang).await {
                         Ok(words) => {
+                            record.ocr.push(crate::analysis_cache::OcrPage {
+                                page,
+                                words: words.iter().map(|w| (w.text.clone(), w.rect)).collect(),
+                            });
                             let total = words.len();
                             let noto = consume_context::<crate::editing::Editing>()
                                 .fallback_font
@@ -320,6 +471,7 @@ impl Ai {
                 (e, 0) => format!("{e} fillable fields already in the PDF"),
                 (e, n) => format!("{e} fillable fields already in the PDF · {n} more possible"),
             };
+            record.suggestions = crate::analysis_cache::Record::suggestions_of(&suggestions);
             consume_context::<crate::find_fields_ui::FindFields>()
                 .set_prepared((n > 0).then_some(suggestions));
             self.set_step(2, Step::new("Form fields", State::Done, detail));
@@ -337,26 +489,36 @@ impl Ai {
                     Step::new("Questions need the desktop app", State::Skip, "")
                 },
             );
+            let before = self.analysis.peek().before.clone();
             self.analysis.with_mut(|a| {
                 a.running = false;
                 a.done = true;
                 a.summary = if a.before.is_some() {
-                    "Done. The OCR text was added to the PDF".into()
+                    "Done. The OCR text was added to the PDF.".into()
                 } else {
                     "Done. Nothing in the PDF was changed.".into()
                 };
             });
-        });
-    }
-
-    fn undo_ocr(mut self) {
-        let Some(before) = self.analysis.peek().before.clone() else {
-            return;
-        };
-        consume_context::<PageTools>().restore_snapshot(&before);
-        self.analysis.with_mut(|a| {
-            a.before = None;
-            a.summary = "The OCR text was taken out again.".into();
+            self.analyzed.set(document_id());
+            self.changed.set(false);
+            // Remember it for this file (D-060).
+            let record = Rc::new(record);
+            self.record.set(Some(record.clone()));
+            if let Some(hash) = OPENED.with_borrow(|h| h.clone()) {
+                crate::analysis_cache::store(&hash, &record).await;
+            }
+            // The panel shows "Done" for a moment, then goes (D-060); OCR's Undo
+            // stays in the usual toast, and found fields open for review.
+            crate::print_ui::pause(1800).await;
+            self.panel.set(false);
+            if let Some(before) = before {
+                consume_context::<PageTools>().show(
+                    "Scanned pages are now searchable".into(),
+                    crate::form_edit_ui::ICON_FORM,
+                    Some(before),
+                );
+            }
+            consume_context::<crate::find_fields_ui::FindFields>().review_prepared_quietly();
         });
     }
 }
@@ -504,94 +666,38 @@ pub(crate) mod desktop {
     }
 }
 
-/// The menu under the AI button, and the Analysis panel.
+/// The Analysis panel (the menu itself is the top bar's, island.rs).
 #[component]
 pub fn AiUi() -> Element {
     let ai = use_context::<Ai>();
     let document = use_context::<Signal<Option<crate::pages::OpenDocument>>>();
     // A different document: start over.
     let doc_id = document.read().as_ref().map(|d| d.id);
+    // A file was opened (not just refreshed after an edit): start over, and
+    // bring back what's remembered about it (D-060).
     use_effect(use_reactive!(|doc_id| {
-        let _ = doc_id;
-        ai.reset();
+        let seq = OPEN_SEQ.get();
+        if doc_id.is_some() && seq != *ai.seen_open.peek() {
+            let mut ai = ai;
+            ai.seen_open.set(seq);
+            ai.reset();
+            spawn(async move { ai.restore().await });
+        }
     }));
-    use_outside_close(ai);
+    // Know the models' state before the AI button is first pressed.
+    use_hook(|| {
+        let ask = consume_context::<crate::ask_ui::Ask>();
+        spawn(async move { ask.refresh().await });
+    });
     let a = (ai.analysis)();
-    let desktop = desktop::available();
     rsx! {
         document::Stylesheet { href: AI_CSS }
-        if let Some((left, top)) = (ai.menu)() {
-            div {
-                class: match ((ai.closing)(), (ai.shown)()) {
-                    (true, _) => "cm-menu t-dropdown pdit-ai-menu is-closing",
-                    (false, true) => "cm-menu t-dropdown pdit-ai-menu is-open",
-                    _ => "cm-menu t-dropdown pdit-ai-menu",
-                },
-                role: "menu",
-                "data-origin": "top-left",
-                style: "left: {left}px; top: {top}px;",
-                button {
-                    r#type: "button",
-                    role: "menuitem",
-                    disabled: a.running,
-                    onclick: move |_| {
-                        ai.close_menu();
-                        ai.analyze();
-                    },
-                    span { class: "pdit-ai-primary", if a.done { "Analyze again" } else { "Analyze PDF" } }
-                }
-                div { class: "cm-label", "With the analysis" }
-                MenuRow {
-                    label: "Ask a question",
-                    off: !a.done || !desktop,
-                    why: (if desktop { "after analysis" } else { "desktop app" }).to_owned(),
-                    onpick: move |_| {
-                        let mut ai = ai;
-                        ai.close_menu();
-                        ai.panel.set(false);
-                        consume_context::<crate::ask_ui::Ask>().open();
-                    },
-                }
-                MenuRow {
-                    label: "Find form fields",
-                    off: !a.done,
-                    why: "after analysis",
-                    onpick: move |_| {
-                        ai.close_menu();
-                        consume_context::<crate::find_fields_ui::FindFields>().review_prepared();
-                    },
-                }
-                MenuRow {
-                    label: "Show analysis",
-                    off: !a.done,
-                    why: "after analysis",
-                    onpick: move |_| {
-                        let mut ai = ai;
-                        ai.close_menu();
-                        consume_context::<crate::ask_ui::Ask>().close();
-                        ai.panel.set(true);
-                    },
-                }
-            }
-        }
         aside {
             class: "pdit-panel pdit-ai t-panel-slide",
             "data-open": if (ai.panel)() { "true" } else { "false" },
             "aria-label": "Analysis",
             div { class: "pdit-panel-head",
                 span { class: "title", "Analysis" }
-                span { class: "grow" }
-                button {
-                    class: "pdit-ai-x",
-                    r#type: "button",
-                    title: "Close",
-                    disabled: a.running,
-                    onclick: move |_| {
-                        let mut ai = ai;
-                        ai.panel.set(false);
-                    },
-                    "✕"
-                }
             }
             for (i, s) in a.steps.iter().enumerate() {
                 div {
@@ -619,72 +725,8 @@ pub fn AiUi() -> Element {
                 }
             }
             if !a.summary.is_empty() {
-                div { class: "pdit-ai-sum",
-                    "{a.summary}"
-                    if a.before.is_some() {
-                        " · "
-                        button { r#type: "button", onclick: move |_| ai.undo_ocr(), "Undo OCR" }
-                    }
-                }
+                div { class: "pdit-ai-sum", "{a.summary}" }
             }
         }
     }
-}
-
-/// A menu row that waits for the analysis (greyed, with why).
-#[component]
-fn MenuRow(label: String, off: bool, why: String, onpick: EventHandler<()>) -> Element {
-    rsx! {
-        button {
-            r#type: "button",
-            role: "menuitem",
-            disabled: off,
-            onclick: move |_| onpick.call(()),
-            span { "{label}" }
-            if off {
-                span { class: "pdit-ai-why", "{why}" }
-            }
-        }
-    }
-}
-
-/// A press outside the menu (and not on the AI button) closes it.
-fn use_outside_close(ai: Ai) {
-    use_hook(move || {
-        let Some(window) = web_sys::window() else {
-            return;
-        };
-        let (mut menu, mut closing) = (ai.menu, ai.closing);
-        let on_pointer = Closure::<dyn FnMut(web_sys::PointerEvent)>::new(
-            move |event: web_sys::PointerEvent| {
-                if menu.peek().is_none() {
-                    return;
-                }
-                let inside = event
-                    .target()
-                    .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
-                    .and_then(|el| el.closest(".pdit-ai-menu, .tb-ai").ok().flatten())
-                    .is_some();
-                if !inside {
-                    // As close_menu, without looking up a context outside Dioxus.
-                    closing.set(true);
-                    set_timeout(CLOSE_MS, move || {
-                        if *closing.peek() {
-                            menu.set(None);
-                            closing.set(false);
-                        }
-                    });
-                }
-            },
-        );
-        let capture = web_sys::AddEventListenerOptions::new();
-        capture.set_capture(true);
-        let _ = window.add_event_listener_with_callback_and_add_event_listener_options(
-            "pointerdown",
-            on_pointer.as_ref().unchecked_ref(),
-            &capture,
-        );
-        // The app lives as long as the page.
-        on_pointer.forget();
-    });
 }

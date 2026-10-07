@@ -248,7 +248,7 @@ fn ZoomMenu() -> Element {
     rsx! {
         div {
             class: if shown() { "cm-menu t-dropdown pdit-zoom-menu is-open" } else { "cm-menu t-dropdown pdit-zoom-menu" },
-            "data-origin": "bottom-right",
+            "data-origin": "bottom-left",
             role: "menu",
             button { r#type: "button", role: "menuitem", onclick: move |_| pick(&|z| z.fit(true)), span { "Fit width" } }
             button { r#type: "button", role: "menuitem", onclick: move |_| pick(&|z| z.fit(false)), span { "Fit page" } }

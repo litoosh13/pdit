@@ -63,9 +63,35 @@ impl Ask {
         })
     }
 
+    /// The Ask panel is open (the Pages panel makes way, D-059).
+    pub fn is_open(&self) -> bool {
+        (self.open)()
+    }
+
     pub fn open(mut self) {
         self.open.set(true);
         spawn(async move { self.check().await });
+    }
+
+    /// For the AI menu (D-060): the models must be downloaded first; their
+    /// download progress; the last error.
+    pub fn download_state(&self) -> (bool, Option<(f64, f64)>, Option<String>) {
+        match &*self.models.read() {
+            Models::Missing { progress, error } => (
+                true,
+                progress.map(|(d, t)| (d as f64, t as f64)),
+                error.clone(),
+            ),
+            _ => (false, None, None),
+        }
+    }
+
+    pub fn can_ask(&self) -> bool {
+        *self.models.read() == Models::Ready
+    }
+
+    pub async fn refresh(self) {
+        self.check().await;
     }
 
     pub fn close(mut self) {
@@ -114,7 +140,7 @@ impl Ask {
         }
     }
 
-    fn download(self) {
+    pub(crate) fn download(self) {
         spawn(async move {
             if let Err(error) = desktop::invoke("qa_download", &Object::new()).await {
                 crate::log(&format!("pdit: question models: {error:?}"));
@@ -123,7 +149,7 @@ impl Ask {
         });
     }
 
-    fn cancel(self) {
+    pub(crate) fn cancel(self) {
         spawn(async move {
             let _ = desktop::invoke("qa_cancel", &Object::new()).await;
         });
@@ -226,10 +252,15 @@ pub fn AskUi() -> Element {
     let mut ask = use_context::<Ask>();
     let find = use_context::<crate::search_ui::Find>();
     let document = use_context::<Signal<Option<crate::pages::OpenDocument>>>();
+    // A new file (not an edit of this one): a fresh conversation.
     let doc_id = document.read().as_ref().map(|d| d.id);
+    let mut seen = use_signal(|| 0u64);
     use_effect(use_reactive!(|doc_id| {
-        let _ = doc_id;
-        ask.reset();
+        let seq = crate::ai_ui::open_seq();
+        if doc_id.is_some() && seq != *seen.peek() {
+            seen.set(seq);
+            ask.reset();
+        }
     }));
     let models = (ask.models)();
     let messages = (ask.messages)();

@@ -7,6 +7,7 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod cache;
 mod qa;
 mod update;
 
@@ -149,6 +150,8 @@ fn handlers() -> impl Fn(tauri::ipc::Invoke) -> bool {
         update::update_progress,
         update::update_restart,
         ocr_available,
+        cache::analysis_get,
+        cache::analysis_put,
         debug_log
     ]
 }
@@ -167,7 +170,9 @@ fn handlers() -> impl Fn(tauri::ipc::Invoke) -> bool {
         update::update_install,
         update::update_progress,
         update::update_restart,
-        ocr_available
+        ocr_available,
+        cache::analysis_get,
+        cache::analysis_put
     ]
 }
 

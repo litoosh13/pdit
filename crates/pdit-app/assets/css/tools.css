@@ -10,7 +10,8 @@
 
 .pdit-rail {
   width: 60px;
-  padding: 8px 6px;
+  /* The bottom holds the zoom control (selection-actions.css .pdit-zoom). */
+  padding: 8px 6px 108px;
   z-index: 11;
 }
 

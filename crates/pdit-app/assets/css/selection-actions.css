@@ -251,9 +251,26 @@
 /* ---- Zoom (D-049): the Selection Actions bar, bottom right ---- */
 .pdit-zoom {
   position: fixed;
-  right: 20px;
-  bottom: 20px;
+  /* At the bottom of the tools rail (D-059), stacked: zoom in, the
+     percentage, zoom out. */
+  left: 22px;
+  bottom: 26px;
+  width: 48px;
   z-index: 35;
+}
+.pdit-zoom .sa-bar {
+  flex-direction: column-reverse;
+  width: 48px;
+  height: auto;
+  padding: 2px 0;
+  background: transparent;
+  box-shadow: none;
+}
+.pdit-zoom .pdit-zoom-pct {
+  min-width: 0 !important;
+  padding: 0 !important;
+  font-size: 11px;
+  font-weight: 600;
 }
 .pdit-zoom .sa-bar {
   gap: 2px;
@@ -280,9 +297,10 @@
 /* The presets menu (context-menu.css surface) opens upward from the pill. */
 .cm-menu.pdit-zoom-menu {
   position: fixed;
-  right: 20px;
-  bottom: 70px;
-  left: auto;
+  /* To the right of the rail, level with its bottom. */
+  left: 84px;
+  bottom: 16px;
+  right: auto;
   top: auto;
   min-width: 150px;
   z-index: 36;
@@ -290,16 +308,4 @@
 .pdit-zoom-tick {
   margin-left: auto;
   opacity: 0.7;
-}
-/* Beside the comments panel (right side), the pill moves left of it; with a
-   document open it stays left of the Pages panel's room (D-050). */
-@media (min-width: 721px) {
-  body:has(.pdit-rail) .pdit-zoom,
-  body:has(.pdit-rail) .cm-menu.pdit-zoom-menu {
-    right: 248px;
-  }
-  body:has(.pdit-comments[data-open='true']) .pdit-zoom,
-  body:has(.pdit-comments[data-open='true']) .cm-menu.pdit-zoom-menu {
-    right: 296px;
-  }
 }

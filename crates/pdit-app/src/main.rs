@@ -7,6 +7,7 @@ use std::rc::Rc;
 use wasm_bindgen::JsCast;
 
 mod ai_ui;
+mod analysis_cache;
 mod annotations_ui;
 mod ask_ui;
 mod bookmarks_ui;
@@ -84,7 +85,7 @@ fn App() -> Element {
     print_ui::Print::provide();
     find_fields_ui::FindFields::provide();
     let ai = ai_ui::Ai::provide();
-    ask_ui::Ask::provide();
+    let ask = ask_ui::Ask::provide();
     update_ui::Updates::provide();
     doc_ui::DocTools::provide();
     use_close_on_outside(editing);
@@ -114,7 +115,11 @@ fn App() -> Element {
         TopBar {
             has_doc: document.read().is_some(),
             pages_shown: pages_panel_open(),
-            on_ai: move |_| ai.toggle_menu(),
+            ai: ai.view(),
+            on_ai: move |_| ai.opened(),
+            on_ai_pick: move |id: String| ai.pick(&id),
+            on_ai_download: move |_| consume_context::<ask_ui::Ask>().download(),
+            on_ai_cancel: move |_| consume_context::<ask_ui::Ask>().cancel(),
             on_open: move |_| click_file_input(),
             on_new: move |_| {
                 if !engine_ready() {
@@ -147,7 +152,8 @@ fn App() -> Element {
         }
         PageList {}
         if document.read().is_some() {
-            ThumbnailsPanel { open: pages_panel_open() }
+            // Ask and Analysis open in the Pages panel's place (D-059).
+            ThumbnailsPanel { open: pages_panel_open() && !ai.panel_open() && !ask.is_open() }
             tools_ui::ToolRail {}
         }
         ContextMenu {}
@@ -180,6 +186,7 @@ fn show_document(
     bytes: Vec<u8>,
     name: String,
 ) {
+    ai_ui::opened_file(&bytes);
     match pdit_core::open_document(bytes) {
         Ok(page_sizes) => {
             editing.state.set(Default::default());
@@ -210,6 +217,7 @@ fn save_open_document(editing: Editing, document: Signal<Option<OpenDocument>>) 
         Ok(bytes) => bytes,
         Err(error) => return log(&format!("pdit: could not save the PDF: {error}")),
     };
+    ai_ui::saved_file(&bytes);
     spawn(async move {
         // Only the size is logged: document contents stay out of the console.
         match save::save_pdf(&bytes, &name).await {

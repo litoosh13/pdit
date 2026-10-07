@@ -142,6 +142,7 @@
   height: 100%;
 }
 
+
 /* Narrow windows: tighter spacing, then (phones) each label under its icon,
    so all five items and their labels still fit (responsive adaptation). */
 @media (max-width: 720px) {
@@ -200,4 +201,162 @@
   body:has(.pdit-rail):has(.pdit-edit-panel[data-open='true']) .tb-bar {
     width: min(640px, calc(100vw - 564px));
   }
+}
+
+/* ---- The AI menu (D-055, D-060, approved mockup .claude/research/ai-gooey-ui/) ----
+   liquid-gooey "Morph" on the Gooey playground surface (gooey-surface.css): drops on a half circle under the
+   round button, or the model card. It sits on the round button (6px in from the bar's corner) but behind the
+   bar, so the liquid seems to come out from under the metal; the liquid area reaches 120px left and 260px down. */
+.tb-ai-menu {
+  position: absolute;
+  left: 6px;
+  top: 6px;
+  width: 44px;
+  height: 44px;
+  z-index: -1;
+  pointer-events: none;
+}
+.tb-ai-menu > div:first-child {
+  position: absolute;
+  left: -120px;
+  top: -20px;
+  width: 440px;
+  height: 300px;
+  pointer-events: none;
+}
+.tb-ai-menu .tb-ai-spot,
+.tb-ai-menu .tb-ai-card {
+  position: absolute;
+  left: 120px;
+  top: 20px;
+  pointer-events: auto;
+}
+.tb-ai-anchor {
+  display: block;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+}
+.tb-ai-drop {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--btn-text);
+  cursor: pointer;
+  transition: opacity 0.15s, background-color 0.15s;
+}
+.tb-ai-drop:hover:enabled {
+  background: var(--hover-veil);
+}
+.tb-ai-drop:disabled {
+  cursor: default;
+}
+.tb-ai-drop svg {
+  width: 18px;
+  height: 18px;
+}
+.tb-ai-captions {
+  position: absolute;
+  left: 0;
+  top: 0;
+}
+.tb-ai-cap {
+  position: absolute;
+  transform: translateX(-50%);
+  padding: 1px 6px;
+  border-radius: 6px;
+  white-space: nowrap;
+  background: color-mix(in srgb, var(--modal-bg) 85%, transparent);
+  color: var(--btn-text);
+  font: 500 11px 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+  animation: tb-ai-cap-in 0.25s 0.15s both;
+}
+.tb-ai-cap.is-off {
+  opacity: 0.45;
+}
+@keyframes tb-ai-cap-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%);
+  }
+}
+
+/* The model card grows out of the button and opens below it (the liquid follows its box). */
+.tb-ai-card {
+  box-sizing: border-box;
+  width: 44px;
+  height: 44px;
+  overflow: hidden;
+  border-radius: 22px;
+  color: var(--btn-text);
+  font: 12.5px/1.5 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+  transition:
+    top 0.35s cubic-bezier(0.22, 1, 0.36, 1),
+    width 0.35s cubic-bezier(0.22, 1, 0.36, 1),
+    height 0.35s cubic-bezier(0.22, 1, 0.36, 1),
+    border-radius 0.35s;
+}
+.tb-ai-menu .tb-ai-card.is-open {
+  top: 70px;
+  display: flex;
+  width: 300px;
+  height: auto;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  border-radius: 16px;
+}
+.tb-ai-card b {
+  font-weight: 600;
+}
+.tb-ai-card .small {
+  font-size: 11.5px;
+  opacity: 0.75;
+}
+.tb-ai-card .err {
+  color: #d33a2c;
+  opacity: 1;
+}
+.tb-ai-card .row {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.tb-ai-card .btn {
+  height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--btn-text);
+  font: 550 12px 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+  cursor: pointer;
+}
+.tb-ai-card .btn:hover {
+  background: var(--hover-veil);
+}
+.tb-ai-card .btn.primary {
+  background: #0285ff;
+  color: #fff;
+}
+.tb-ai-card .bar {
+  display: block;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: var(--hover-veil);
+}
+.tb-ai-card .bar i {
+  display: block;
+  height: 100%;
+  background: #0285ff;
+  transition: width 0.3s;
 }

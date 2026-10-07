@@ -1,6 +1,6 @@
 /* Ask a question (D-056, approved mockup .claude/research/ask-ui/): Beautiful
    UI "Chat" (https://www.beautifului.dev, MIT, (c) 2026 Shane Levine) in the
-   Analysis panel's place (thumbnails.css panel surface + Transitions.dev
+   Pages panel's place (D-059: the page neither moves nor is covered) (thumbnails.css panel surface + Transitions.dev
    "Panel reveal"): header, conversation (user bubble slides up 10px over
    300ms; reply sections fade-up 400ms cubic-bezier(0.23,1,0.32,1)), composer
    with the send arrow (ink with text, line-strong without, active:scale(.96)). */
@@ -12,9 +12,9 @@
   --accent: #0285ff;
   left: auto;
   right: 16px;
-  top: 92px;
+  top: 20px;
   bottom: 16px;
-  width: 320px;
+  width: 208px;
   padding: 0;
   overflow: hidden;
   z-index: 12;

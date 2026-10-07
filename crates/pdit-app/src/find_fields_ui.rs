@@ -131,7 +131,14 @@ impl FindFields {
         self.prepared.set(found.map(Rc::new));
     }
 
-    /// AI menu → Find form fields: the analysis's suggestions to review.
+    /// After the analysis (D-060): its suggestions open for review, if any.
+    pub fn review_prepared_quietly(self) {
+        if self.prepared.peek().is_some() {
+            self.review_prepared();
+        }
+    }
+
+    /// The analysis's suggestions to review.
     pub fn review_prepared(mut self) {
         let Some(found) = self.prepared.peek().clone() else {
             return consume_context::<PageTools>().show(

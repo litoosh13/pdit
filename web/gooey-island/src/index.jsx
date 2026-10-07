@@ -12,7 +12,9 @@ import { MetalFx, useMetalBend } from 'metal-fx';
 import './gooey-surface.css';
 import './format-bar.css';
 import './top-bar.css';
-import placeholderIcon from './icons/detective.svg';
+import aiIcon from './icons/cyborg.svg';
+import analyzeIcon from './icons/person-selecting-note.svg';
+import askIcon from './icons/comment-bubble.svg';
 import openIcon from './icons/folder-pen.svg';
 import newIcon from './icons/clipboard-new.svg';
 import saveIcon from './icons/cartoon-floppy-disk.svg';
@@ -110,18 +112,129 @@ function BarItem({ icon, label, onClick, disabled, pressed }) {
   );
 }
 
+// ---------- the AI menu (D-055, D-060) ----------
+
+/** Where the drops sit: a half circle under the round button (Gooey's plus-menu satellites), for 1 or 2. */
+const AI_RADIUS = 96;
+const AI_SPOTS = { 1: [90], 2: [124, 56] };
+const aiSpot = (n, i) => {
+  const a = ((AI_SPOTS[n] || AI_SPOTS[2])[i] * Math.PI) / 180;
+  return { x: Math.round(Math.cos(a) * AI_RADIUS), y: Math.round(Math.sin(a) * AI_RADIUS) };
+};
+const AI_ICONS = { analyze: analyzeIcon, reanalyze: analyzeIcon, ask: askIcon };
+
+/** The AI button's choices, dropping out of it like liquid (liquid-gooey "Morph"): the first time a card that
+ *  asks to download the models, afterwards the drops the app sends (`ai.drops`). It sits on the round button, next
+ *  to the bar (the bar clips its contents). The app gets the user's picks through the callbacks. */
+function AiMenu({ ai, open, setOpen, onAiPick, onAiDownload, onAiCancel }) {
+  const theme = useTheme();
+  const needs = !!ai?.needsModels;
+  const drops = ai?.drops || [];
+  const progress = ai?.progress; // [done, total] while downloading
+  const asking = open && needs;
+  const shown = open && !needs;
+  const mb = (n) => Math.round(n / 1e6);
+  useEffect(() => {
+    if (!open) return undefined;
+    const close = (e) => {
+      if (progress) return;
+      if (!e.target.closest('.tb-ai-menu, .tb-ai')) setOpen(false);
+    };
+    window.addEventListener('pointerdown', close, true);
+    return () => window.removeEventListener('pointerdown', close, true);
+  }, [open, progress, setOpen]);
+  return (
+    <div className={theme === 'dark' ? 'tb-ai-menu pdit-plus-menu is-dark' : 'tb-ai-menu pdit-plus-menu'}>
+      <Liquid blur={BLUR} contrast={CONTRAST} fill="var(--modal-bg)" shadow={theme === 'dark' ? SHADOWS.dark : SHADOWS.light}>
+        {/* Under the metal button: the liquid the drops and the card flow out of. */}
+        <Liquid.Item className="tb-ai-spot" x={0} y={0}>
+          <span className="tb-ai-anchor" />
+        </Liquid.Item>
+        {drops.map((d, i) => {
+          const { x, y } = aiSpot(drops.length, i);
+          return (
+            <Liquid.Item key={d.id} className="tb-ai-spot" x={shown ? x : 0} y={shown ? y : 0} transition="bouncy" delay={i * 45}>
+              <button
+                type="button"
+                className="tb-ai-drop"
+                aria-label={d.label}
+                title={d.title || d.label}
+                disabled={!!d.disabled || !shown}
+                style={{ opacity: shown ? 1 : 0 }}
+                onClick={() => { setOpen(false); onAiPick?.(d.id); }}
+                dangerouslySetInnerHTML={{ __html: AI_ICONS[d.id] || analyzeIcon }}
+              />
+            </Liquid.Item>
+          );
+        })}
+        <Liquid.Item className="tb-ai-card-spot" x={0} y={0} transition="bouncy" morph={{ shape: true }}>
+          <div className={asking ? 'tb-ai-card is-open' : 'tb-ai-card'} role={asking ? 'dialog' : undefined} aria-label="AI models">
+            {asking && (
+              <>
+                <b>pdit's AI needs its models first</b>
+                <span>
+                  About <b>760 MB</b>, downloaded once to this computer. Only the models — your PDFs never leave your
+                  computer.
+                </span>
+                {progress && (
+                  <>
+                    <span className="small">
+                      {progress[0] >= progress[1] && progress[1] > 0
+                        ? 'Getting ready…'
+                        : `Downloading… ${mb(progress[0])} of ${mb(progress[1])} MB`}
+                    </span>
+                    <span className="bar">
+                      <i style={{ width: `${progress[1] ? (progress[0] / progress[1]) * 100 : 0}%` }} />
+                    </span>
+                  </>
+                )}
+                {ai?.error && <span className="small err">The download stopped: {ai.error}. You can try again.</span>}
+                <span className="row">
+                  <button type="button" className="btn" onClick={() => (progress ? onAiCancel?.() : setOpen(false))}>
+                    {progress ? 'Cancel' : 'Not now'}
+                  </button>
+                  {!progress && (
+                    <button type="button" className="btn primary" onClick={() => onAiDownload?.()}>
+                      Download
+                    </button>
+                  )}
+                </span>
+              </>
+            )}
+          </div>
+        </Liquid.Item>
+      </Liquid>
+      {shown && (
+        <div className="tb-ai-captions">
+          {drops.map((d, i) => {
+            const { x, y } = aiSpot(drops.length, i);
+            return (
+              <span key={d.id} className={d.disabled ? 'tb-ai-cap is-off' : 'tb-ai-cap'} style={{ left: 22 + x, top: 22 + y + 26 }}>
+                {d.label}
+              </span>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** The top bar: the round metal button (the AI button, D-055: opens the AI menu),
  *  then Open, New, Pages, Light/Dark and Save. The bar is a dark pill in both
  *  themes, so the metal is pinned to its dark tuning. The bar's own wandering
  *  halo is off (it flashed outside the bar at load, user report); the round
  *  button keeps its glow, clipped to the pill. Its reflections on the items
  *  are off too: they drew a grey block beside "Open". */
-function TopBar({ hasDoc, pagesShown, onAi, onOpen, onNew, onSave, onTogglePages }) {
+function TopBar({ hasDoc, pagesShown, ai, onAi, onAiPick, onAiDownload, onAiCancel, onOpen, onNew, onSave, onTogglePages }) {
   const theme = useTheme();
+  const [aiOpen, setAiOpen] = useState(false);
+  useEffect(() => { if (!hasDoc) setAiOpen(false); }, [hasDoc]);
   const bar = useRef(null);
   useMetalBend(bar);
   const other = theme === 'dark' ? 'light' : 'dark';
   return (
+    <>
     <MetalFx ref={bar} variant="button" preset="chromatic" theme="dark" innerShadow disableGlow>
       <nav className="tb-bar" aria-label="pdit">
         <MetalFx variant="circle" preset="chromatic" theme="dark">
@@ -131,10 +244,11 @@ function TopBar({ hasDoc, pagesShown, onAi, onOpen, onNew, onSave, onTogglePages
             aria-label="AI"
             title={hasDoc ? 'AI' : 'AI — open a PDF first'}
             aria-haspopup="menu"
+            aria-expanded={aiOpen}
             disabled={!hasDoc}
-            onClick={onAi}
+            onClick={() => { setAiOpen((o) => !o); onAi?.(); }}
           >
-            <span className="tb-icon" aria-hidden="true" dangerouslySetInnerHTML={{ __html: placeholderIcon }} />
+            <span className="tb-icon" aria-hidden="true" dangerouslySetInnerHTML={{ __html: aiIcon }} />
           </button>
         </MetalFx>
         <div className="tb-items">
@@ -156,6 +270,10 @@ function TopBar({ hasDoc, pagesShown, onAi, onOpen, onNew, onSave, onTogglePages
         </div>
       </nav>
     </MetalFx>
+    {hasDoc && (
+      <AiMenu ai={ai} open={aiOpen} setOpen={setAiOpen} onAiPick={onAiPick} onAiDownload={onAiDownload} onAiCancel={onAiCancel} />
+    )}
+    </>
   );
 }
 
@@ -165,7 +283,7 @@ export function mountTopBar(element, callbacks = {}) {
   element.classList.add('pdit-top-bar');
   const root = createRoot(element);
   const render = (state) => root.render(<TopBar {...state} {...callbacks} />);
-  render({ hasDoc: false, pagesShown: true });
+  render({ hasDoc: false, pagesShown: true, ai: null });
   return { update: render, unmount: () => root.unmount() };
 }
 
