@@ -40,21 +40,26 @@ pub fn subset_for_text(font: &[u8], text: &str) -> Result<Vec<u8>, Error> {
 
 /// Whether `font` has a glyph for every character of `text` (spaces aside).
 pub fn covers(font: &[u8], text: &str) -> bool {
-    let Ok(data) = ReadScope::new(font).read::<FontData<'_>>() else {
-        return false;
-    };
-    let Ok(provider) = data.table_provider(0) else {
-        return false;
-    };
-    let Ok(mut parsed) = Font::new(provider) else {
-        return false;
-    };
-    text.chars().filter(|c| !c.is_whitespace()).all(|c| {
+    has_all_glyphs(font, text) == Some(true)
+}
+
+/// Whether `font` can be read and lacks a glyph for some character of `text`
+/// (spaces aside). An unreadable font (CFF, a bare CID font) says nothing.
+pub fn lacks_glyph(font: &[u8], text: &str) -> bool {
+    has_all_glyphs(font, text) == Some(false)
+}
+
+/// `None` when the font's tables can't be read.
+fn has_all_glyphs(font: &[u8], text: &str) -> Option<bool> {
+    let data = ReadScope::new(font).read::<FontData<'_>>().ok()?;
+    let provider = data.table_provider(0).ok()?;
+    let mut parsed = Font::new(provider).ok()?;
+    Some(text.chars().filter(|c| !c.is_whitespace()).all(|c| {
         parsed
             .lookup_glyph_index(c, MatchingPresentation::NotRequired, None)
             .0
             != 0
-    })
+    }))
 }
 
 /// Gives a subset its own PostScript name, as PDF subset tags do

@@ -17402,8 +17402,10 @@ impl PdfiumLibraryBindings for WasmPdfiumBindings {
                     .map(usize::from_le_bytes)
                     .unwrap_or(0);
 
-                if *out_buflen > 0 {
-                    state.copy_struct_from_pdfium(buffer_ptr, *out_buflen as usize, buffer);
+                // pdit patch: the length-only call passes no buffer (null, 0); copy only
+                // into a real buffer, and no more than it holds.
+                if *out_buflen > 0 && buflen > 0 {
+                    state.copy_struct_from_pdfium(buffer_ptr, (*out_buflen).min(buflen), buffer);
                 }
             }
         }

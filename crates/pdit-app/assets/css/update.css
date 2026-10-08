@@ -1,5 +1,5 @@
 /* The update prompt (D-058, approved mockup .claude/research/update-ui/): the
-   app's toast pill (toast.css) placed under the top bar, so it never meets the
+   app's toast pill (toast.css) placed near the top, so it never meets the
    Undo toast, with Selection Actions buttons; and its row at the bottom of the
    tools rail (tools.css). */
 
@@ -26,7 +26,7 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* The rail's row (until the user's Koboyo icon arrives: a dot). */
+/* The rail's row: a dot (the update signal). */
 .pdit-rail .pdit-rail-grow {
   flex: 1;
 }
@@ -40,9 +40,6 @@
 }
 
 /* ---- About (the rail's last section; approved mockup .claude/research/about-ui/) ---- */
-.pdit-fly.is-about {
-  width: 248px;
-}
 .about-id {
   display: flex;
   align-items: center;
@@ -102,14 +99,6 @@
 }
 .about-update .ok {
   color: #189a4d;
-}
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme='light']) .about-update .ok {
-    color: #5fd38d;
-  }
-}
-:root[data-theme='dark'] .about-update .ok {
-  color: #5fd38d;
 }
 .about-links .sb-item .ext {
   margin-left: auto;

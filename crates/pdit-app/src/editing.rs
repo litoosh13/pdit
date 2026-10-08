@@ -1,23 +1,24 @@
-//! Click-to-edit (D-019): the selected text line, and Beautiful UI's
-//! "Selection Actions" bar (assets/css/selection-actions.css) ported to Dioxus.
-//! Since D-035 the bar's text row and the format bar sit together in one edit
-//! panel beside the page (assets/css/edit-panel.css); the line keeps a grey
-//! outline and a thin connector leads to the panel, so nothing covers the text.
+//! Click-to-edit (D-019): the selected text line keeps a grey outline; since
+//! the redesign (D-062) its format bar floats under the centre bar and
+//! Devigner's MenuDock sits at the line (island `mountSelectionDock`): Edit,
+//! Comment, Copy, Delete, More ▸ Add link. Editing is inline (user 2026-10-08):
+//! Edit or a double-click puts a text box over the paragraph on the page;
+//! Enter or a click outside applies it (one Undo), Esc leaves it unchanged.
+//! Look: assets/css/edit-panel.css.
 
 use dioxus::prelude::*;
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 use wasm_bindgen::JsCast;
+use wasm_bindgen::prelude::*;
 
 const SELECTION_CSS: Asset = asset!("/assets/css/selection-actions.css");
 const ERROR_CSS: Asset = asset!("/assets/css/error-shake.css");
 const PANEL_CSS: Asset = asset!("/assets/css/edit-panel.css");
 const IMAGE_SELECT_CSS: Asset = asset!("/assets/css/image-select.css");
-/// Shown beneath the bar when no font can show the typed characters (D-019).
-const UNSUPPORTED_MESSAGE: &str = "These characters can't be shown in this document.";
-const ICON_SEND: &str = include_str!("../assets/icons/inkbrush-arrow-up.svg");
-const ICON_KEEP: &str = include_str!("../assets/icons/inkbrush-check.svg");
-const ICON_DISCARD: &str = include_str!("../assets/icons/inkbrush-close-cross.svg");
+const ICON_TEXT_CHANGED: &str = include_str!("../assets/icons/devigner/Pen2.svg");
+const UNSUPPORTED: &str = "These characters can't be shown in this document.";
 
 /// The text the user clicked: a single line, or a whole wrapped paragraph block
 /// (reflow). `object_index` is the anchor (topmost line, used for style/traits);
@@ -95,6 +96,8 @@ pub struct Editing {
     pub fallback_font: Signal<Option<Rc<Vec<u8>>>>,
     /// The selected line's style, shown and changed by the format bar (D-027).
     pub style: Signal<Option<pdit_core::TextStyle>>,
+    /// Typing in the inline box over the selected text.
+    pub typing: Signal<bool>,
 }
 
 impl Editing {
@@ -104,7 +107,91 @@ impl Editing {
             page_versions: Signal::new(HashMap::new()),
             fallback_font: Signal::new(None),
             style: Signal::new(None),
+            typing: Signal::new(false),
         })
+    }
+
+    /// Starts typing in the selected text (double-click, Edit, "Edit text").
+    pub fn open_edit(mut self) {
+        if self.state.peek().selection.is_some() {
+            self.typing.set(true);
+        }
+    }
+
+    /// Enter / a click outside while typing: applies the typed text as one
+    /// change with Undo; nothing changed closes the box.
+    pub fn commit(mut self) {
+        let state = self.state.peek().clone();
+        let Some(selection) = state.selection else {
+            self.typing.set(false);
+            return;
+        };
+        if state.draft == selection.text {
+            self.typing.set(false);
+            if selection.adding.is_some() {
+                self.cancel();
+            }
+            return;
+        }
+        // Desktop: a text-only change to existing text goes to MuPDF (D-065); anything else, or when MuPDF
+        // declines, the PDFium edit below.
+        let restyled = *self.style.peek()
+            != pdit_core::text_style(selection.page, selection.object_index).ok();
+        if crate::ai_ui::desktop::available() && selection.adding.is_none() && !restyled {
+            spawn(async move {
+                if let Err(error) = self.edit_with_mupdf(&selection, &state.draft).await {
+                    crate::log(&format!("pdit: MuPDF edit not used: {error}"));
+                    self.preview_and_keep();
+                }
+            });
+            return;
+        }
+        self.preview_and_keep();
+    }
+
+    /// Replaces the selected paragraph with `text` in the desktop app's MuPDF (D-065): the document goes to the
+    /// desktop side and comes back edited; the page is shown again, with one Undo.
+    async fn edit_with_mupdf(self, selection: &Selection, text: &str) -> Result<(), String> {
+        let tools = consume_context::<crate::page_tools::PageTools>();
+        let before = tools.snapshot().ok_or("no snapshot")?;
+        let height = pdit_core::page_ops::page_sizes()
+            .map_err(|e| e.to_string())?
+            .get(usize::from(selection.page))
+            .map_or(842.0, |s| s.1);
+        // A point just inside the paragraph's first line, from the page's top-left (MuPDF's page space).
+        // ponytail: ignores the page's rotation and a crop box not at the origin.
+        let [left, _, _, top] = selection.bounds;
+        let encode = |s: &str| String::from(js_sys::encode_uri_component(s));
+        let headers = [
+            ("x-page", selection.page.to_string()),
+            ("x-x", (left + 2.0).to_string()),
+            ("x-y", (height - top + 2.0).to_string()),
+            ("x-expected", encode(&selection.text)),
+            ("x-text", encode(text)),
+        ];
+        let edited = crate::ai_ui::desktop::invoke_raw("edit_paragraph", &before, &headers)
+            .await
+            .map_err(|e| e.as_string().unwrap_or_else(|| format!("{e:?}")))?;
+        let bytes = js_sys::Uint8Array::new(&edited).to_vec();
+        if bytes.is_empty() {
+            return Err("no document came back".into());
+        }
+        tools.apply_since(before, "Text changed", ICON_TEXT_CHANGED, move || {
+            pdit_core::page_ops::restore(bytes).map(|_| ())
+        });
+        Ok(())
+    }
+
+    /// Esc while typing: the box closes, the text stays as it was.
+    pub fn stop_typing(mut self) {
+        clear_error();
+        self.typing.set(false);
+        let state = self.state.peek().clone();
+        match state.selection {
+            Some(sel) if sel.adding.is_some() => self.cancel(),
+            Some(sel) => self.state.with_mut(|s| s.draft = sel.text),
+            None => {}
+        }
     }
 
     pub fn redraw(mut self, page: u16) {
@@ -115,6 +202,11 @@ impl Editing {
     /// wrapped sentence, reflow), or closes the bar if there is no text there.
     /// Any pending preview is discarded first.
     pub fn select_at(mut self, page: u16, x: f32, y: f32) {
+        // The first click outside the box while typing only ends the typing.
+        if *self.typing.peek() {
+            self.commit();
+            return;
+        }
         self.cancel();
         if let Some(selection) = paragraph_selection(page, x, y) {
             self.style
@@ -130,6 +222,7 @@ impl Editing {
     /// Add text (D-026): opens the bar, empty, at (x, y) PDF points on `page`.
     pub fn start_add(mut self, page: u16, x: f32, y: f32) {
         self.cancel();
+        self.typing.set(true);
         self.style.set(pdit_core::style_near(page, x, y).ok());
         self.state.set(EditState {
             draft: String::new(),
@@ -148,6 +241,7 @@ impl Editing {
     /// Closes the bar without changing anything (Escape / click outside).
     pub fn cancel(mut self) {
         clear_error();
+        self.typing.set(false);
         let state = self.state.peek().clone();
         if let (Some(selection), BarMode::Result) = (&state.selection, state.mode) {
             if let Err(error) = pdit_core::discard_edit() {
@@ -159,9 +253,8 @@ impl Editing {
         self.style.set(None);
     }
 
-    /// A change from the format bar (D-027): previewed right away, like an
-    /// edit, so Keep and Discard apply to it. New text with nothing typed yet
-    /// only remembers the style.
+    /// A change from the format bar (D-027): applied right away (with Undo),
+    /// like an edit. New text with nothing typed yet only remembers the style.
     pub fn restyle(self, style: pdit_core::TextStyle) {
         let mut this = self;
         this.style.set(Some(style));
@@ -173,13 +266,20 @@ impl Editing {
             return;
         }
         clear_error();
-        self.preview();
+        self.preview_and_keep();
     }
 
-    /// Enter / send: previews the draft on the page. The look-alike of the
+    /// Applies the draft as one change: a snapshot for Undo, the preview,
+    /// then Keep and the Undo toast (the centre bar's Undo).
+    fn preview_and_keep(self) {
+        let before = consume_context::<crate::page_tools::PageTools>().snapshot();
+        self.preview(before);
+    }
+
+    /// Previews the draft on the page, then keeps it with `undo`. The look-alike of the
     /// line's font (D-028) is loaded first when it isn't yet, so a font that
     /// can't show the text falls back to it rather than to Noto Sans.
-    fn preview(self) {
+    fn preview(self, undo: Option<Rc<Vec<u8>>>) {
         let state = self.state.peek().clone();
         let Some(selection) = state.selection else {
             return;
@@ -216,12 +316,16 @@ impl Editing {
             };
             // Apply only if the selection is still the one this was for.
             if self.state.peek().selection.as_ref() == Some(&selection) {
-                self.apply_preview(look_alike);
+                self.apply_preview(look_alike, undo);
             }
         });
     }
 
-    fn apply_preview(mut self, look_alike: Option<(Rc<Vec<u8>>, bool, bool)>) {
+    fn apply_preview(
+        mut self,
+        look_alike: Option<(Rc<Vec<u8>>, bool, bool)>,
+        undo: Option<Rc<Vec<u8>>>,
+    ) {
         let state = self.state.peek().clone();
         let Some(selection) = state.selection else {
             return;
@@ -294,6 +398,13 @@ impl Editing {
                     }
                 });
                 self.redraw(selection.page);
+                self.typing.set(false);
+                self.keep();
+                consume_context::<crate::page_tools::PageTools>().show(
+                    "Text changed".to_owned(),
+                    ICON_TEXT_CHANGED,
+                    undo,
+                );
             }
             Err(pdit_core::Error::UnsupportedCharacters { .. }) => show_error(),
             Err(error) => crate::log(&format!("pdit: {error}")),
@@ -341,61 +452,6 @@ impl Editing {
             self.keep();
         }
     }
-
-    /// Discard: the old text comes back; the bar returns to editing.
-    fn discard(mut self) {
-        let state = self.state.peek().clone();
-        if let Err(error) = pdit_core::discard_edit() {
-            crate::log(&format!("pdit: could not discard the edit: {error}"));
-        }
-        if let Some(selection) = state.selection {
-            if let Some((x, y)) = selection.adding {
-                // The new text is removed; what was typed stays in the bar.
-                self.state.with_mut(|s| {
-                    s.mode = BarMode::Editing;
-                    if let Some(sel) = s.selection.as_mut() {
-                        sel.bounds = [x, y, x, y];
-                    }
-                });
-                self.redraw(selection.page);
-                return;
-            }
-            if selection.object_indices.len() > 1 {
-                // A re-wrapped block was restored; re-find it at its top-left.
-                let (ax, ay) = (selection.bounds[0] + 2.0, selection.bounds[3] - 2.0);
-                if let Some(fresh) = paragraph_selection(selection.page, ax, ay) {
-                    self.style
-                        .set(pdit_core::text_style(selection.page, fresh.object_index).ok());
-                    self.state.with_mut(|s| {
-                        s.mode = BarMode::Editing;
-                        s.draft = fresh.text.clone();
-                        s.selection = Some(fresh);
-                    });
-                    self.redraw(selection.page);
-                    return;
-                }
-            }
-            let original = pdit_core::text_lines(selection.page)
-                .ok()
-                .and_then(|lines| {
-                    lines
-                        .into_iter()
-                        .find(|l| l.object_index == selection.object_index)
-                });
-            self.state.with_mut(|s| {
-                s.mode = BarMode::Editing;
-                if let (Some(sel), Some(line)) = (s.selection.as_mut(), original) {
-                    sel.text = line.text.clone();
-                    sel.bounds = line.bounds;
-                    s.draft = line.text;
-                }
-            });
-            // The original's look comes back too.
-            self.style
-                .set(pdit_core::text_style(selection.page, selection.object_index).ok());
-            self.redraw(selection.page);
-        }
-    }
 }
 
 /// Loads the editing CSS. Rendered once by the app.
@@ -410,13 +466,13 @@ pub fn EditingStyles() -> Element {
 }
 
 /// The selected line's outline on page `page` (D-035), in the page slot's
-/// coordinates (`scale` CSS px per PDF point). The editing happens in
-/// [`EditPanel`], beside the page.
+/// coordinates (`scale` CSS px per PDF point); while typing, the inline box
+/// over the text (white, in the text's size, wrapping at the block's width).
 #[component]
 pub fn SelectionOverlay(page: u16, page_width_pt: f32, page_height_pt: f32, scale: f32) -> Element {
-    let _ = page_width_pt;
-    let editing = use_context::<Editing>();
+    let mut editing = use_context::<Editing>();
     let state = editing.state.read().clone();
+    let typing = *editing.typing.read();
     let Some(selection) = state.selection.filter(|s| s.page == page) else {
         return rsx! {};
     };
@@ -428,52 +484,130 @@ pub fn SelectionOverlay(page: u16, page_width_pt: f32, page_height_pt: f32, scal
     let width = (right - left) * scale + 2.0 * pad;
     let height = (top - bottom) * scale + 2.0 * pad;
 
+    let size = editing.style.read().map_or(12.0, |s| s.size) * scale;
+    // New text has no width yet: up to the page's right margin.
+    let width = if selection.adding.is_some() {
+        ((page_width_pt - left) * scale - 24.0).max(120.0)
+    } else {
+        width
+    };
+    let line = size * 1.2;
+    let draft = state.draft.clone();
+    // One line stays one line in the PDF: the box grows sideways, no wrapping.
+    let one_line = selection.object_indices.len() <= 1;
+
     rsx! {
         div { class: "sa-root",
             div {
                 class: "sa-highlight pdit-line-outline",
                 style: "left: {x}px; top: {y}px; width: {width}px; height: {height}px;",
             }
+            if typing {
+                div {
+                    class: "t-input-wrap pdit-inline-wrap",
+                    style: "left: {x}px; top: {y}px; width: {width}px;",
+                    // Clicks inside the box stay inside (no reselect, no image pick).
+                    onclick: move |event| event.stop_propagation(),
+                    onpointerdown: move |event| event.stop_propagation(),
+                    ondoubleclick: move |event| event.stop_propagation(),
+                    textarea {
+                        class: "t-input pdit-inline-edit",
+                        wrap: if one_line { "off" } else { "soft" },
+                        style: "font-size: {size}px; line-height: {line}px; min-height: {height}px;",
+                        value: "{draft}",
+                        aria_label: "Edit text",
+                        onmounted: move |event| {
+                            if let Some(el) = event.data().downcast::<web_sys::Element>() {
+                                fit_height(el);
+                                if let Some(area) = el.dyn_ref::<web_sys::HtmlTextAreaElement>() {
+                                    let _ = area.focus();
+                                    let end = area.value().len() as u32;
+                                    let _ = area.set_selection_range(end, end);
+                                }
+                            }
+                        },
+                        oninput: move |event| {
+                            clear_error();
+                            editing.state.with_mut(|s| s.draft = event.value());
+                            if let Some(el) = web_sys::window()
+                                .and_then(|w| w.document())
+                                .and_then(|d| d.query_selector(".pdit-inline-edit").ok().flatten())
+                            {
+                                fit_height(&el);
+                            }
+                        },
+                        onkeydown: move |event| {
+                            if event.key() == Key::Enter && !event.modifiers().shift() {
+                                event.prevent_default();
+                                editing.commit();
+                            }
+                        },
+                    }
+                    p { class: "t-error-msg sa-error-msg", role: "alert", "{UNSUPPORTED}" }
+                }
+            }
         }
     }
 }
 
-/// Where the edit panel sits (D-035), measured from the page after each change.
-#[derive(Clone, Copy, PartialEq, Default)]
-struct Place {
-    left: f64,
-    top: f64,
-    /// Narrow window: docked at the bottom of the page area (edit-panel.css).
-    docked: bool,
-    /// Connector from the line's outline to the text row: x1, y1, x2, y2.
-    link: Option<[f64; 4]>,
+/// Grows the inline box to its text, so nothing scrolls inside it (sideways
+/// too when it doesn't wrap).
+fn fit_height(el: &web_sys::Element) {
+    if let Some(el) = el.dyn_ref::<web_sys::HtmlElement>() {
+        let style = el.style();
+        let _ = style.set_property("height", "auto");
+        let _ = style.set_property("height", &format!("{}px", el.scroll_height()));
+        if el.get_attribute("wrap").as_deref() == Some("off") {
+            let _ = style.set_property("width", "100%");
+            if el.scroll_width() > el.client_width() {
+                let _ = style.set_property("width", &format!("{}px", el.scroll_width() + 8));
+            }
+        }
+    }
 }
 
-/// From this window width the panel is a column beside the page; below it,
-/// it docks at the bottom (edit-panel.css uses the same width).
-const WIDE_MIN: f64 = 1181.0;
-/// Below the top bar (20 px + 56 px + 20 px, D-031).
-const TOP_MIN: f64 = 96.0;
-/// Between the page and the panel.
-const GAP: f64 = 20.0;
-
-/// The edit panel (D-035): one box with the format bar (a Gooey island,
-/// inline) and the Selection Actions text row, beside the page, with a thin
-/// connector to the selected line. Always mounted, so the island stays loaded;
-/// shown while a line is selected.
+/// The selection's bars (D-062, approved mockup .claude/research/canva-ui/):
+/// the format bar (and Link) in a toolbar under the centre bar, and Devigner's
+/// MenuDock just above the selected line — the dock grows upward when it opens,
+/// so above the line it never covers the text being edited; below the line only
+/// when there is no room above. Always mounted, so the island stays loaded.
 #[component]
-pub fn EditPanel() -> Element {
-    let editing = use_context::<Editing>();
-    let place = use_signal(Place::default);
+pub fn SelectionUi() -> Element {
+    let mut editing = use_context::<Editing>();
     let state = editing.state.read().clone();
     let open = state.selection.is_some();
+    let mut at = use_signal(|| None::<(f64, f64, bool)>);
+    let update = use_hook(|| Rc::new(RefCell::new(None::<js_sys::Function>)));
+    let mut ready = use_signal(|| false);
 
-    // Re-place after each change of the selection or mode, once it is drawn,
-    // and again when the page list has made room (Panel reveal, 400 ms). A new
-    // selection also scrolls its line into view above a docked panel.
+    // Island callbacks go through Dioxus callbacks (contexts, spawn).
+    let on_edit = use_callback(move |_: ()| editing.open_edit());
+    let on_delete = use_callback(move |_: ()| {
+        editing.state.with_mut(|s| s.draft = String::new());
+        editing.preview_and_keep();
+    });
+    let line_action = move |action: crate::context_menu::Action| {
+        let Some(sel) = editing.state.peek().selection.clone() else {
+            return;
+        };
+        let [left, bottom, right, top] = sel.bounds;
+        let (x, y) = match action {
+            // A note beside the line's end, level with its top.
+            crate::context_menu::Action::AddNote => (right + 4.0, top),
+            // A point inside the line.
+            _ => (left + 1.0, (bottom + top) / 2.0),
+        };
+        editing.cancel();
+        crate::context_menu::run(action, sel.page, x, y);
+    };
+    let on_comment = use_callback(move |_: ()| line_action(crate::context_menu::Action::AddNote));
+    let on_link =
+        use_callback(move |_: ()| line_action(crate::context_menu::Action::AddLinkToLine));
+
+    // Follow the line: after each change, and on scroll / resize.
     use_effect(move || {
         let _ = editing.state.read();
-        schedule_place(place, true);
+        crate::page_tools::next_frame(move || at.set(measure()));
     });
     use_hook(move || {
         let Some(window) = web_sys::window() else {
@@ -481,7 +615,7 @@ pub fn EditPanel() -> Element {
         };
         let follow = wasm_bindgen::closure::Closure::<dyn FnMut()>::new(move || {
             if editing.state.peek().selection.is_some() {
-                place_now(place, false);
+                at.set(measure());
             }
         });
         let options = web_sys::AddEventListenerOptions::new();
@@ -497,205 +631,126 @@ pub fn EditPanel() -> Element {
         follow.forget();
     });
 
-    let at = place();
-    let class = if at.docked {
-        "pdit-edit-panel pdit-plus-menu sa-root is-docked"
-    } else {
-        "pdit-edit-panel pdit-plus-menu sa-root"
-    };
-    let style = if open && !at.docked {
-        format!("left: {}px; top: {}px;", at.left.round(), at.top.round())
-    } else {
-        String::new()
-    };
+    // The dock's state.
+    let push = update.clone();
+    use_effect(use_reactive!(|state| {
+        let _ = ready();
+        let Some(update) = push.borrow().clone() else {
+            return;
+        };
+        let o = js_sys::Object::new();
+        let set = |k: &str, v: JsValue| {
+            let _ = js_sys::Reflect::set(&o, &k.into(), &v);
+        };
+        if let Some(sel) = state.selection.as_ref() {
+            set(
+                "selKey",
+                format!("{}-{}-{}", sel.page, sel.object_index, sel.adding.is_some()).into(),
+            );
+            set("text", sel.text.as_str().into());
+            set("adding", sel.adding.is_some().into());
+        }
+        let _ = update.call1(&JsValue::NULL, &o);
+    }));
 
+    let dock_style = match at() {
+        Some((x, y, above)) if open => {
+            if above {
+                format!("left: {x:.0}px; bottom: {y:.0}px;")
+            } else {
+                format!("left: {x:.0}px; top: {y:.0}px;")
+            }
+        }
+        _ => String::new(),
+    };
+    let link = move |_| line_action(crate::context_menu::Action::AddLinkToLine);
+    let adding = state.selection.as_ref().is_some_and(|s| s.adding.is_some());
     rsx! {
         div {
-            class,
+            class: "pdit-sel-toolbar",
             "data-open": if open { "true" } else { "false" },
-            style,
-            div { class: "pdit-edit-box",
-                crate::format_bar::FormatBar {}
-                if let Some(selection) = state.selection.as_ref() {
-                    div { class: "pdit-edit-text",
-                        div { class: "sa-anchor t-input-wrap",
-                            Bar {
-                                mode: state.mode,
-                                draft: state.draft.clone(),
-                                adding: selection.adding.is_some(),
-                                on_resize: move |_| schedule_place(place, false),
-                            }
-                            p { class: "t-error-msg sa-error-msg", role: "alert", {UNSUPPORTED_MESSAGE} }
+            crate::format_bar::FormatBar {}
+            if !adding {
+                span { class: "pdit-sel-sep" }
+                button { class: "pdit-sel-chip", r#type: "button", onclick: link, "Link" }
+            }
+        }
+        div {
+            class: "pdit-sel-dock",
+            "data-open": if open && at().is_some() { "true" } else { "false" },
+            style: "{dock_style}",
+            onmounted: move |event| {
+                let update = update.clone();
+                async move {
+                    let Some(element) = event.data().downcast::<web_sys::Element>().cloned() else {
+                        return;
+                    };
+                    let options = js_sys::Object::new();
+                    let on = |name: &str, f: JsValue| {
+                        let _ = js_sys::Reflect::set(&options, &name.into(), &f);
+                    };
+                    let unit = |cb: Callback<()>| {
+                        Closure::<dyn FnMut()>::new(move || cb.call(())).into_js_value()
+                    };
+                    on("onEdit", unit(on_edit));
+                    on("onDelete", unit(on_delete));
+                    on("onComment", unit(on_comment));
+                    on("onLink", unit(on_link));
+                    match crate::island::mount_with(&element, "mountSelectionDock", &options).await {
+                        Ok(controller) => {
+                            *update.borrow_mut() = js_sys::Reflect::get(&controller, &"update".into())
+                                .ok()
+                                .and_then(|f| f.dyn_into::<js_sys::Function>().ok());
+                            ready.set(true);
                         }
+                        Err(error) => crate::log(&format!("pdit: could not load the selection dock: {error:?}")),
                     }
                 }
-            }
-        }
-        if let (true, Some([x1, y1, x2, y2])) = (open, at.link) {
-            svg { class: "pdit-edit-link", "aria-hidden": "true",
-                line { x1: "{x1}", y1: "{y1}", x2: "{x2}", y2: "{y2}" }
-                circle { cx: "{x1}", cy: "{y1}", r: "2.5" }
-                circle { cx: "{x2}", cy: "{y2}", r: "2.5" }
-            }
+            },
         }
     }
 }
 
-/// Places the panel on the next frame (after the DOM shows the change) and
-/// once more after the page list's 400 ms move.
-fn schedule_place(place: Signal<Place>, reveal: bool) {
-    let Some(window) = web_sys::window() else {
-        return;
-    };
-    let now = wasm_bindgen::closure::Closure::once_into_js(move || place_now(place, reveal));
-    let _ = window.request_animation_frame(now.unchecked_ref());
-    set_timeout(&window, 420.0, move || place_now(place, false));
-}
-
-fn place_now(mut place: Signal<Place>, reveal: bool) {
-    if let Some(next) = measure(reveal)
-        && *place.peek() != next
-    {
-        place.set(next);
-    }
-}
-
-/// Where the panel goes for the selected line on screen now. `reveal`: scroll
-/// the line into view above a docked panel (only for a new selection, never
-/// while the user scrolls).
-fn measure(reveal: bool) -> Option<Place> {
+/// Where the dock goes for the selected line on screen now: its centre x and,
+/// above the line, the distance from the window's bottom to its foot (the dock
+/// grows upward); below it (no room above), its top. `None` without an outline.
+fn measure() -> Option<(f64, f64, bool)> {
     let window = web_sys::window()?;
-    let document = window.document()?;
-    let outline = document.query_selector(".pdit-line-outline").ok()??;
-    let page = outline.closest(".page").ok()??;
-    let panel = document.query_selector(".pdit-edit-panel").ok()??;
-    let text = document.query_selector(".pdit-edit-text").ok()??;
-    let view_width = window.inner_width().ok()?.as_f64()?;
-    let view_height = window.inner_height().ok()?.as_f64()?;
+    let outline = window
+        .document()?
+        .query_selector(".pdit-line-outline")
+        .ok()??;
     let line = outline.get_bounding_client_rect();
-    let page = page.get_bounding_client_rect();
-    let box_rect = panel.get_bounding_client_rect();
-    let row = text.get_bounding_client_rect();
-    let middle = line.top() + line.height() / 2.0;
-
-    if view_width < WIDE_MIN {
-        if reveal {
-            // Where the docked panel's top is (20 px above the window's bottom,
-            // edit-panel.css), even if it has not moved there yet.
-            let above = view_height - 20.0 - box_rect.height() - 24.0;
-            if line.bottom() > above {
-                window.scroll_by_with_x_and_y(0.0, line.bottom() - above);
-            } else if line.top() < TOP_MIN {
-                window.scroll_by_with_x_and_y(0.0, line.top() - TOP_MIN - 24.0);
-            }
-        }
-        return Some(Place {
-            docked: true,
-            ..Place::default()
-        });
+    let view_w = window.inner_width().ok()?.as_f64()?;
+    let view_h = window.inner_height().ok()?.as_f64()?;
+    let x = (line.left() + line.width() / 2.0).clamp(160.0, view_w - 160.0);
+    // Room above: below the centre bar and the toolbar (≈ 110 px), plus the dock.
+    if line.top() > 170.0 {
+        Some((x, view_h - line.top() + 10.0, true))
+    } else {
+        Some((x, line.bottom() + 10.0, false))
     }
-
-    let row_middle = row.top() - box_rect.top() + row.height() / 2.0;
-    let left = (page.right() + GAP).min(view_width - box_rect.width() - 16.0);
-    let lowest = (view_height - box_rect.height() - 16.0).max(TOP_MIN);
-    let top = (middle - row_middle).clamp(TOP_MIN, lowest);
-    Some(Place {
-        left,
-        top,
-        docked: false,
-        link: Some([line.right(), middle, left, top + row_middle]),
-    })
-}
-
-#[component]
-fn Bar(mode: BarMode, draft: String, adding: bool, on_resize: EventHandler<()>) -> Element {
-    let mut editing = use_context::<Editing>();
-    rsx! {
-        div { class: "sa-bar t-input",
-            div { class: "sa-content", key: "{mode:?}",
-                match mode {
-                    // D-035: a text field that wraps and grows, so a long line
-                    // is shown whole; Enter previews, as the source's form did.
-                    BarMode::Editing => rsx! {
-                        form {
-                            class: "sa-form",
-                            onsubmit: move |event| {
-                                event.prevent_default();
-                                editing.preview();
-                            },
-                            textarea {
-                                class: "sa-input",
-                                rows: "1",
-                                "aria-label": if adding { "New text" } else { "Edit text" },
-                                placeholder: if adding { "Type new text…" } else { "" },
-                                value: "{draft}",
-                                autofocus: true,
-                                onmounted: move |event| async move {
-                                    grow_text();
-                                    on_resize.call(());
-                                    let _ = event.data().set_focus(true).await;
-                                },
-                                oninput: move |event| {
-                                    clear_error();
-                                    editing.state.with_mut(|s| s.draft = event.value());
-                                    grow_text();
-                                    on_resize.call(());
-                                },
-                                onkeydown: move |event| {
-                                    if event.key() == Key::Enter {
-                                        event.prevent_default();
-                                        editing.preview();
-                                    }
-                                },
-                            }
-                        }
-                        button {
-                            r#type: "button",
-                            class: "sa-send",
-                            "aria-label": "Preview edit",
-                            onclick: move |_| editing.preview(),
-                            span { dangerous_inner_html: ICON_SEND, style: "display: contents" }
-                        }
-                    },
-                    BarMode::Result => rsx! {
-                        button {
-                            r#type: "button",
-                            class: "sa-primary",
-                            onclick: move |_| editing.keep(),
-                            span { dangerous_inner_html: ICON_KEEP, style: "display: contents" }
-                            "Keep"
-                        }
-                        button {
-                            r#type: "button",
-                            class: "sa-control",
-                            onclick: move |_| editing.discard(),
-                            span { dangerous_inner_html: ICON_DISCARD, style: "display: contents" }
-                            "Discard"
-                        }
-                    },
-                }
-            }
-        }
-    }
-}
-
-/// Fits the text field's height to its text (D-035).
-fn grow_text() {
-    let Some(field) = web_sys::window()
-        .and_then(|w| w.document())
-        .and_then(|d| d.query_selector(".pdit-edit-text textarea").ok().flatten())
-        .and_then(|e| e.dyn_into::<web_sys::HtmlElement>().ok())
-    else {
-        return;
-    };
-    let style = field.style();
-    let _ = style.set_property("height", "auto");
-    let _ = style.set_property("height", &format!("{}px", field.scroll_height()));
 }
 
 /// Closes the bar on Escape, or on a pointer press outside the bar and outside
 /// any page (a press on a page selects a line or closes the bar itself).
 pub fn use_close_on_outside(editing: Editing) {
+    // Window listeners run outside Dioxus's runtime; applying an edit needs it
+    // (contexts, spawn), so they go through callbacks.
+    let outside = use_callback(move |_: ()| {
+        if *editing.typing.peek() {
+            editing.commit();
+        } else {
+            editing.cancel();
+        }
+    });
+    let escape = use_callback(move |_: ()| {
+        if *editing.typing.peek() {
+            editing.stop_typing();
+        } else {
+            editing.cancel();
+        }
+    });
     use_hook(|| {
         let Some(window) = web_sys::window() else {
             return;
@@ -706,20 +761,20 @@ pub fn use_close_on_outside(editing: Editing) {
                     .target()
                     .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
                     .and_then(|el| {
-                        el.closest(".sa-anchor, .page, .pdit-plus-menu, .pdit-edit-panel, .pdit-top-bar, .cm-menu")
+                        el.closest(".sa-anchor, .page, .pdit-plus-menu, .pdit-sel-toolbar, .pdit-sel-dock, .pdit-frame, .cm-menu")
                             .ok()
                             .flatten()
                     })
                     .is_some();
                 if !inside && editing.state.peek().selection.is_some() {
-                    editing.cancel();
+                    outside.call(());
                 }
             },
         );
         let on_key = wasm_bindgen::closure::Closure::<dyn FnMut(web_sys::KeyboardEvent)>::new(
             move |event: web_sys::KeyboardEvent| {
                 if event.key() == "Escape" && editing.state.peek().selection.is_some() {
-                    editing.cancel();
+                    escape.call(());
                 }
             },
         );
@@ -794,8 +849,8 @@ fn cancel_revert(window: &web_sys::Window) {
 fn error_elements() -> Option<(web_sys::Window, web_sys::Element, web_sys::Element)> {
     let window = web_sys::window()?;
     let document = window.document()?;
-    let wrap = document.query_selector(".sa-anchor").ok()??;
-    let bar = document.query_selector(".sa-bar").ok()??;
+    let wrap = document.query_selector(".pdit-inline-wrap").ok()??;
+    let bar = document.query_selector(".pdit-inline-edit").ok()??;
     Some((window, wrap, bar))
 }
 

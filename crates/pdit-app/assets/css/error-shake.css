@@ -75,12 +75,6 @@
 /* ---- pdit additions ---- */
 
 .sa-root { --red: #e3474c; }
-/* Dark: follows the system unless the user picked a theme (D-022). */
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme='light']) .sa-root { --red: #ee5c61; }
-}
-
-:root[data-theme='dark'] .sa-root { --red: #ee5c61; }
 
 /* The bar's "border" is the 1px ring in its shadow, so the error colour and
    the tween apply to box-shadow (same timings as the snippet's border-color). */

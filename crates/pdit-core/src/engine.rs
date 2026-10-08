@@ -17,6 +17,10 @@ fn js_error(value: JsValue) -> Error {
 /// Loads PDFium from the given URLs and connects it to pdfium-render.
 /// Call once, before any other pdit-core function.
 pub async fn start(pdfium_js_url: &str, pdfium_wasm_url: &str) -> Result<(), Error> {
+    // pdfium-render reports a failed PDFium call (and its name) through `log`
+    // just before it panics; without a logger that line is lost (P-043).
+    let _ = log::set_logger(&ConsoleLogger);
+    log::set_max_level(log::LevelFilter::Warn);
     load_script(pdfium_js_url).await?;
 
     let factory: Function = Reflect::get(&js_sys::global(), &"PDFiumModule".into())
@@ -116,4 +120,21 @@ async fn load_script(url: &str) -> Result<(), Error> {
         .await
         .map(|_| ())
         .map_err(|_| Error::EngineStart(format!("could not load {url}")))
+}
+
+/// Prints `log` warnings and errors (pdfium-render's) to the browser console.
+struct ConsoleLogger;
+
+impl log::Log for ConsoleLogger {
+    fn enabled(&self, metadata: &log::Metadata) -> bool {
+        metadata.level() <= log::Level::Warn
+    }
+
+    fn log(&self, record: &log::Record) {
+        if self.enabled(record.metadata()) {
+            web_sys::console::error_1(&format!("{}: {}", record.level(), record.args()).into());
+        }
+    }
+
+    fn flush(&self) {}
 }

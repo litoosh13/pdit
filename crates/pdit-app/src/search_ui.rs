@@ -11,11 +11,11 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 
 const SEARCH_CSS: Asset = asset!("/assets/css/search.css");
-/// The Search component's own magnifier and clear icons (Beautiful UI).
-pub(crate) const ICON_FIND: &str = r#"<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>"#;
-const ICON_CLEAR: &str = r#"<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>"#;
-const ICON_UP: &str = r#"<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 15l-6-6-6 6"/></svg>"#;
-const ICON_DOWN: &str = r#"<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>"#;
+/// The find bar's icons: Devigner Icons (D-062; were the Search component's own, Beautiful UI).
+pub(crate) const ICON_FIND: &str = include_str!("../assets/icons/devigner/SearchNormal.svg");
+const ICON_CLEAR: &str = include_str!("../assets/icons/devigner/Close.svg");
+const ICON_UP: &str = include_str!("../assets/icons/devigner/ChevronUp.svg");
+const ICON_DOWN: &str = include_str!("../assets/icons/devigner/ChevronDown.svg");
 const INPUT_ID: &str = "pdit-find-q";
 /// The card's pop-out time (ms).
 const CLOSE_MS: i32 = 120;
@@ -163,7 +163,7 @@ impl Find {
         );
         // One edit per line; highest index first on each page, so earlier
         // indices stay valid.
-        let mut lines: Vec<(u16, usize, String, Option<usize>)> = if all {
+        let lines: Vec<(u16, usize, String, Option<usize>)> = if all {
             let mut lines: Vec<_> = results
                 .iter()
                 .map(|m| (m.page, m.object_index, m.line.clone(), None))
@@ -178,27 +178,72 @@ impl Find {
                 Some(current.nth),
             )]
         };
-        lines.sort_by(|a, b| a.0.cmp(&b.0).then(b.1.cmp(&a.1)));
         let count = if all { results.len() } else { 1 };
-        let message = if count == 1 {
-            "Replaced 1".to_owned()
-        } else {
-            format!("Replaced {count}")
-        };
-        consume_context::<PageTools>().apply(&message, ICON_FIND, || {
-            let fonts = pdit_core::Fonts {
-                look_alike: None,
-                noto_sans: &noto,
-            };
-            for (page, index, line, only) in &lines {
-                let new = search::replace_in(line, &query, &with, options, *only);
-                pdit_core::preview_edit(*page, *index, &new, &fonts)?;
-                pdit_core::keep_edit();
-            }
-            Ok(())
-        });
+        replace_lines(lines, &query, &with, options, count, &noto);
         self.search();
     }
+}
+
+/// Edits `lines` (page, text object, its text, `Some(n)`: only the n-th match)
+/// as one step with Undo: one edit per line, highest index first on each page so
+/// earlier indices stay valid.
+fn replace_lines(
+    mut lines: Vec<(u16, usize, String, Option<usize>)>,
+    query: &str,
+    with: &str,
+    options: search::FindOptions,
+    count: usize,
+    noto: &[u8],
+) {
+    lines.sort_by(|a, b| a.0.cmp(&b.0).then(b.1.cmp(&a.1)));
+    let message = if count == 1 {
+        "Replaced 1".to_owned()
+    } else {
+        format!("Replaced {count}")
+    };
+    consume_context::<PageTools>().apply(&message, ICON_FIND, || {
+        let fonts = pdit_core::Fonts {
+            look_alike: None,
+            noto_sans: noto,
+        };
+        for (page, index, line, only) in &lines {
+            let new = search::replace_in(line, query, with, options, *only);
+            pdit_core::preview_edit(*page, *index, &new, &fonts)?;
+            pdit_core::keep_edit();
+        }
+        Ok(())
+    });
+}
+
+/// The AI chat's `change all "old" to "new"` (D-062): every `query` in the
+/// document (any letter case, any part of a word) becomes `with`, as one step
+/// with Undo. Returns how many were changed.
+/// ponytail: matches inside one text object only, like Find; a phrase the PDF
+/// splits into pieces isn't found — search the joined lines (lines.rs) for that.
+pub(crate) fn replace_everywhere(query: &str, with: &str) -> Result<usize, String> {
+    let editing = consume_context::<crate::editing::Editing>();
+    let noto = editing
+        .fallback_font
+        .peek()
+        .clone()
+        .ok_or("the fallback font is still loading; try again in a moment")?;
+    editing.keep_waiting();
+    let options = search::FindOptions::default();
+    let pages = pdit_core::page_ops::page_sizes().map_or(0, |s| s.len());
+    let mut found = Vec::new();
+    for page in 0..pages {
+        found.extend(search::find(page as u16, query, options).map_err(|e| e.to_string())?);
+    }
+    let count = found.len();
+    let mut lines: Vec<_> = found
+        .into_iter()
+        .map(|m| (m.page, m.object_index, m.line, None))
+        .collect();
+    lines.dedup_by_key(|l| (l.0, l.1));
+    if count > 0 {
+        replace_lines(lines, query, with, options, count, &noto);
+    }
+    Ok(count)
 }
 
 /// Brings the current match into the middle of the window.

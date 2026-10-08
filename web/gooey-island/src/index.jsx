@@ -1,289 +1,204 @@
 // Islands mounted into elements provided by the Dioxus app:
-// - the top bar (D-031): Libraries.dev Metal (metal-fx, MIT, Jakub Antalik;
-//   its liquidMetal shader is Paper Shaders, Apache-2.0) on the dark pill from
-//   the user's reference video, see top-bar.css;
+// - the frame (D-062): the centre bar (Undo · Edit | AI · Redo) and the bottom bar (file name, zoom, page count,
+//   full screen, Save), laid out like the Canva editor with Devigner UI (devignerui, MIT: Slider, Badge) and
+//   Devigner Icons (@devigner-ui/icons: code MIT; artwork Solar CC BY 4.0 + Iconsax), see frame.css;
 // - the format bar (D-027): the Libraries.dev Gooey playground's DragCard demo
 //   (demos/DragCard.tsx, MIT, Copyright (c) 2026 Jakub Antalik), with the
 //   PlusMenu demo's surface and shadow (theme.ts), see format-bar.css.
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Liquid } from 'liquid-gooey';
-import { MetalFx, useMetalBend } from 'metal-fx';
+import { Slider, Badge, DeleteButton, MenuDock } from 'devignerui';
+import { IconRedo } from '../node_modules/@devigner-ui/icons/dist/icons/Redo.js';
+import { IconEdit } from '../node_modules/@devigner-ui/icons/dist/icons/Edit.js';
+import { IconMagicStar } from '../node_modules/@devigner-ui/icons/dist/icons/MagicStar.js';
+import { IconDownload } from '../node_modules/@devigner-ui/icons/dist/icons/Download.js';
+import { IconMaximize } from '../node_modules/@devigner-ui/icons/dist/icons/Maximize.js';
+import { IconLock } from '../node_modules/@devigner-ui/icons/dist/icons/Lock.js';
+import { IconLockUnlocked } from '../node_modules/@devigner-ui/icons/dist/icons/LockUnlocked.js';
+import { IconCopy } from '../node_modules/@devigner-ui/icons/dist/icons/Copy.js';
+import { IconAddSquare } from '../node_modules/@devigner-ui/icons/dist/icons/AddSquare.js';
+import { IconPen } from '../node_modules/@devigner-ui/icons/dist/icons/Pen.js';
+import { IconChatRound } from '../node_modules/@devigner-ui/icons/dist/icons/ChatRound.js';
+import { IconTrashBinMinimalistic } from '../node_modules/@devigner-ui/icons/dist/icons/TrashBinMinimalistic.js';
+import { IconMenuDots } from '../node_modules/@devigner-ui/icons/dist/icons/MenuDots.js';
+import { IconLink } from '../node_modules/@devigner-ui/icons/dist/icons/Link.js';
+import 'devignerui/styles.css';
 import './gooey-surface.css';
 import './format-bar.css';
-import './top-bar.css';
-import aiIcon from './icons/cyborg.svg';
-import analyzeIcon from './icons/person-selecting-note.svg';
-import askIcon from './icons/comment-bubble.svg';
-import openIcon from './icons/folder-pen.svg';
-import newIcon from './icons/clipboard-new.svg';
-import saveIcon from './icons/cartoon-floppy-disk.svg';
-import pagesIcon from './icons/panel-right-open.svg';
-import sunIcon from './icons/cartoon-sun.svg';
-import moonIcon from './icons/cartoon-moon.svg';
-import gripIcon from './icons/cartoon-grip-vertical.svg';
-import minusIcon from './icons/cartoon-minus.svg';
-import biggerIcon from './icons/cartoon-plus.svg';
-import chevronIcon from './icons/cartoon-chevron-down.svg';
-import boldIcon from './icons/bold.svg';
-import italicIcon from './icons/italic.svg';
-import underlineIcon from './icons/underline.svg';
+import './frame.css';
+import gripIcon from './icons/devigner/More.svg';
+import minusIcon from './icons/devigner/Minus.svg';
+import biggerIcon from './icons/devigner/Plus.svg';
+import chevronIcon from './icons/devigner/ChevronDown.svg';
+import boldIcon from './icons/devigner/TextBold.svg';
+import italicIcon from './icons/devigner/TextItalic.svg';
+import underlineIcon from './icons/devigner/TextUnderline.svg';
 
 // Gooey demo defaults (PlusMenu.tsx DEFAULTS), used by the format bar.
 const BLUR = 6;
 const CONTRAST = 18;
 
-// "Figma soft" shadow (theme.ts), with the demo's display-p3 variants.
-const P3 = typeof CSS !== 'undefined' && CSS.supports?.('color', 'color(display-p3 0 0 0 / 0.2)');
-const p3 = (tpl) =>
-  tpl
-    .replace(/\{w4\}/g, P3 ? 'color(display-p3 1 1 1 / 0.04)' : 'rgba(255, 255, 255, 0.04)')
-    .replace(/\{w3\}/g, P3 ? 'color(display-p3 1 1 1 / 0.03)' : 'rgba(255, 255, 255, 0.03)')
-    .replace(/\{k6\}/g, P3 ? 'color(display-p3 0 0 0 / 0.06)' : 'rgba(0, 0, 0, 0.06)')
-    .replace(/\{k5\}/g, P3 ? 'color(display-p3 0 0 0 / 0.05)' : 'rgba(0, 0, 0, 0.05)')
-    .replace(/\{k24\}/g, P3 ? 'color(display-p3 0 0 0 / 0.24)' : 'rgba(0, 0, 0, 0.24)');
-const SHADOWS = {
-  light: '0 0 0 1px rgba(0, 0, 0, 0.06), 0 2px 6px rgba(0, 0, 0, 0.05), 0 4px 42px rgba(0, 0, 0, 0.06)',
-  dark: p3(
-    '0 0 0 1px {w4} inset, 0 1px 0 0 {w3} inset, ' +
-      '0 0 0 1px {k6}, 0 2px 6px 0 {k5}, 0 4px 42px 0 {k24}',
-  ),
-};
-
-// ---------- theme (D-022) ----------
-// The chosen theme lives on <html data-theme> and in localStorage under
-// THEME_KEY; without a choice the page follows the system. The app applies a
-// saved choice at start-up (crates/pdit-app/src/theme.rs, same key).
-const THEME_KEY = 'pdit-theme';
-const systemDark = () => window.matchMedia('(prefers-color-scheme: dark)');
-const currentTheme = () => {
-  const chosen = document.documentElement.dataset.theme;
-  if (chosen === 'light' || chosen === 'dark') return chosen;
-  return systemDark().matches ? 'dark' : 'light';
-};
-
-function chooseTheme(theme) {
-  document.documentElement.dataset.theme = theme;
-  try {
-    localStorage.setItem(THEME_KEY, theme);
-  } catch {
-    // Storage can be unavailable (private windows); the choice then lasts for this visit.
-  }
-}
-
-function useTheme() {
-  const [theme, setTheme] = useState(currentTheme);
-  useEffect(() => {
-    const update = () => setTheme(currentTheme());
-    const media = systemDark();
-    media.addEventListener('change', update);
-    const observer = new MutationObserver(update);
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
-    return () => {
-      media.removeEventListener('change', update);
-      observer.disconnect();
-    };
-  }, []);
-  return theme;
-}
-
-// Koboyo SVGs are inlined so they take `currentColor`; they are static assets
-// bundled with the app, not user content.
+// The format bar's Devigner SVGs (src/icons/devigner, scripts/export-icons.mjs) are inlined so they take `currentColor`; they are static assets bundled with the
+// app, not user content.
 function Icon({ svg }) {
   return <span aria-hidden="true" style={{ display: 'contents' }} dangerouslySetInnerHTML={{ __html: svg }} />;
 }
 
-// ---------- top bar (D-031) ----------
+// ---------- frame (D-062) ----------
 
-/** One labelled item of the bar: a Koboyo icon and its text (user: every icon
- *  gets a label for now). */
-function BarItem({ icon, label, onClick, disabled, pressed }) {
-  return (
-    <button
-      type="button"
-      className={pressed ? 'tb-item is-on' : 'tb-item'}
-      disabled={disabled}
-      aria-pressed={pressed}
-      onClick={onClick}
-    >
-      <span className="tb-icon" aria-hidden="true" dangerouslySetInnerHTML={{ __html: icon }} />
-      {label}
-    </button>
-  );
-}
-
-// ---------- the AI menu (D-055, D-060) ----------
-
-/** Where the drops sit: a half circle under the round button (Gooey's plus-menu satellites), for 1 or 2. */
-const AI_RADIUS = 96;
-const AI_SPOTS = { 1: [90], 2: [124, 56] };
-const aiSpot = (n, i) => {
-  const a = ((AI_SPOTS[n] || AI_SPOTS[2])[i] * Math.PI) / 180;
-  return { x: Math.round(Math.cos(a) * AI_RADIUS), y: Math.round(Math.sin(a) * AI_RADIUS) };
-};
-const AI_ICONS = { analyze: analyzeIcon, reanalyze: analyzeIcon, ask: askIcon };
-
-/** The AI button's choices, dropping out of it like liquid (liquid-gooey "Morph"): the first time a card that
- *  asks to download the models, afterwards the drops the app sends (`ai.drops`). It sits on the round button, next
- *  to the bar (the bar clips its contents). The app gets the user's picks through the callbacks. */
-function AiMenu({ ai, open, setOpen, onAiPick, onAiDownload, onAiCancel }) {
-  const theme = useTheme();
-  const needs = !!ai?.needsModels;
-  const drops = ai?.drops || [];
-  const progress = ai?.progress; // [done, total] while downloading
-  const asking = open && needs;
-  const shown = open && !needs;
-  const mb = (n) => Math.round(n / 1e6);
+/** The page nearest the top of the window (1-based), read from the page list as it scrolls. */
+function useCurrentPage(count) {
+  const [page, setPage] = useState(1);
   useEffect(() => {
-    if (!open) return undefined;
-    const close = (e) => {
-      if (progress) return;
-      if (!e.target.closest('.tb-ai-menu, .tb-ai')) setOpen(false);
+    const update = () => {
+      let current = 1;
+      for (const el of document.querySelectorAll('.page-list .page[data-page]')) {
+        if (el.getBoundingClientRect().top > window.innerHeight / 3) break;
+        current = Number(el.dataset.page) + 1;
+      }
+      setPage(current);
     };
-    window.addEventListener('pointerdown', close, true);
-    return () => window.removeEventListener('pointerdown', close, true);
-  }, [open, progress, setOpen]);
-  return (
-    <div className={theme === 'dark' ? 'tb-ai-menu pdit-plus-menu is-dark' : 'tb-ai-menu pdit-plus-menu'}>
-      <Liquid blur={BLUR} contrast={CONTRAST} fill="var(--modal-bg)" shadow={theme === 'dark' ? SHADOWS.dark : SHADOWS.light}>
-        {/* Under the metal button: the liquid the drops and the card flow out of. */}
-        <Liquid.Item className="tb-ai-spot" x={0} y={0}>
-          <span className="tb-ai-anchor" />
-        </Liquid.Item>
-        {drops.map((d, i) => {
-          const { x, y } = aiSpot(drops.length, i);
-          return (
-            <Liquid.Item key={d.id} className="tb-ai-spot" x={shown ? x : 0} y={shown ? y : 0} transition="bouncy" delay={i * 45}>
-              <button
-                type="button"
-                className="tb-ai-drop"
-                aria-label={d.label}
-                title={d.title || d.label}
-                disabled={!!d.disabled || !shown}
-                style={{ opacity: shown ? 1 : 0 }}
-                onClick={() => { setOpen(false); onAiPick?.(d.id); }}
-                dangerouslySetInnerHTML={{ __html: AI_ICONS[d.id] || analyzeIcon }}
-              />
-            </Liquid.Item>
-          );
-        })}
-        <Liquid.Item className="tb-ai-card-spot" x={0} y={0} transition="bouncy" morph={{ shape: true }}>
-          <div className={asking ? 'tb-ai-card is-open' : 'tb-ai-card'} role={asking ? 'dialog' : undefined} aria-label="AI models">
-            {asking && (
-              <>
-                <b>pdit's AI needs its models first</b>
-                <span>
-                  About <b>760 MB</b>, downloaded once to this computer. Only the models — your PDFs never leave your
-                  computer.
-                </span>
-                {progress && (
-                  <>
-                    <span className="small">
-                      {progress[0] >= progress[1] && progress[1] > 0
-                        ? 'Getting ready…'
-                        : `Downloading… ${mb(progress[0])} of ${mb(progress[1])} MB`}
-                    </span>
-                    <span className="bar">
-                      <i style={{ width: `${progress[1] ? (progress[0] / progress[1]) * 100 : 0}%` }} />
-                    </span>
-                  </>
-                )}
-                {ai?.error && <span className="small err">The download stopped: {ai.error}. You can try again.</span>}
-                <span className="row">
-                  <button type="button" className="btn" onClick={() => (progress ? onAiCancel?.() : setOpen(false))}>
-                    {progress ? 'Cancel' : 'Not now'}
-                  </button>
-                  {!progress && (
-                    <button type="button" className="btn primary" onClick={() => onAiDownload?.()}>
-                      Download
-                    </button>
-                  )}
-                </span>
-              </>
-            )}
-          </div>
-        </Liquid.Item>
-      </Liquid>
-      {shown && (
-        <div className="tb-ai-captions">
-          {drops.map((d, i) => {
-            const { x, y } = aiSpot(drops.length, i);
-            return (
-              <span key={d.id} className={d.disabled ? 'tb-ai-cap is-off' : 'tb-ai-cap'} style={{ left: 22 + x, top: 22 + y + 26 }}>
-                {d.label}
-              </span>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
+    update();
+    window.addEventListener('scroll', update, { passive: true });
+    return () => window.removeEventListener('scroll', update);
+  }, [count]);
+  return Math.min(page, Math.max(count, 1));
 }
 
-/** The top bar: the round metal button (the AI button, D-055: opens the AI menu),
- *  then Open, New, Pages, Light/Dark and Save. The bar is a dark pill in both
- *  themes, so the metal is pinned to its dark tuning. The bar's own wandering
- *  halo is off (it flashed outside the bar at load, user report); the round
- *  button keeps its glow, clipped to the pill. Its reflections on the items
- *  are off too: they drew a grey block beside "Open". */
-function TopBar({ hasDoc, pagesShown, ai, onAi, onAiPick, onAiDownload, onAiCancel, onOpen, onNew, onSave, onTogglePages }) {
-  const theme = useTheme();
-  const [aiOpen, setAiOpen] = useState(false);
-  useEffect(() => { if (!hasDoc) setAiOpen(false); }, [hasDoc]);
-  const bar = useRef(null);
-  useMetalBend(bar);
-  const other = theme === 'dark' ? 'light' : 'dark';
+function Frame({ hasDoc, mode, fileName, zoom, pages, canUndo, onMode, onUndo, onZoom, onSave, onPages }) {
+  const current = useCurrentPage(pages);
+  const ai = mode === 'ai';
+  const fullscreen = () => {
+    if (document.fullscreenElement) document.exitFullscreen?.();
+    else document.documentElement.requestFullscreen?.();
+  };
+  if (!hasDoc) return null;
   return (
     <>
-    <MetalFx ref={bar} variant="button" preset="chromatic" theme="dark" innerShadow disableGlow>
-      <nav className="tb-bar" aria-label="pdit">
-        <MetalFx variant="circle" preset="chromatic" theme="dark">
-          <button
-            type="button"
-            className="tb-round tb-ai"
-            aria-label="AI"
-            title={hasDoc ? 'AI' : 'AI — open a PDF first'}
-            aria-haspopup="menu"
-            aria-expanded={aiOpen}
-            disabled={!hasDoc}
-            onClick={() => { setAiOpen((o) => !o); onAi?.(); }}
-          >
-            <span className="tb-icon" aria-hidden="true" dangerouslySetInnerHTML={{ __html: aiIcon }} />
+      <div className="fr-center" role="toolbar" aria-label="Mode">
+        <button type="button" className="fr-icon" aria-label="Undo" title="Undo" disabled={!canUndo} onClick={onUndo}>
+          <IconRedo className="fr-mirror" />
+        </button>
+        <span className="fr-sep" />
+        <div role="tablist" className="fr-tabs">
+          <button type="button" role="tab" aria-selected={!ai} className={ai ? '' : 'is-on'} onClick={() => onMode?.('edit')}>
+            <IconEdit />
+            Edit
           </button>
-        </MetalFx>
-        <div className="tb-items">
-          <BarItem icon={openIcon} label="Open" onClick={onOpen} />
-          <BarItem icon={newIcon} label="New" onClick={onNew} />
-          <BarItem
-            icon={pagesIcon}
-            label="Pages"
-            disabled={!hasDoc}
-            pressed={hasDoc && pagesShown}
-            onClick={onTogglePages}
-          />
-          <BarItem
-            icon={theme === 'dark' ? moonIcon : sunIcon}
-            label={theme === 'dark' ? 'Dark' : 'Light'}
-            onClick={() => chooseTheme(other)}
-          />
-          <BarItem icon={saveIcon} label="Save" disabled={!hasDoc} onClick={onSave} />
+          <button type="button" role="tab" aria-selected={ai} className={ai ? 'is-on' : ''} onClick={() => onMode?.('ai')}>
+            <IconMagicStar />
+            AI
+          </button>
         </div>
-      </nav>
-    </MetalFx>
-    {hasDoc && (
-      <AiMenu ai={ai} open={aiOpen} setOpen={setAiOpen} onAiPick={onAiPick} onAiDownload={onAiDownload} onAiCancel={onAiCancel} />
-    )}
+        <span className="fr-sep" />
+        {/* No redo history yet (LATER: an app-wide undo history). */}
+        <button type="button" className="fr-icon" aria-label="Redo" title="Redo — not available yet" disabled>
+          <IconRedo />
+        </button>
+      </div>
+      <footer className="fr-bottom">
+        <span className="fr-name" title={fileName}>{fileName}</span>
+        <div className="fr-right">
+          <Slider
+            size="sm"
+            className="fr-zoom"
+            min={25}
+            max={400}
+            value={zoom}
+            onValueChange={(v) => onZoom?.(Math.round(v))}
+            format={(v) => `${Math.round(v)}%`}
+            aria-label="Zoom"
+          />
+          {!ai && (
+            <Badge size="sm" onClick={onPages} title="Show the pages">
+              {current} / {pages}
+            </Badge>
+          )}
+          <button type="button" className="fr-icon" aria-label="Full screen" title="Full screen" onClick={fullscreen}>
+            <IconMaximize />
+          </button>
+          <button type="button" className="fr-save" onClick={onSave}>
+            <IconDownload />
+            Save
+          </button>
+        </div>
+      </footer>
     </>
   );
 }
 
-/** Renders the top bar into `element`. The app calls `update({hasDoc,
- *  pagesShown})` when those change; the callbacks report the user's clicks. */
-export function mountTopBar(element, callbacks = {}) {
-  element.classList.add('pdit-top-bar');
+/** Renders the frame into `element`. The app calls `update(state)` when its state changes; the callbacks report
+ *  the user's choices (`onMode('edit' | 'ai')`, `onZoom(percent)`, `onUndo`, `onSave`, `onPages`). */
+export function mountFrame(element, callbacks = {}) {
   const root = createRoot(element);
-  const render = (state) => root.render(<TopBar {...state} {...callbacks} />);
-  render({ hasDoc: false, pagesShown: true, ai: null });
+  const render = (state) => root.render(<Frame {...state} {...callbacks} />);
+  render({ hasDoc: false });
+  return { update: render, unmount: () => root.unmount() };
+}
+
+// ---------- page tools (D-062) ----------
+
+/** The row above a page (Canva's page tools): its number, lock, duplicate, add a page after it, and Devigner's
+ *  DeleteButton (asks before it deletes). The last page can't be deleted. */
+function PageToolsRow({ page, count, locked, onLock, onDuplicate, onAdd, onDelete }) {
+  return (
+    <div className="pt-row">
+      <span className="pt-label">
+        Page {page + 1}
+        {locked && <span className="pt-locked"> · locked</span>}
+      </span>
+      <button
+        type="button"
+        className="fr-icon"
+        aria-label={locked ? 'Unlock page' : 'Lock page'}
+        aria-pressed={locked}
+        title={locked ? 'Unlock: allow changes to this page' : 'Lock: no changes to this page'}
+        onClick={onLock}
+      >
+        {locked ? <IconLock /> : <IconLockUnlocked />}
+      </button>
+      <button type="button" className="fr-icon" aria-label="Duplicate page" title="Duplicate page" disabled={locked} onClick={onDuplicate}>
+        <IconCopy />
+      </button>
+      <button type="button" className="fr-icon" aria-label="Add a page after this one" title="Add a page after this one" onClick={onAdd}>
+        <IconAddSquare />
+      </button>
+      {count > 1 && !locked && <DeleteButton label="Delete page" confirmLabel="Delete" onConfirm={() => onDelete?.()} resetAfter={0} />}
+    </div>
+  );
+}
+
+/** Renders a page's tools row into `element`; the app calls `update({ page, count, locked })`. */
+export function mountPageTools(element, callbacks = {}) {
+  const root = createRoot(element);
+  const render = (state) => root.render(<PageToolsRow {...state} {...callbacks} />);
+  return { update: render, unmount: () => root.unmount() };
+}
+
+// ---------- selection dock (D-062) ----------
+
+/** Devigner's MenuDock for the selected text (the approved mockup's bar at the selection): Edit (typing starts in
+ *  the text on the page), Comment, Copy, Delete, More ▸ Add link. New text is typed on the page; no dock. */
+function SelectionDock({ selKey, adding, text, onEdit, onComment, onDelete, onLink }) {
+  const [path, setPath] = useState([]);
+  useEffect(() => setPath([]), [selKey]);
+  if (!selKey || adding) return null;
+  const items = [
+    { label: 'Edit', icon: <IconPen />, onSelect: onEdit },
+    { label: 'Comment', icon: <IconChatRound />, onSelect: onComment },
+    { label: 'Copy', icon: <IconCopy />, onSelect: () => navigator.clipboard?.writeText(text ?? '') },
+    { label: 'Delete', icon: <IconTrashBinMinimalistic />, onSelect: onDelete },
+    { label: 'More', icon: <IconMenuDots />, items: [{ label: 'Add link', icon: <IconLink />, onSelect: onLink }] },
+  ];
+  return <MenuDock label="Selected text" items={items} path={path} onNavigate={setPath} />;
+}
+
+/** Renders the selection dock into `element`; the app calls `update(state)` as the selection changes. */
+export function mountSelectionDock(element, callbacks = {}) {
+  const root = createRoot(element);
+  const render = (state) => root.render(<SelectionDock {...state} {...callbacks} />);
+  render({});
   return { update: render, unmount: () => root.unmount() };
 }
 
@@ -357,7 +272,6 @@ function anchorPosition(width) {
 }
 
 function FormatBar({ visible, style, onChange, inline }) {
-  const theme = useTheme();
   const [pos, setPos] = useState(placedByUser);
   const [dragging, setDragging] = useState(false);
   const [lift, setLift] = useState(0);
@@ -432,10 +346,7 @@ function FormatBar({ visible, style, onChange, inline }) {
 
   const change = (patch) => onChange?.({ ...style, ...patch });
   const size = Math.round(style.size);
-  const shadow =
-    theme === 'dark'
-      ? SHADOWS.dark
-      : [
+  const shadow = [
           '0 0 0 1px rgba(0,0,0,0.08)',
           `0 ${lerp(1, 3, lift).toFixed(2)}px ${lerp(3, 5, lift).toFixed(2)}px rgba(0,0,0,0.04)`,
           `0 ${lerp(0, 10, lift).toFixed(2)}px ${lerp(0, 24, lift).toFixed(2)}px rgba(0,0,0,${(0.04 * lift).toFixed(3)})`,

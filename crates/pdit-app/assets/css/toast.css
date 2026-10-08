@@ -48,8 +48,9 @@
   position: fixed;
   left: 0;
   right: 0;
-  bottom: 24px;
-  z-index: 25;
+  /* Above the bottom bar (D-062, 52px). */
+  bottom: 68px;
+  z-index: 31;
   display: flex;
   justify-content: center;
   pointer-events: none;
@@ -78,23 +79,6 @@
 
 .pdit-toast.is-open {
   pointer-events: auto;
-}
-
-/* Dark: follows the system unless the user picked a theme (D-022). */
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme='light']) .pdit-toast {
-    --toast-surface: #202020;
-    --toast-shadow: 0 0 0 1px rgba(255, 255, 255, 0.04) inset,
-      0 1px 0 0 rgba(255, 255, 255, 0.03) inset, 0 0 0 1px rgba(0, 0, 0, 0.06),
-      0 2px 6px 0 rgba(0, 0, 0, 0.05), 0 4px 42px 0 rgba(0, 0, 0, 0.24);
-  }
-}
-
-:root[data-theme='dark'] .pdit-toast {
-  --toast-surface: #202020;
-  --toast-shadow: 0 0 0 1px rgba(255, 255, 255, 0.04) inset,
-    0 1px 0 0 rgba(255, 255, 255, 0.03) inset, 0 0 0 1px rgba(0, 0, 0, 0.06),
-    0 2px 6px 0 rgba(0, 0, 0, 0.05), 0 4px 42px 0 rgba(0, 0, 0, 0.24);
 }
 
 .pdit-toast .toast-icon {

@@ -20,6 +20,9 @@ rustup target add x86_64-apple-darwin                          # once, for Intel
 cargo tauri build --target universal-apple-darwin --bundles dmg   # Intel + Apple Silicon
 ```
 
+Text edits run on MuPDF (`crates/pdit-mupdf`), which is compiled from source with the app: it needs a C
+compiler, `make` and clang (all come with Xcode's command-line tools on macOS).
+
 Tauri first fetches the OCR files (`scripts/fetch-ocr.sh`: Tesseract + language files, pinned and checksum-verified), then runs the release web build (`dx build --release --platform web` in `crates/pdit-app`,
 using the `dx` from `~/.cargo/bin` — another `dx`, e.g. Deno's, may come first on `PATH`), then
 builds the app. The disk image lands in `target/universal-apple-darwin/release/bundle/dmg/`.

@@ -1,6 +1,5 @@
-//! The AI button (D-055): the round metal button in the top bar opens the
-//! app's menu under it. "Analyze PDF" comes first; the other entries turn on
-//! once it has run. The analysis decides by itself what each page needs —
+//! The analysis (D-055), run in AI mode (D-062, frame_ui.rs) when the PDF was
+//! never analysed or changed since. The analysis decides by itself what each page needs —
 //! its own text, or OCR for a scan (desktop app: leafmind's Tesseract through
 //! the desktop commands) — looks for form fields with leafmind's finder, and
 //! says whether questions can be asked. Its steps show in a panel on the right.
@@ -11,12 +10,12 @@ use dioxus::prelude::*;
 use pdit_core::analysis::{PageKind, page_kind};
 use std::rc::Rc;
 
-const AI_CSS: Asset = asset!("/assets/css/ai.css");
 /// Scans are read at this resolution.
 const OCR_DPI: f32 = 300.0;
 
+/// A step's state, shown in the AI chat (ask_ui.rs).
 #[derive(Clone, Copy, PartialEq)]
-enum State {
+pub(crate) enum State {
     Wait,
     Run,
     Done,
@@ -24,10 +23,10 @@ enum State {
 }
 
 #[derive(Clone, PartialEq)]
-struct Step {
-    what: String,
-    detail: String,
-    state: State,
+pub(crate) struct Step {
+    pub(crate) what: String,
+    pub(crate) detail: String,
+    pub(crate) state: State,
 }
 
 impl Step {
@@ -41,30 +40,18 @@ impl Step {
 }
 
 #[derive(Clone, PartialEq, Default)]
-struct Analysis {
-    steps: Vec<Step>,
-    running: bool,
+pub(crate) struct Analysis {
+    pub(crate) steps: Vec<Step>,
+    pub(crate) running: bool,
     done: bool,
-    summary: String,
+    pub(crate) summary: String,
     /// The document before OCR's text layer, for "Undo OCR".
     before: Option<Rc<Vec<u8>>>,
-}
-
-/// What the top bar's AI menu (island, D-060) shows: the model card, or drops
-/// (id, label, disabled, title).
-#[derive(Clone, PartialEq, Default)]
-pub struct AiView {
-    pub needs_models: bool,
-    /// (done, total) bytes while the models download.
-    pub progress: Option<(f64, f64)>,
-    pub error: Option<String>,
-    pub drops: Vec<(&'static str, &'static str, bool, String)>,
 }
 
 /// Shared AI state.
 #[derive(Clone, Copy)]
 pub struct Ai {
-    panel: Signal<bool>,
     analysis: Signal<Analysis>,
     /// The document's id (it grows with every change) when it was analysed
     /// (D-060): another id means it changed since, and "Analyze again" is offered.
@@ -116,7 +103,6 @@ pub fn saved_file(bytes: &[u8]) {
 impl Ai {
     pub fn provide() -> Self {
         use_context_provider(|| Ai {
-            panel: Signal::new(false),
             analysis: Signal::new(Analysis::default()),
             analyzed: Signal::new(None),
             changed: Signal::new(false),
@@ -125,52 +111,9 @@ impl Ai {
         })
     }
 
-    /// The Analysis panel is open (the Pages panel makes way, D-059).
-    pub fn panel_open(&self) -> bool {
-        (self.panel)()
-    }
-
-    /// The menu's contents (read during render).
-    pub fn view(&self) -> AiView {
-        let ask = consume_context::<crate::ask_ui::Ask>();
-        let (needs_models, progress, error) = ask.download_state();
-        let a = self.analysis.read();
-        let drops = if a.running {
-            Vec::new()
-        } else if self.analyzed.read().is_none() {
-            vec![("analyze", "Analyze PDF", false, String::new())]
-        } else {
-            let mut drops = vec![if ask.can_ask() {
-                ("ask", "Ask a question", false, String::new())
-            } else {
-                (
-                    "ask",
-                    "Ask a question",
-                    true,
-                    "Asking works on Apple-silicon Macs for now".into(),
-                )
-            }];
-            if (self.changed)() {
-                drops.push((
-                    "reanalyze",
-                    "Analyze again",
-                    false,
-                    "The PDF changed since its analysis".into(),
-                ));
-            }
-            drops
-        };
-        AiView {
-            needs_models,
-            progress,
-            error,
-            drops,
-        }
-    }
-
-    /// The round button was pressed: fresh model status, and whether the PDF
-    /// changed since its analysis.
-    pub fn opened(mut self) {
+    /// AI mode opened (D-062): fresh model status, and whether the PDF changed
+    /// since its analysis.
+    pub fn entered(mut self) {
         let ask = consume_context::<crate::ask_ui::Ask>();
         spawn(async move { ask.refresh().await });
         if let Some(at) = *self.analyzed.peek() {
@@ -178,16 +121,14 @@ impl Ai {
         }
     }
 
-    pub fn pick(self, id: &str) {
-        match id {
-            "analyze" | "reanalyze" => self.analyze(),
-            "ask" => {
-                let mut ai = self;
-                ai.panel.set(false);
-                consume_context::<crate::ask_ui::Ask>().open();
-            }
-            _ => {}
+    /// In AI mode: analyse the PDF if it never was, or changed since.
+    pub fn analyze_if_needed(self) {
+        let a = self.analysis.peek();
+        if a.running || (self.analyzed.peek().is_some() && !*self.changed.peek()) {
+            return;
         }
+        drop(a);
+        self.analyze();
     }
 
     /// Opening a file analysed before (D-060): its record comes back — the
@@ -240,17 +181,14 @@ impl Ai {
         crate::log("pdit: analysis remembered for this file");
     }
 
-    /// Esc: the panel (when not running).
-    pub fn escape(mut self) {
-        if *self.panel.peek() && !self.analysis.peek().running {
-            self.panel.set(false);
-        }
+    /// The analysis, for the AI chat (ask_ui.rs).
+    pub(crate) fn analysis(&self) -> Analysis {
+        self.analysis.read().clone()
     }
 
     /// A new document: nothing analysed yet.
     fn reset(mut self) {
         self.analysis.set(Analysis::default());
-        self.panel.set(false);
         self.analyzed.set(None);
         self.changed.set(false);
         self.record.set(None);
@@ -270,7 +208,6 @@ impl Ai {
         if self.analysis.peek().running {
             return;
         }
-        self.panel.set(true);
         self.analysis.set(Analysis {
             steps: vec![
                 Step::new("Checking the pages", State::Run, ""),
@@ -507,10 +444,7 @@ impl Ai {
             if let Some(hash) = OPENED.with_borrow(|h| h.clone()) {
                 crate::analysis_cache::store(&hash, &record).await;
             }
-            // The panel shows "Done" for a moment, then goes (D-060); OCR's Undo
-            // stays in the usual toast, and found fields open for review.
-            crate::print_ui::pause(1800).await;
-            self.panel.set(false);
+            // OCR's Undo is in the usual toast, and found fields open for review.
             if let Some(before) = before {
                 consume_context::<PageTools>().show(
                     "Scanned pages are now searchable".into(),
@@ -556,13 +490,23 @@ pub(crate) mod desktop {
         wasm_bindgen_futures::JsFuture::from(promise).await
     }
 
-    /// Calls a desktop command with `bytes` as the raw body.
-    pub(crate) async fn invoke_raw(command: &str, bytes: &[u8]) -> Result<JsValue, JsValue> {
+    /// Calls a desktop command with `bytes` as the raw body and `headers`.
+    pub(crate) async fn invoke_raw(
+        command: &str,
+        bytes: &[u8],
+        headers: &[(&str, String)],
+    ) -> Result<JsValue, JsValue> {
         let internals = internals().ok_or("not the desktop app")?;
         let invoke: js_sys::Function = Reflect::get(&internals, &"invoke".into())?.dyn_into()?;
         let body = Uint8Array::from(bytes);
+        let head = Object::new();
+        for (name, value) in headers {
+            Reflect::set(&head, &(*name).into(), &value.into())?;
+        }
+        let options = Object::new();
+        Reflect::set(&options, &"headers".into(), &head)?;
         let promise: Promise = invoke
-            .call3(&internals, &command.into(), &body, &Object::new())?
+            .call3(&internals, &command.into(), &body, &options)?
             .dyn_into()?;
         wasm_bindgen_futures::JsFuture::from(promise).await
     }
@@ -666,7 +610,8 @@ pub(crate) mod desktop {
     }
 }
 
-/// The Analysis panel (the menu itself is the top bar's, island.rs).
+/// The analysis's lifecycle (a new file resets it and restores what is
+/// remembered); its steps show in the AI chat (ask_ui.rs, D-062).
 #[component]
 pub fn AiUi() -> Element {
     let ai = use_context::<Ai>();
@@ -689,44 +634,5 @@ pub fn AiUi() -> Element {
         let ask = consume_context::<crate::ask_ui::Ask>();
         spawn(async move { ask.refresh().await });
     });
-    let a = (ai.analysis)();
-    rsx! {
-        document::Stylesheet { href: AI_CSS }
-        aside {
-            class: "pdit-panel pdit-ai t-panel-slide",
-            "data-open": if (ai.panel)() { "true" } else { "false" },
-            "aria-label": "Analysis",
-            div { class: "pdit-panel-head",
-                span { class: "title", "Analysis" }
-            }
-            for (i, s) in a.steps.iter().enumerate() {
-                div {
-                    key: "{i}",
-                    class: match s.state {
-                        State::Wait => "pdit-ai-step",
-                        State::Run => "pdit-ai-step is-run",
-                        State::Done => "pdit-ai-step is-done",
-                        State::Skip => "pdit-ai-step is-skip",
-                    },
-                    span { class: "st",
-                        match s.state {
-                            State::Wait => "○",
-                            State::Run => "…",
-                            State::Done => "✓",
-                            State::Skip => "–",
-                        }
-                    }
-                    div {
-                        div { class: "what", "{s.what}" }
-                        if !s.detail.is_empty() {
-                            div { class: "detail", "{s.detail}" }
-                        }
-                    }
-                }
-            }
-            if !a.summary.is_empty() {
-                div { class: "pdit-ai-sum", "{a.summary}" }
-            }
-        }
-    }
+    rsx! {}
 }

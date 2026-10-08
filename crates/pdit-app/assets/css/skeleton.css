@@ -81,12 +81,6 @@
 
 /* Skeleton colour from the Transitions.dev demo (--p14-skeleton-color). */
 :root { --skeleton-color: #eeeeee; }
-/* Dark: follows the system unless the user picked a theme (D-022). */
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme='light']) { --skeleton-color: rgba(255, 255, 255, 0.08); }
-}
-
-:root[data-theme='dark'] { --skeleton-color: rgba(255, 255, 255, 0.08); }
 
 /* One placeholder block filling the page's slot. */
 .page-skeleton-block {

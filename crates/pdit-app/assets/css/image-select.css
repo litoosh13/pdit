@@ -1,6 +1,6 @@
 /* Selected-image UI (D-023a, option 3). The ring and handles are drawn to
-   match the metal top bar (top-bar.css): the same dark chromatic fill, a soft
-   light rim, so the selection reads as the bar's family, not the blue accent.
+   a dark chromatic fill with a soft light rim (the former metal top bar's,
+   D-031), not the blue accent.
    The floating actions use the shared Selection Actions bar (selection-actions.css).
    Handle art for corner-resize / free-rotate lands with slice 2. */
 
@@ -14,14 +14,9 @@
   border-radius: 3px;
   box-shadow: 0 0 0 1px rgba(242, 243, 245, 0.35);
 }
-:root[data-theme='dark'] .pdit-img-ring {
-  border-color: #4a505a;
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4);
-}
 
-/* Corner resize handles: small black metal discs echoing the navbar's round
-   button (top-bar `.tb-round`: radial-gradient 50% 35%, #353a42 → #1c1f24), so
-   the selection reads as the bar's family and marks the four grab points. */
+/* Corner resize handles: small black metal discs (radial-gradient 50% 35%,
+   #353a42 → #1c1f24) marking the four grab points. */
 .pdit-img-handle {
   position: absolute;
   width: 13px;
@@ -56,23 +51,8 @@
    in dark mode, on every theme-coloured surface (menu, toast, bars, panels,
    windows). Where the background is inverted — filled buttons (.sa-primary)
    and the inverted edit box (edit-panel.css) — the icon takes the opposite, so
-   it stays visible. The always-dark metal top bar and the table's dark "+"
-   chips keep their own white icons; the red delete icon sets its own fill. */
+   it stays visible. The table's dark "+" chips keep their own white icons; the red delete icon sets its own fill. */
 :root {
-  --icon-theme: #000;
-  --icon-inverse: #fff;
-}
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme='light']) {
-    --icon-theme: #fff;
-    --icon-inverse: #000;
-  }
-}
-:root[data-theme='dark'] {
-  --icon-theme: #fff;
-  --icon-inverse: #000;
-}
-:root[data-theme='light'] {
   --icon-theme: #000;
   --icon-inverse: #fff;
 }
@@ -80,13 +60,13 @@
   --icon: var(--icon-theme);
   --icon-on-ink: var(--icon-inverse);
 }
-.pdit-edit-panel.pdit-plus-menu.sa-root {
-  --icon: var(--icon-inverse);
-  --icon-on-ink: var(--icon-theme);
-}
-:is(.cm-menu, .pdit-toast, .sa-root, .pdit-panel, .pdit-rail, .pdit-fly, .pdit-shape-bar, .doc-box, .sig-root) svg {
+:is(.cm-menu, .pdit-toast, .sa-root, .pdit-panel, .pdit-rail, .pdit-dock, .pdit-shape-bar, .doc-box, .sig-root) svg {
   color: var(--icon);
 }
-:is(.cm-menu, .pdit-toast, .sa-root, .pdit-panel, .pdit-rail, .pdit-fly, .pdit-shape-bar, .doc-box, .sig-root) .sa-primary svg {
+:is(.cm-menu, .pdit-toast, .sa-root, .pdit-panel, .pdit-rail, .pdit-dock, .pdit-shape-bar, .doc-box, .sig-root) .sa-primary svg {
   color: var(--icon-on-ink);
+}
+/* Delete image: the trash in Material red (the user, D-023). */
+.sa-bar .sa-primary .sa-danger svg {
+  color: #f44336;
 }

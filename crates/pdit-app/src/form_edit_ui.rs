@@ -13,13 +13,13 @@ use dioxus::prelude::*;
 use pdit_core::form_edit::{self as fe, FieldSettings, NewField};
 use pdit_core::{FieldKind, FormField};
 
-pub const ICON_FORM: &str = include_str!("../assets/icons/cartoon-form.svg");
-const ICON_TEXT: &str = include_str!("../assets/icons/cartoon-text-cursor-input.svg");
-const ICON_CHECK: &str = include_str!("../assets/icons/cartoon-square-check.svg");
-const ICON_RADIO: &str = include_str!("../assets/icons/cartoon-circle-dot.svg");
-const ICON_DROPDOWN: &str = include_str!("../assets/icons/cartoon-square-chevron-down.svg");
-const ICON_SETTINGS: &str = include_str!("../assets/icons/cartoon-settings.svg");
-const ICON_TRASH: &str = include_str!("../assets/icons/cartoon-trash.svg");
+pub const ICON_FORM: &str = include_str!("../assets/icons/devigner/ClipboardList.svg");
+const ICON_TEXT: &str = include_str!("../assets/icons/devigner/TextField.svg");
+const ICON_CHECK: &str = include_str!("../assets/icons/devigner/CheckSquare.svg");
+const ICON_RADIO: &str = include_str!("../assets/icons/devigner/RecordCircle.svg");
+const ICON_DROPDOWN: &str = include_str!("../assets/icons/devigner/ChevronDownSquare.svg");
+const ICON_SETTINGS: &str = include_str!("../assets/icons/devigner/Settings.svg");
+const ICON_TRASH: &str = include_str!("../assets/icons/devigner/TrashBinMinimalistic.svg");
 const SHAPES_CSS: Asset = asset!("/assets/css/shapes.css");
 const IMAGE_SELECT_CSS: Asset = asset!("/assets/css/image-select.css");
 

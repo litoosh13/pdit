@@ -5,7 +5,7 @@
 
 use crate::context_menu::ContextMenuState;
 use crate::editing::{Editing, SelectionOverlay};
-use crate::page_tools::{ImageOverlay, PageTools};
+use crate::page_tools::{ImageOverlay, PageAction, PageTools};
 use dioxus::prelude::*;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -30,21 +30,51 @@ pub struct OpenDocument {
     pub page_sizes: Vec<(f32, f32)>,
 }
 
+/// Locked pages (D-062, the lock in each page's tools row): their clicks,
+/// presses and right-clicks do nothing, so nothing on them changes.
+/// ponytail: kept by page index and cleared when the page count changes (a page
+/// added, removed); a move keeps the count, so its lock stays on the index —
+/// key locks by a page id if that matters.
+#[derive(Clone, Copy)]
+pub struct PageLocks(pub Signal<std::collections::HashSet<u16>>);
+
 #[component]
 pub fn PageList() -> Element {
     let document = use_context::<Signal<Option<OpenDocument>>>();
+    let mut locks = use_context_provider(|| PageLocks(Signal::new(Default::default()))).0;
+    let tools = use_context::<PageTools>();
+    let count = document.read().as_ref().map_or(0, |d| d.page_sizes.len());
+    use_effect(use_reactive!(|count| {
+        let _ = count;
+        if !locks.peek().is_empty() {
+            locks.set(Default::default());
+        }
+    }));
+    // AI mode (D-062) shows only the page it opened on.
+    let frame = use_context::<crate::frame_ui::Frame>();
+    let only = frame.is_ai().then(|| (frame.ai_page)() as usize);
     rsx! {
         // Loaded even with no PDF open: pages.css also sets the app background.
         document::Stylesheet { href: SKELETON_CSS }
         document::Stylesheet { href: PAGES_CSS }
         if let Some(open) = document() {
             div { class: "page-list",
-                for (index, (width, height)) in open.page_sizes.iter().copied().enumerate() {
+                for (index, (width, height)) in open.page_sizes.iter().copied().enumerate().filter(|(i, _)| only.is_none_or(|p| p == *i)) {
                     PageView {
                         key: "{open.id}-{index}",
                         index: index as u16,
+                        count: open.page_sizes.len(),
                         width_pt: width,
                         height_pt: height,
+                    }
+                }
+                // Canva's "+ Add page" (D-062): a blank page after the last one.
+                if only.is_none() {
+                    button {
+                        class: "pdit-add-page",
+                        r#type: "button",
+                        onclick: move |_| tools.run(PageAction::InsertBlank, count.saturating_sub(1) as u16),
+                        "+ Add page"
                     }
                 }
             }
@@ -85,8 +115,10 @@ struct ImageDrag {
 }
 
 #[component]
-fn PageView(index: u16, width_pt: f32, height_pt: f32) -> Element {
+fn PageView(index: u16, count: usize, width_pt: f32, height_pt: f32) -> Element {
     let revealed = use_signal(|| false);
+    let locks = use_context::<PageLocks>().0;
+    let locked = locks.read().contains(&index);
     let watcher = use_hook(|| Rc::new(RefCell::new(Watcher::default())));
     let editing = use_context::<Editing>();
     let context_menu = use_context::<ContextMenuState>();
@@ -155,9 +187,15 @@ fn PageView(index: u16, width_pt: f32, height_pt: f32) -> Element {
         (false, true) => "page t-skel pdit-arming",
         (false, false) => "page t-skel",
     };
+    let width_style = if percent <= 100.0 {
+        format!("width: min(100%, {width_px}px);")
+    } else {
+        format!("width: {width_px}px;")
+    };
     rsx! {
+        PageBar { index, count, locked, revealed: revealed(), width_style }
         div {
-            class: page_class,
+            class: if locked { format!("{page_class} is-locked") } else { page_class.to_owned() },
             "data-page": "{index}",
             // Up to 100 % a page also shrinks to fit a narrow window; zoomed
             // in, it may be wider than the window (the list scrolls sideways).
@@ -181,6 +219,9 @@ fn PageView(index: u16, width_pt: f32, height_pt: f32) -> Element {
             // Click-to-edit (D-019): select the text line under the pointer.
             // Image select / drag-to-move is handled by the pointer events below.
             onclick: move |event| {
+                if locks.peek().contains(&index) {
+                    return;
+                }
                 let Some(slot) = slot_element.peek().clone() else { return };
                 let rect = slot.get_bounding_client_rect();
                 slot_width.set(rect.width());
@@ -199,11 +240,20 @@ fn PageView(index: u16, width_pt: f32, height_pt: f32) -> Element {
                 }
                 editing.select_at(index, x, y);
             },
+            // A double-click on text opens the edit box (D-062); the first
+            // click selected the line.
+            ondoubleclick: move |_| {
+                if !locks.peek().contains(&index) && editing.state.peek().selection.is_some() {
+                    editing.open_edit();
+                }
+            },
             // Click-to-select an image, then drag it to move (D-023a). Text
             // lines keep priority (handled by onclick); a press on empty space
             // deselects any image.
             onpointerdown: move |event| {
-                if event.trigger_button() != Some(dioxus::html::input_data::MouseButton::Primary) {
+                if event.trigger_button() != Some(dioxus::html::input_data::MouseButton::Primary)
+                    || locks.peek().contains(&index)
+                {
                     return;
                 }
                 let Some(slot) = slot_element.peek().clone() else { return };
@@ -351,6 +401,9 @@ fn PageView(index: u16, width_pt: f32, height_pt: f32) -> Element {
             // Right-click menu (D-023): options for what is under the pointer;
             // where none apply, the browser's own menu shows.
             oncontextmenu: move |event| {
+                if locks.peek().contains(&index) {
+                    return event.prevent_default();
+                }
                 let Some(slot) = slot_element.peek().clone() else { return };
                 let rect = slot.get_bounding_client_rect();
                 let point = event.client_coordinates();
@@ -549,4 +602,96 @@ fn draw(canvas: &web_sys::HtmlCanvasElement, index: u16) -> Result<(), String> {
     context
         .put_image_data(&image, 0.0, 0.0)
         .map_err(|e| format!("{e:?}"))
+}
+
+/// The tools row above a page (D-062): a React island (web/gooey-island
+/// `mountPageTools`, Devigner UI), mounted once the page comes near the screen.
+#[component]
+fn PageBar(index: u16, count: usize, locked: bool, revealed: bool, width_style: String) -> Element {
+    let tools = use_context::<PageTools>();
+    let mut locks = use_context::<PageLocks>().0;
+    let mut host = use_signal(|| None::<web_sys::Element>);
+    let controller = use_hook(|| Rc::new(RefCell::new(None::<JsValue>)));
+    let mut mounted = use_signal(|| false);
+    // The island has loaded (the first state goes to it then).
+    let mut ready = use_signal(|| false);
+    let on_lock = use_callback(move |_: ()| {
+        locks.with_mut(|l| {
+            if !l.remove(&index) {
+                l.insert(index);
+            }
+        })
+    });
+    let on_duplicate = use_callback(move |_: ()| tools.run(PageAction::Duplicate, index));
+    let on_add = use_callback(move |_: ()| tools.run(PageAction::InsertBlank, index));
+    let on_delete = use_callback(move |_: ()| tools.run(PageAction::Delete, index));
+
+    // Mount when the page is near the screen.
+    let mount_into = controller.clone();
+    // `revealed` is a prop: reactive, so the effect runs again when it turns on.
+    use_effect(use_reactive!(|revealed| {
+        let Some(element) = host() else { return };
+        if !revealed || *mounted.peek() {
+            return;
+        }
+        mounted.set(true);
+        let controller = mount_into.clone();
+        spawn(async move {
+            let options = js_sys::Object::new();
+            for (name, cb) in [
+                ("onLock", on_lock),
+                ("onDuplicate", on_duplicate),
+                ("onAdd", on_add),
+                ("onDelete", on_delete),
+            ] {
+                let f = Closure::<dyn FnMut()>::new(move || cb.call(()));
+                let _ = js_sys::Reflect::set(&options, &name.into(), f.as_ref());
+                // ponytail: one closure set per row; it lives until the page goes.
+                f.forget();
+            }
+            match crate::island::mount_with(&element, "mountPageTools", &options).await {
+                Ok(c) => {
+                    *controller.borrow_mut() = Some(c);
+                    ready.set(true);
+                }
+                Err(error) => {
+                    crate::log(&format!("pdit: could not load the page tools: {error:?}"))
+                }
+            }
+        });
+    }));
+    // Keep the row current.
+    let push = controller.clone();
+    use_effect(use_reactive!(|(index, count, locked)| {
+        let _ = ready();
+        let Some(c) = push.borrow().clone() else {
+            return;
+        };
+        let Ok(update) = js_sys::Reflect::get(&c, &"update".into())
+            .and_then(|f| f.dyn_into::<js_sys::Function>())
+        else {
+            return;
+        };
+        let state = js_sys::Object::new();
+        let _ = js_sys::Reflect::set(&state, &"page".into(), &f64::from(index).into());
+        let _ = js_sys::Reflect::set(&state, &"count".into(), &(count as f64).into());
+        let _ = js_sys::Reflect::set(&state, &"locked".into(), &locked.into());
+        let _ = update.call1(&JsValue::NULL, &state);
+    }));
+    let unmount = controller.clone();
+    use_drop(move || {
+        if let Some(c) = unmount.borrow().as_ref()
+            && let Ok(f) = js_sys::Reflect::get(c, &"unmount".into())
+                .and_then(|f| f.dyn_into::<js_sys::Function>())
+        {
+            let _ = f.call0(&JsValue::NULL);
+        }
+    });
+    rsx! {
+        div {
+            class: "pdit-page-tools",
+            style: "{width_style}",
+            onmounted: move |event| host.set(event.data().downcast::<web_sys::Element>().cloned()),
+        }
+    }
 }

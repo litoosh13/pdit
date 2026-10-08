@@ -106,9 +106,6 @@
              background: var(--cm-surface); box-shadow: var(--cm-shadow); color: var(--ink); font-size: 13px;
              font-family: 'Inter Variable', ui-sans-serif, system-ui, sans-serif; -webkit-font-smoothing: antialiased;
              --cm-surface: #ffffff; --cm-shadow: 0 0 0 1px rgba(0,0,0,.06), 0 2px 6px rgba(0,0,0,.05), 0 4px 42px rgba(0,0,0,.06); }
-  :root[data-theme='dark'] .sig-box { --cm-surface: #202020;
-    --cm-shadow: 0 0 0 1px rgba(255,255,255,.04) inset, 0 1px 0 0 rgba(255,255,255,.03) inset, 0 0 0 1px rgba(0,0,0,.06), 0 2px 6px 0 rgba(0,0,0,.05), 0 4px 42px 0 rgba(0,0,0,.24);
-    --tabs-text-muted: rgba(242,243,244,.75); --tabs-text-active: #f2f3f4; --tabs-bar-bg: #2a2b2e; --tabs-pill-bg: #3a3c40; }
   .sig-head { display: flex; align-items: center; justify-content: space-between; }
   .sig-head .title { font-weight: 600; }
   /* The pad and the upload preview are paper: white in both themes, like the page. */
@@ -126,13 +123,3 @@
   .sig-ink button { width: 18px; height: 18px; border-radius: 50%; border: 0; cursor: pointer; box-shadow: 0 0 0 1px rgba(0,0,0,.15); }
   .sig-ink button[aria-pressed='true'] { box-shadow: 0 0 0 2px var(--cm-surface), 0 0 0 3.5px var(--ink); }
   .sig-root { --ink: #1f2124; --ink-2: #62656b; --canvas: #fff; }
-  :root[data-theme='dark'] .sig-root { --ink: #f2f3f4; --ink-2: #a5a8ad; --canvas: #1f2124; }
-  /* Dark mode: a light outline keeps the black swatch visible on the dark window. */
-  :root[data-theme='dark'] .sig-ink button:not([aria-pressed='true']) { box-shadow: 0 0 0 1px rgba(255,255,255,.3); }
-@media (prefers-color-scheme: dark) {
-:root:not([data-theme='light']) .sig-box { --cm-surface: #202020;
-    --cm-shadow: 0 0 0 1px rgba(255,255,255,.04) inset, 0 1px 0 0 rgba(255,255,255,.03) inset, 0 0 0 1px rgba(0,0,0,.06), 0 2px 6px 0 rgba(0,0,0,.05), 0 4px 42px 0 rgba(0,0,0,.24);
-    --tabs-text-muted: rgba(242,243,244,.75); --tabs-text-active: #f2f3f4; --tabs-bar-bg: #2a2b2e; --tabs-pill-bg: #3a3c40; }
-  :root:not([data-theme='light']) .sig-root { --ink: #f2f3f4; --ink-2: #a5a8ad; --canvas: #1f2124; }
-  :root:not([data-theme='light']) .sig-ink button:not([aria-pressed='true']) { box-shadow: 0 0 0 1px rgba(255,255,255,.3); }
-}

@@ -140,9 +140,83 @@ pub fn find(page: u16, query: &str, options: FindOptions) -> Result<Vec<Match>, 
     })
 }
 
+/// An edit asked for in words (the AI chat, D-062): `change all "old" to
+/// "new"` — "change" or "replace", optionally "all", the two texts in quotes
+/// ("…", “…”, '…', ‘…’, «…»), joined by "to", "with", "into", "by", "->" or
+/// "→". Returns (old, new); `None` for anything else (then it's a question).
+pub fn parse_change_command(text: &str) -> Option<(String, String)> {
+    let text = text.trim();
+    let lower = text.to_lowercase();
+    if !(lower.starts_with("change") || lower.starts_with("replace")) {
+        return None;
+    }
+    // The quoted parts: (byte start of the opening quote, byte end after the
+    // closing one, the text inside).
+    let mut parts = Vec::new();
+    let mut chars = text.char_indices();
+    while let Some((start, c)) = chars.next() {
+        let close = match c {
+            '"' => '"',
+            '“' => '”',
+            '\'' => '\'',
+            '‘' => '’',
+            '«' => '»',
+            _ => continue,
+        };
+        let mut inner = String::new();
+        let mut end = None;
+        for (i, d) in chars.by_ref() {
+            if d == close || (c == '“' && d == '"') {
+                end = Some(i + d.len_utf8());
+                break;
+            }
+            inner.push(d);
+        }
+        parts.push((start, end?, inner));
+    }
+    let [(_, first_end, old), (second_start, _, new)] = parts.as_slice() else {
+        return None;
+    };
+    let between = text[*first_end..*second_start].trim().to_lowercase();
+    let joined = ["to", "with", "into", "by", "->", "→"].contains(&between.as_str());
+    (joined && !old.trim().is_empty()).then(|| (old.clone(), new.clone()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn change_commands() {
+        let pair = |a: &str, b: &str| Some((a.to_owned(), b.to_owned()));
+        assert_eq!(
+            parse_change_command(r#"change all "Jordan Rivera" to "Jordan Riviera""#),
+            pair("Jordan Rivera", "Jordan Riviera")
+        );
+        assert_eq!(
+            parse_change_command("Replace “Gate 4” with “Gate 5”"),
+            pair("Gate 4", "Gate 5")
+        );
+        assert_eq!(
+            parse_change_command("replace 'cold' by 'warm' "),
+            pair("cold", "warm")
+        );
+        assert_eq!(parse_change_command("change «A» → «B»"), pair("A", "B"));
+        // Removing text: the new text may be empty.
+        assert_eq!(
+            parse_change_command(r#"change all "draft " to """#),
+            pair("draft ", "")
+        );
+        // Questions and half commands are not edits.
+        assert_eq!(parse_change_command("When does the lease begin?"), None);
+        assert_eq!(parse_change_command(r#"change "A""#), None);
+        assert_eq!(parse_change_command(r#"change "A" and "B""#), None);
+        assert_eq!(parse_change_command(r#"change "" to "B""#), None);
+        assert_eq!(
+            parse_change_command(r#"what does "rent" mean in "clause 4""#),
+            None
+        );
+    }
 
     #[test]
     fn finds_and_replaces() {

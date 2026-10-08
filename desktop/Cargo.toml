@@ -26,6 +26,9 @@ serde_json = "1"
 leafmind-qa = { git = "https://github.com/litoosh13/leafmind", tag = "v0.3.1" }
 # Keys the kept question index by the PDF's bytes.
 sha2 = "0.11"
+# Paragraph edits with MuPDF (D-065): pdit's MuPDF layer; the text arrives percent-encoded in a header.
+pdit-mupdf = { path = "../crates/pdit-mupdf" }
+percent-encoding = "2"
 
 # Own workspace: Tauri's native dependencies stay out of the web (wasm) build.
 [workspace]
@@ -34,3 +37,8 @@ sha2 = "0.11"
 lto = true
 codegen-units = 1
 strip = true
+
+# mupdf 0.8.0 with its context and raw pointers public (visibility only; see
+# ../third_party/mupdf-rs/PDIT_PATCH.md), for pdit-mupdf's Story helper.
+[patch.crates-io]
+mupdf = { path = "../third_party/mupdf-rs" }

@@ -44,15 +44,6 @@
 .pdit-swatch[aria-pressed='true'] {
   box-shadow: 0 0 0 2px var(--surface), 0 0 0 3.5px var(--ink);
 }
-/* Dark: a light outline keeps the swatches' edges visible on the dark bar. */
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme='light']) .pdit-swatch:not([aria-pressed='true']) {
-    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.3);
-  }
-}
-:root[data-theme='dark'] .pdit-swatch:not([aria-pressed='true']) {
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.3);
-}
 
 /* The note box: the menu's surface, positioned on the page. */
 .pdit-note-box.cm-menu {
@@ -292,22 +283,6 @@
 }
 .pdit-link-box .sa-control {
   background: transparent;
-}
-/* The link box's tabs (Transitions.dev "Tabs sliding", signature.css) take the
-   dark surface's tokens in dark mode, as in the header & footer window. */
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme='light']) .pdit-link-box {
-    --tabs-text-muted: rgba(242, 243, 244, 0.75);
-    --tabs-text-active: #f2f3f4;
-    --tabs-bar-bg: #2a2b2e;
-    --tabs-pill-bg: #3a3c40;
-  }
-}
-:root[data-theme='dark'] .pdit-link-box {
-  --tabs-text-muted: rgba(242, 243, 244, 0.75);
-  --tabs-text-active: #f2f3f4;
-  --tabs-bar-bg: #2a2b2e;
-  --tabs-pill-bg: #3a3c40;
 }
 .pdit-link-box .t-tabs {
   align-self: flex-start;

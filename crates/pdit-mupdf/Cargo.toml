@@ -1,0 +1,21 @@
+[package]
+name = "pdit-mupdf"
+description = "pdit's MuPDF engine layer (desktop, native): reading paragraphs and editing them with MuPDF's Story layout."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+# Native only (the desktop app); on wasm32 the crate is empty.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+mupdf = { version = "0.8", default-features = false, features = ["html", "base14-fonts"] }
+mupdf-sys = { version = "0.8", default-features = false, features = ["html", "base14-fonts"] }
+# Fallback fonts are embedded with only the glyphs the new text needs.
+allsorts.workspace = true
+
+[build-dependencies]
+cc = "1"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+mupdf = { version = "0.8", default-features = false, features = ["html", "base14-fonts"] }

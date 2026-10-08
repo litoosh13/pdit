@@ -10,19 +10,20 @@ use pdit_core::page_ops;
 use wasm_bindgen::JsCast;
 
 const TOAST_CSS: Asset = asset!("/assets/css/toast.css");
-const ICON_BLANK: &str = include_str!("../assets/icons/cartoon-blank-page.svg");
-const ICON_COPY: &str = include_str!("../assets/icons/cartoon-copy.svg");
-const ICON_IMPORT: &str = include_str!("../assets/icons/cartoon-import.svg");
-const ICON_ROTATE: &str = include_str!("../assets/icons/cartoon-rotate-ccw.svg");
-const ICON_TRASH: &str = include_str!("../assets/icons/cartoon-trash.svg");
-const ICON_UNDO: &str = include_str!("../assets/icons/cartoon-undo.svg");
-const ICON_MOVE: &str = include_str!("../assets/icons/cartoon-arrow-up-down.svg");
-const ICON_IMAGE: &str = include_str!("../assets/icons/cartoon-image-plus.svg");
-const ICON_SHAPE: &str = include_str!("../assets/icons/cartoon-rectangle-sides.svg");
-const ICON_TABLE: &str = include_str!("../assets/icons/fact-table.svg");
-const ICON_SIGNATURE: &str = include_str!("../assets/icons/signature.svg");
-/// The image-options bar's Delete icon (red, sourced for this use, D-023a).
-const ICON_PERMANENT_DELETE: &str = include_str!("../assets/icons/cartoon-permanent-delete.svg");
+const ICON_BLANK: &str = include_str!("../assets/icons/devigner/DocumentNormal.svg");
+const ICON_COPY: &str = include_str!("../assets/icons/devigner/Copy.svg");
+const ICON_IMPORT: &str = include_str!("../assets/icons/devigner/Import.svg");
+const ICON_ROTATE: &str = include_str!("../assets/icons/devigner/RotateLeft.svg");
+const ICON_TRASH: &str = include_str!("../assets/icons/devigner/TrashBinMinimalistic.svg");
+const ICON_UNDO: &str = include_str!("../assets/icons/devigner/UndoLeft.svg");
+const ICON_MOVE: &str = include_str!("../assets/icons/devigner/SortVertical.svg");
+const ICON_IMAGE: &str = include_str!("../assets/icons/devigner/GalleryAdd.svg");
+const ICON_SHAPE: &str = include_str!("../assets/icons/devigner/Stop.svg");
+const ICON_TABLE: &str = include_str!("../assets/icons/devigner/Grid3x3.svg");
+const ICON_SIGNATURE: &str = include_str!("../assets/icons/devigner/Magicpen.svg");
+/// The image-options bar's Delete icon (red by CSS, image-select.css, D-023a).
+const ICON_PERMANENT_DELETE: &str =
+    include_str!("../assets/icons/devigner/TrashBinMinimalistic.svg");
 
 /// The hidden file input that "Insert pages from PDF" clicks.
 const INSERT_INPUT_ID: &str = "pdit-insert-pdf";
@@ -727,6 +728,16 @@ impl PageTools {
         });
     }
 
+    /// The last page-tool step can be undone (the centre bar's Undo, D-062).
+    pub fn can_undo(&self) -> bool {
+        self.toast.read().as_ref().is_some_and(|t| t.undo.is_some())
+    }
+
+    /// The centre bar's Undo: the same as the last toast's Undo.
+    pub fn undo_last(self) {
+        self.undo();
+    }
+
     fn undo(mut self) {
         let Some(toast) = self.toast.peek().clone() else {
             return;
@@ -736,6 +747,12 @@ impl PageTools {
         let Some(snapshot) = toast.undo else {
             return;
         };
+        // Used once: a second Undo must not restore the same snapshot again.
+        self.toast.with_mut(|t| {
+            if let Some(t) = t.as_mut() {
+                t.undo = None;
+            }
+        });
         let before = self
             .table_before
             .peek()
@@ -962,7 +979,7 @@ pub fn ImageOverlay(page: u16, page_height_pt: f32, scale: f32) -> Element {
                             event.stop_propagation();
                             tools.delete_image_selection();
                         },
-                        span { dangerous_inner_html: ICON_PERMANENT_DELETE, style: "display: contents" }
+                        span { class: "sa-danger", dangerous_inner_html: ICON_PERMANENT_DELETE, style: "display: contents" }
                         "Delete"
                     }
                 }

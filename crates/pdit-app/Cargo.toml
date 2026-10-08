@@ -16,4 +16,4 @@ wasm-bindgen-futures.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
-web-sys = { workspace = true, features = ["AddEventListenerOptions", "Blob", "BlobPropertyBag", "CanvasRenderingContext2d", "console", "CssStyleDeclaration", "Document", "DomTokenList", "Element", "DomRect", "HtmlAnchorElement", "HtmlCanvasElement", "HtmlElement", "HtmlInputElement", "ImageData", "IntersectionObserver", "IntersectionObserverEntry", "IntersectionObserverInit", "KeyboardEvent", "MouseEvent", "PointerEvent", "ResizeObserver", "Response", "WheelEvent", "Storage", "Url", "Window"] }
+web-sys = { workspace = true, features = ["AddEventListenerOptions", "Blob", "BlobPropertyBag", "CanvasRenderingContext2d", "console", "CssStyleDeclaration", "Document", "DomTokenList", "Element", "DomRect", "HtmlAnchorElement", "HtmlCanvasElement", "HtmlElement", "HtmlInputElement", "HtmlTextAreaElement", "ImageData", "IntersectionObserver", "IntersectionObserverEntry", "IntersectionObserverInit", "KeyboardEvent", "MouseEvent", "PointerEvent", "ResizeObserver", "Response", "WheelEvent", "Storage", "Url", "Window"] }

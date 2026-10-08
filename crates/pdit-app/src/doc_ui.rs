@@ -16,8 +16,8 @@ use wasm_bindgen::JsCast;
 
 const DOC_CSS: Asset = asset!("/assets/css/doc.css");
 const SIGNATURE_CSS: Asset = asset!("/assets/css/signature.css");
-pub const ICON_HF: &str = include_str!("../assets/icons/cartoon-layout-template.svg");
-pub const ICON_WM: &str = include_str!("../assets/icons/cartoon-watermark.svg");
+pub const ICON_HF: &str = include_str!("../assets/icons/devigner/LayoutHeader.svg");
+pub const ICON_WM: &str = include_str!("../assets/icons/devigner/Waterdrop.svg");
 /// The modal's close duration (--modal-close-dur).
 const CLOSE_MS: i32 = 150;
 /// The watermark colours (D-042, approved): grey, red, blue, green.

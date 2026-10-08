@@ -12,6 +12,7 @@ use pdfium_render::prelude::*;
 use serde::Serialize;
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 
 /// One text object on a page, for finding what the user clicked.
 #[derive(Debug, Clone, Serialize)]
@@ -232,6 +233,10 @@ struct Base {
     /// Font size before the matrix scales it.
     size: PdfPoints,
     font: Option<PdfFontToken>,
+    /// The embedded font program, to check it has a glyph for new characters:
+    /// a subset can map a character yet have no glyph for it, so it reads back
+    /// right but draws nothing.
+    font_data: Option<Rc<Vec<u8>>>,
     /// The font's traits (none for the defaults of a page without text).
     traits: Option<FontTraits>,
     /// Drawn with pdit's simulated bold (fill + stroke).
@@ -267,6 +272,12 @@ impl Base {
             fill: object.fill_color()?,
             size: text.unscaled_font_size(),
             font: Some(text.font().token()),
+            font_data: text
+                .font()
+                .data()
+                .ok()
+                .filter(|d| !d.is_empty())
+                .map(Rc::new),
             traits: Some(FontTraits::of(&text.font())),
             stroked: text.render_mode() == PdfPageTextRenderMode::FilledThenStroked,
             slanted,
@@ -420,7 +431,11 @@ fn insert_text(
     let (own_bold, own_italic) = traits.map_or((false, false), |t| (t.bold, t.italic));
     let own_fits = !(own_bold && !style.bold) && !(own_italic && !style.italic);
     let mut candidates = Vec::new();
-    if let (Some(font), false, true) = (base.font, wants_noto, own_fits) {
+    let own_draws = base
+        .font_data
+        .as_ref()
+        .is_none_or(|data| !crate::subset::lacks_glyph(data, text));
+    if let (Some(font), false, true, true) = (base.font, wants_noto, own_fits, own_draws) {
         candidates.push((EditMethod::Native, Some(font), None, (own_bold, own_italic)));
     }
     if let (Some(look), false) = (fonts.look_alike, wants_noto) {
@@ -723,6 +738,10 @@ pub fn preview_reflow(
             removed.push((i, pdf_page.objects_mut().remove_object_at_index(i)?));
         }
         removed.reverse();
+        // Draw the new lines where the block's last-drawn piece was: anything
+        // drawn between its pieces (a white box, a table) stays under the text,
+        // as it was under that piece.
+        let at = idx[idx.len() - 1] + 1 - idx.len();
         // Place each wrapped line at the block's left, one line-height apart.
         let mut method = EditMethod::Native;
         let mut added = 0usize;
@@ -733,7 +752,7 @@ pub fn preview_reflow(
             match insert_text(
                 document,
                 &mut pdf_page,
-                min + added,
+                at + added,
                 line,
                 &base,
                 Some(&style),
@@ -756,7 +775,7 @@ pub fn preview_reflow(
                 Err(read_back) => {
                     // Put the block back untouched and report the failure.
                     for _ in 0..added {
-                        pdf_page.objects_mut().remove_object_at_index(min)?;
+                        pdf_page.objects_mut().remove_object_at_index(at)?;
                     }
                     put_back(&mut pdf_page, removed)?;
                     return Err(Error::UnsupportedCharacters {
@@ -769,7 +788,7 @@ pub fn preview_reflow(
         PENDING.with_borrow_mut(|pending| {
             *pending = Some(Pending {
                 page,
-                index: min,
+                index: at,
                 removed,
                 added,
             })
@@ -877,6 +896,7 @@ fn nearest_base(pdf_page: &PdfPage<'_>, x: f32, y: f32) -> Result<Base, Error> {
         fill: PdfColor::BLACK,
         size: PdfPoints::new(12.0),
         font: None,
+        font_data: None,
         traits: None,
         stroked: false,
         slanted: false,

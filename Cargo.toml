@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/pdit-core", "crates/pdit-app"]
+members = ["crates/pdit-core", "crates/pdit-app", "crates/pdit-mupdf"]
 
 [workspace.package]
 version = "0.1.0"
@@ -29,6 +29,8 @@ lopdf = { version = "0.45", default-features = false, features = ["wasm_js"] }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
+# Already in the tree via pdfium-render; pdit-core prints its warnings and errors (P-043).
+log = "0.4"
 web-sys = "0.3"
 
 [profile.release]
@@ -42,6 +44,9 @@ strip = "debuginfo"
 # third_party/pdfium-render/PDIT_PATCH.md), so form fields can be filled the way typing does.
 [patch.crates-io]
 pdfium-render = { path = "third_party/pdfium-render" }
+# mupdf 0.8.0 with its context and raw document/page pointers public (visibility only; see
+# third_party/mupdf-rs/PDIT_PATCH.md), for pdit-mupdf's Story helper.
+mupdf = { path = "third_party/mupdf-rs" }
 
 # Dev builds: no debug info for dependencies. With tract (leafmind's field finder,
 # D-053) the debug wasm reached 406 MB and wasm-bindgen ran out of memory in the

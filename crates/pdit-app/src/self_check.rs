@@ -74,6 +74,7 @@ pub async fn run(font_url: &str) {
     fields_session().await;
     scan_session().await;
     ask_session().await;
+    mupdf_session().await;
     about_session().await;
     page_session();
     expose_page_ops();
@@ -1024,6 +1025,77 @@ async fn about_session() {
     );
 }
 
+/// MuPDF paragraph edits (D-065), desktop only: the wrapped fixture's first paragraph goes through the desktop
+/// app's `edit_paragraph` the way an inline edit does, comes back re-wrapped and reads back in PDFium; a point
+/// whose paragraph isn't the app's is declined.
+async fn mupdf_session() {
+    use crate::ai_ui::desktop;
+    let check = |name: &str, ok: bool, detail: String| {
+        log(&format!(
+            "pdit self-check {}: mupdf: {name}: {detail}",
+            if ok { "PASS" } else { "FAIL" }
+        ))
+    };
+    if !desktop::available() {
+        return log("pdit self-check: mupdf: skipped (not the desktop app)");
+    }
+    let encode = |s: &str| String::from(js_sys::encode_uri_component(s));
+    let old = "This wrapped clause continues across multiple lines purely to exercise the reflow editor, so \
+               selecting any single line should capture the whole block down to this closing period.";
+    let new = old.replace("reflow editor", "reflow text editor");
+    let call = |expected: String| {
+        let headers = [
+            ("x-page", "0".to_owned()),
+            ("x-x", "80".to_owned()),
+            ("x-y", "100".to_owned()),
+            ("x-expected", encode(&expected)),
+            ("x-text", encode(&new)),
+        ];
+        async move { desktop::invoke_raw("edit_paragraph", WRAPPED, &headers).await }
+    };
+    let t = js_sys::Date::now();
+    match call(old.to_owned()).await {
+        Ok(value) => {
+            let bytes = js_sys::Uint8Array::new(&value).to_vec();
+            let ms = js_sys::Date::now() - t;
+            let reopened = pdit_core::open_document(bytes.clone()).is_ok();
+            let text: String = pdit_core::text_lines(0)
+                .map(|lines| {
+                    lines
+                        .iter()
+                        .map(|l| l.text.clone())
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                })
+                .unwrap_or_default();
+            let joined = text.split_whitespace().collect::<Vec<_>>().join(" ");
+            check(
+                "edit comes back and reads in PDFium",
+                reopened
+                    && joined.contains("reflow text editor")
+                    && joined.contains("A separate short note"),
+                format!("{} bytes in {ms:.0} ms; reads {joined:?}", bytes.len()),
+            );
+            pdit_core::close_document();
+        }
+        Err(e) => check(
+            "edit comes back and reads in PDFium",
+            false,
+            format!("{e:?}"),
+        ),
+    }
+    let declined = call("A separate short note stands alone.".to_owned()).await;
+    check(
+        "a different paragraph is declined",
+        declined
+            .as_ref()
+            .err()
+            .and_then(|e| e.as_string())
+            .is_some_and(|e| e.contains("different paragraph")),
+        format!("{declined:?}"),
+    );
+}
+
 async fn ask_session() {
     use crate::ai_ui::desktop;
     use js_sys::{Object, Reflect};
@@ -1054,7 +1126,7 @@ async fn ask_session() {
         format!("{:?}", js_sys::JSON::stringify(&status).ok()),
     );
     let started = js_sys::Date::now();
-    let indexed = desktop::invoke_raw("qa_index", RENTAL).await;
+    let indexed = desktop::invoke_raw("qa_index", RENTAL, &[]).await;
     check(
         "the document is read",
         indexed.is_ok(),

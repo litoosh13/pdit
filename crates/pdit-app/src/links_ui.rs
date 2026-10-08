@@ -10,10 +10,10 @@ use crate::page_tools::{PageTools, next_frame, set_timeout};
 use dioxus::prelude::*;
 use pdit_core::links::{self, Link, LinkTarget};
 
-pub const ICON_LINK: &str = include_str!("../assets/icons/cartoon-link.svg");
-const ICON_OPEN: &str = include_str!("../assets/icons/arrow-up-right.svg");
-const ICON_EDIT: &str = include_str!("../assets/icons/cartoon-pencil.svg");
-const ICON_TRASH: &str = include_str!("../assets/icons/cartoon-trash.svg");
+pub const ICON_LINK: &str = include_str!("../assets/icons/devigner/Link.svg");
+const ICON_OPEN: &str = include_str!("../assets/icons/devigner/ArrowRightUp.svg");
+const ICON_EDIT: &str = include_str!("../assets/icons/devigner/Pen2.svg");
+const ICON_TRASH: &str = include_str!("../assets/icons/devigner/TrashBinMinimalistic.svg");
 /// The link box's close duration (--dropdown-close-dur).
 const CLOSE_MS: i32 = 150;
 /// The link box's width, CSS px (it opens to the left near the page edge).

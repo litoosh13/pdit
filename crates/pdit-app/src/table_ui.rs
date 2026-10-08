@@ -10,7 +10,7 @@ use dioxus::prelude::*;
 
 const TABLE_CSS: Asset = asset!("/assets/css/table.css");
 const IMAGE_SELECT_CSS: Asset = asset!("/assets/css/image-select.css");
-const ICON_PLUS: &str = include_str!("../assets/icons/blockprint-bold-plus.svg");
+const ICON_PLUS: &str = include_str!("../assets/icons/devigner/Plus.svg");
 
 /// The ring and "+" buttons for the table on `page`. `scale` is CSS px per PDF
 /// point. Rendered per page, like the other overlays.

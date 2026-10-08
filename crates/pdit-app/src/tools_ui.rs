@@ -1,29 +1,34 @@
-//! The tools rail (D-050): a Photoshop-style strip of sections on the left;
-//! clicking one opens its tools in a panel beside it (Transitions.dev "Panel
-//! reveal"). Rows are Beautiful UI "Sidebar nav" rows with its sliding hover
-//! highlight. Tools that need a spot (Add text, Add image, Add note, …) arm
+//! The tools rail (D-050, redesign D-062): a strip of sections on the left
+//! edge; clicking one opens its tools in a panel docked beside it, which pushes
+//! the pages over (the Canva editor's layout). Rows are Beautiful UI "Sidebar
+//! nav" rows with its sliding hover highlight. Tools that need a spot (Add text, Add image, Add note, …) arm
 //! first; the next click on a page places them (pages.rs).
 //! Look: assets/css/tools.css.
 
 use crate::context_menu::{Action, page_actions, run};
-use crate::page_tools::{next_frame, set_timeout};
 use dioxus::prelude::*;
 use pdit_core::ShapeKind;
 use wasm_bindgen::JsCast;
-use wasm_bindgen::prelude::*;
 
 const TOOLS_CSS: Asset = asset!("/assets/css/tools.css");
 /// The rail's surface (shared with the Pages panel), also before any PDF.
 const PANEL_CSS: Asset = asset!("/assets/css/thumbnails.css");
-const ICON_TEXT: &str = include_str!("../assets/icons/cartoon-type.svg");
-const ICON_IMAGE: &str = include_str!("../assets/icons/cartoon-image-plus.svg");
-const ICON_SHAPES: &str = include_str!("../assets/icons/cartoon-rectangle-sides.svg");
-const ICON_DOCUMENT: &str = include_str!("../assets/icons/cartoon-layout-template.svg");
-const ICON_PAGE: &str = include_str!("../assets/icons/cartoon-blank-page.svg");
-const ICON_ABOUT: &str = include_str!("../assets/icons/blockprint-crown-above-head.svg");
+const ICON_TEXT: &str = include_str!("../assets/icons/devigner/Text.svg");
+const ICON_IMAGE: &str = include_str!("../assets/icons/devigner/GalleryAdd.svg");
+const ICON_SHAPES: &str = include_str!("../assets/icons/devigner/Shapes.svg");
+const ICON_DOCUMENT: &str = include_str!("../assets/icons/devigner/DocumentText.svg");
+const ICON_PAGE: &str = include_str!("../assets/icons/devigner/DocumentNormal.svg");
+// File actions at the top of the rail (D-062): Devigner Icons (assets/icons/devigner, see SOURCES.md).
+const ICON_OPEN: &str = include_str!("../assets/icons/devigner/Folder.svg");
+const ICON_NEW: &str = include_str!("../assets/icons/devigner/File.svg");
+pub(crate) const ICON_PRINT: &str = include_str!("../assets/icons/devigner/Printer.svg");
+const ICON_CLOSE_PANEL: &str = include_str!("../assets/icons/devigner/ArrowLeft.svg");
+const ICON_ABOUT: &str = include_str!("../assets/icons/devigner/Crown.svg");
 /// About: the rail's last section, at its bottom; its flyout holds the About
 /// panel (update_ui.rs) instead of tool rows.
 const ABOUT: usize = SECTIONS.len();
+/// The Page section (page actions and the thumbnails).
+const PAGE: usize = 7;
 
 /// Rail sections: (title, rail label, icon).
 const SECTIONS: [(&str, &str, &str); 8] = [
@@ -35,11 +40,8 @@ const SECTIONS: [(&str, &str, &str); 8] = [
     ("Comment", "Comment", crate::annotations_ui::ICON_NOTE),
     ("Form", "Form", crate::form_edit_ui::ICON_FORM),
     ("Document", "Document", ICON_DOCUMENT),
-    ("This page", "Page", ICON_PAGE),
+    ("Pages", "Page", ICON_PAGE),
 ];
-
-/// The flyout's close time before another section opens (ms).
-const SWITCH_MS: i32 = 180;
 
 /// The rows of section `i` (some depend on the document's state).
 fn rows(i: usize, stamps: bool) -> Vec<Action> {
@@ -104,10 +106,8 @@ fn places(action: Action) -> bool {
 pub struct Tools {
     /// The section whose tools the flyout shows (kept while it closes).
     section: Signal<Option<usize>>,
-    /// The flyout is open (its Panel reveal state).
+    /// The docked panel is open.
     shown: Signal<bool>,
-    /// The flyout's top (px), level with its rail button.
-    top: Signal<f64>,
     /// The Comment flyout lists the stamps (after "Stamp…").
     stamps: Signal<bool>,
     /// The armed placing tool.
@@ -119,7 +119,6 @@ impl Tools {
         use_context_provider(|| Tools {
             section: Signal::new(None),
             shown: Signal::new(false),
-            top: Signal::new(20.0),
             stamps: Signal::new(false),
             placing: Signal::new(None),
         })
@@ -138,39 +137,20 @@ impl Tools {
         action
     }
 
-    /// Opens section `i` beside its button; a different open section closes
-    /// first, so both moves animate.
+    /// Opens section `i` in the docked panel (another open section is
+    /// replaced in place).
     fn open(mut self, i: usize) {
-        let was_open = *self.shown.peek();
-        self.shown.set(false);
-        let mut tools = self;
-        let mut show = move || {
-            tools.section.set(Some(i));
-            tools.stamps.set(false);
-            tools.reveal(i);
-        };
-        if was_open {
-            set_timeout(SWITCH_MS, show);
-        } else {
-            show();
-        }
+        self.section.set(Some(i));
+        self.stamps.set(false);
+        self.shown.set(true);
     }
 
-    /// After the rows render: level with button `i`, kept in the window, then
-    /// one frame in the closed state so the reveal runs.
-    fn reveal(self, i: usize) {
-        let (mut top, mut shown, section) = (self.top, self.shown, self.section);
-        next_frame(move || {
-            top.set(fly_top(i));
-            next_frame(move || {
-                if *section.peek() == Some(i) {
-                    shown.set(true);
-                }
-            });
-        });
+    /// The bottom bar's page count: the Page section, with the thumbnails.
+    pub fn open_pages(self) {
+        self.open(PAGE);
     }
 
-    /// Closes the flyout; its rows stay while the reveal plays backwards.
+    /// Closes the docked panel; its rows stay while it slides shut.
     fn close(mut self) {
         self.shown.set(false);
     }
@@ -184,9 +164,6 @@ impl Tools {
     fn pick(mut self, action: Action) {
         if action == Action::StampMenu {
             self.stamps.set(true);
-            if let Some(i) = *self.section.peek() {
-                self.reveal(i);
-            }
             return;
         }
         if places(action) {
@@ -198,32 +175,6 @@ impl Tools {
         self.close();
         run(action, current_page(), 0.0, 0.0);
     }
-}
-
-/// The flyout's top for section `i`: its button's top − 8px, inside the window.
-fn fly_top(i: usize) -> f64 {
-    let Some(document) = web_sys::window().and_then(|w| w.document()) else {
-        return 20.0;
-    };
-    let button = document
-        .query_selector(&format!(".pdit-rail [data-section='{i}']"))
-        .ok()
-        .flatten();
-    let fly = document
-        .query_selector(".pdit-fly")
-        .ok()
-        .flatten()
-        .and_then(|e| e.dyn_into::<web_sys::HtmlElement>().ok());
-    let (Some(button), Some(fly)) = (button, fly) else {
-        return 20.0;
-    };
-    let view_h = web_sys::window()
-        .and_then(|w| w.inner_height().ok())
-        .and_then(|v| v.as_f64())
-        .unwrap_or(800.0);
-    let top = button.get_bounding_client_rect().top() - 8.0;
-    top.min(view_h - f64::from(fly.offset_height()) - 16.0)
-        .max(16.0)
 }
 
 /// The page nearest the top of the window (the "This page" actions use it).
@@ -253,7 +204,6 @@ pub fn ToolRail(has_document: bool) -> Element {
     let shapes = use_context::<crate::shapes_ui::ShapeDraw>();
     let mut rail_hl = use_signal(|| None::<(f64, f64)>);
     let mut fly_hl = use_signal(|| None::<(f64, f64)>);
-    use_outside_close(tools);
     let section = (tools.section)();
     let shown = (tools.shown)();
     let stamps = (tools.stamps)();
@@ -274,9 +224,41 @@ pub fn ToolRail(has_document: bool) -> Element {
         document::Stylesheet { href: TOOLS_CSS }
         document::Stylesheet { href: crate::update_ui::UPDATE_CSS }
         aside {
-            class: if has_document { "pdit-rail t-panel-slide" } else { "pdit-rail t-panel-slide is-bare" },
+            class: "pdit-rail t-panel-slide",
             "data-open": "true",
             "aria-label": "Tools",
+            // File actions (D-062): Open, New, and Print once a PDF is open.
+            div { class: "sb-nav pdit-rail-file",
+                button {
+                    class: "sb-item",
+                    r#type: "button",
+                    title: "Open a PDF",
+                    onclick: move |_| crate::open_file(),
+                    span { dangerous_inner_html: ICON_OPEN, style: "display: contents" }
+                    span { "Open" }
+                }
+                button {
+                    class: "sb-item",
+                    r#type: "button",
+                    title: "New blank PDF",
+                    onclick: move |_| crate::new_document(),
+                    span { dangerous_inner_html: ICON_NEW, style: "display: contents" }
+                    span { "New" }
+                }
+                if has_document {
+                    button {
+                        class: "sb-item",
+                        r#type: "button",
+                        title: "Print",
+                        onclick: move |_| run(Action::Print, current_page(), 0.0, 0.0),
+                        span { dangerous_inner_html: ICON_PRINT, style: "display: contents" }
+                        span { "Print" }
+                    }
+                }
+            }
+            if has_document {
+                span { class: "pdit-rail-line" }
+            }
             div {
                 class: "sb-nav",
                 onmouseleave: move |_| rail_hl.set(None),
@@ -338,19 +320,21 @@ pub fn ToolRail(has_document: bool) -> Element {
                 }
             }
         }
+        // The docked panel (D-062): beside the rail; the pages make room for it.
         aside {
-            class: if section == Some(ABOUT) { "pdit-fly t-panel-slide is-about" } else { "pdit-fly t-panel-slide" },
+            class: "pdit-dock",
             "data-open": if shown { "true" } else { "false" },
             "aria-label": "{title} tools",
-            style: "top: {(tools.top)()}px;",
-            div { class: "pdit-panel-head",
+            div { class: "pdit-dock-inner",
+            div { class: "pdit-dock-head",
                 span { class: "title", "{title}" }
                 button {
-                    class: "count pdit-fly-close",
+                    class: "pdit-dock-close",
                     r#type: "button",
                     title: "Close (Esc)",
+                    "aria-label": "Close the panel",
                     onclick: move |_| tools.close(),
-                    "✕"
+                    span { dangerous_inner_html: ICON_CLOSE_PANEL, style: "display: contents" }
                 }
             }
             if section == Some(ABOUT) {
@@ -380,43 +364,11 @@ pub fn ToolRail(has_document: bool) -> Element {
                         }
                     }
                 }
+                if i == PAGE && !stamps {
+                    crate::thumbnails::PageThumbs {}
+                }
+            }
             }
         }
     }
-}
-
-/// A press outside the rail and its flyout closes the flyout (an armed
-/// placing tool stays armed: that press places it).
-fn use_outside_close(tools: Tools) {
-    use_hook(move || {
-        let Some(window) = web_sys::window() else {
-            return;
-        };
-        let mut shown = tools.shown;
-        let placing = tools.placing;
-        let on_pointer = Closure::<dyn FnMut(web_sys::PointerEvent)>::new(
-            move |event: web_sys::PointerEvent| {
-                if !*shown.peek() || placing.peek().is_some() {
-                    return;
-                }
-                let inside = event
-                    .target()
-                    .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
-                    .and_then(|el| el.closest(".pdit-rail, .pdit-fly").ok().flatten())
-                    .is_some();
-                if !inside {
-                    shown.set(false);
-                }
-            },
-        );
-        let capture = web_sys::AddEventListenerOptions::new();
-        capture.set_capture(true);
-        let _ = window.add_event_listener_with_callback_and_add_event_listener_options(
-            "pointerdown",
-            on_pointer.as_ref().unchecked_ref(),
-            &capture,
-        );
-        // The app lives as long as the page.
-        on_pointer.forget();
-    });
 }

@@ -1,8 +1,10 @@
-//! Ask a question (D-056): AI menu → Ask a question opens Beautiful UI's
-//! "Chat" in the right-hand panel. The first time, a card asks before the
-//! question models are downloaded (desktop app: desktop/src/qa.rs). Answers are
-//! the document's own sentences, picked by leafmind, with their page; "Show on
-//! page" marks the sentence (search_ui's mark). Look: assets/css/ask.css.
+//! The AI chat (D-056; redesign D-062, approved mockup
+//! .claude/research/canva-ui/): AI mode's right half. The first time, a card
+//! asks before the question models are downloaded (desktop app:
+//! desktop/src/qa.rs); then the analysis's steps (ai_ui.rs) show as a message;
+//! then questions. Answers are the document's own sentences, picked by
+//! leafmind, with their page; "Show on page" marks the sentence (search_ui's
+//! mark). Look: assets/css/ask.css (Devigner UI tokens).
 
 use crate::ai_ui::desktop;
 use dioxus::prelude::*;
@@ -11,8 +13,8 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 
 const ASK_CSS: Asset = asset!("/assets/css/ask.css");
-const ICON_CLOSE: &str = r#"<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>"#;
-const ICON_SEND: &str = r#"<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>"#;
+const ICON_SEND: &str = include_str!("../assets/icons/devigner/ArrowUp.svg");
+const ICON_SHOW: &str = include_str!("../assets/icons/devigner/Eye.svg");
 const INPUT_ID: &str = "pdit-ask-q";
 
 #[derive(Clone, PartialEq)]
@@ -37,6 +39,12 @@ enum Msg {
     NotFound,
     WrongLanguage(String),
     Failed(String),
+    /// `change all "old" to "new"` done: (old, new, how many).
+    Changed(String, String, usize),
+    /// `change all "old" …`: no "old" in the document.
+    NothingToChange(String),
+    /// A plain reply (why a question can't be answered here).
+    Info(&'static str),
 }
 
 /// Shared Ask state.
@@ -63,31 +71,15 @@ impl Ask {
         })
     }
 
-    /// The Ask panel is open (the Pages panel makes way, D-059).
-    pub fn is_open(&self) -> bool {
-        (self.open)()
-    }
-
     pub fn open(mut self) {
         self.open.set(true);
         spawn(async move { self.check().await });
     }
 
-    /// For the AI menu (D-060): the models must be downloaded first; their
-    /// download progress; the last error.
-    pub fn download_state(&self) -> (bool, Option<(f64, f64)>, Option<String>) {
-        match &*self.models.read() {
-            Models::Missing { progress, error } => (
-                true,
-                progress.map(|(d, t)| (d as f64, t as f64)),
-                error.clone(),
-            ),
-            _ => (false, None, None),
-        }
-    }
-
-    pub fn can_ask(&self) -> bool {
-        *self.models.read() == Models::Ready
+    /// The analysis can run: the question models are ready, or not used on
+    /// this computer (it then skips the questions step).
+    pub fn can_analyze(&self) -> bool {
+        matches!(*self.models.read(), Models::Ready | Models::Unsupported)
     }
 
     pub async fn refresh(self) {
@@ -157,7 +149,35 @@ impl Ask {
 
     fn ask(mut self) {
         let question = self.draft.peek().trim().to_owned();
-        if question.is_empty() || *self.busy.peek() || *self.models.peek() != Models::Ready {
+        if question.is_empty() || *self.busy.peek() {
+            return;
+        }
+        // An edit asked for in words (D-062): done here, no models needed.
+        if let Some((old, new)) = pdit_core::search::parse_change_command(&question) {
+            self.draft.set(String::new());
+            let reply = match crate::search_ui::replace_everywhere(&old, &new) {
+                Ok(0) => Msg::NothingToChange(old),
+                Ok(n) => Msg::Changed(old, new, n),
+                Err(error) => Msg::Failed(error),
+            };
+            self.messages.with_mut(|m| {
+                m.push(Msg::Me(question));
+                m.push(reply);
+            });
+            next_focus();
+            return;
+        }
+        if *self.models.peek() != Models::Ready {
+            let why = if *self.models.peek() == Models::Unsupported {
+                "Questions work on Apple-silicon Macs for now. Edits like change all \"old\" to \"new\" work here."
+            } else {
+                "Questions need the models first (the card above). Edits like change all \"old\" to \"new\" work now."
+            };
+            self.draft.set(String::new());
+            self.messages.with_mut(|m| {
+                m.push(Msg::Me(question));
+                m.push(Msg::Info(why));
+            });
             return;
         }
         self.draft.set(String::new());
@@ -189,7 +209,7 @@ impl Ask {
         if *self.indexed.peek() != Some(version) {
             self.messages
                 .with_mut(|m| m.push(Msg::Wait("Reading the document…")));
-            if let Err(error) = desktop::invoke_raw("qa_index", &bytes).await {
+            if let Err(error) = desktop::invoke_raw("qa_index", &bytes, &[]).await {
                 return Msg::Failed(format!("{error:?}"));
             }
             self.indexed.set(Some(version));
@@ -262,157 +282,197 @@ pub fn AskUi() -> Element {
             ask.reset();
         }
     }));
+    let ai = use_context::<crate::ai_ui::Ai>();
+    let frame = use_context::<crate::frame_ui::Frame>();
+    let analysis = ai.analysis();
+    let tools = use_context::<crate::page_tools::PageTools>();
     let models = (ask.models)();
     let messages = (ask.messages)();
     let draft = (ask.draft)();
-    let can_send = models == Models::Ready && !draft.trim().is_empty() && !(ask.busy)();
+    let can_send = !draft.trim().is_empty() && !(ask.busy)();
     rsx! {
         document::Stylesheet { href: ASK_CSS }
         aside {
             class: "pdit-panel pdit-ask t-panel-slide",
             "data-open": if (ask.open)() { "true" } else { "false" },
-            "aria-label": "Ask a question",
-            div { class: "pdit-ask-head",
-                span { class: "tab", "Ask" }
-                button {
-                    class: "icon",
-                    r#type: "button",
-                    title: "Close (Esc)",
-                    "aria-label": "Close",
-                    onclick: move |_| ask.close(),
-                    span { dangerous_inner_html: ICON_CLOSE, style: "display: contents" }
-                }
-            }
+            "aria-label": "AI chat",
             div { class: "pdit-ask-conv",
-                match models.clone() {
-                    Models::Unknown => rsx! {},
-                    Models::Unsupported => rsx! {
-                        div { class: "pdit-ask-card",
-                            b { "Asking questions works on Apple-silicon Macs for now" }
-                            div { "leafmind's question models need ONNX Runtime, which pdit downloads for Apple-silicon Macs only so far." }
+                if let Models::Missing { progress, error } = models.clone() {
+                    div { class: "ac-card",
+                        b { "pdit's AI needs its models first" }
+                        span {
+                            "About "
+                            b { "760 MB" }
+                            ", downloaded once to this computer. Only the models — your PDFs never leave your computer."
                         }
-                    },
-                    Models::Missing { progress, error } => rsx! {
-                        div { class: "pdit-ask-card",
-                            b { "Asking needs leafmind's question models" }
-                            div {
-                                "About "
-                                b { "760 MB" }
-                                ", downloaded once to this computer from Hugging Face and the ONNX Runtime releases. Only the models are downloaded — this PDF never leaves your computer."
-                            }
-                            div { class: "small",
-                                "Answers are sentences from the document itself, with their page. Nothing is made up; if no sentence answers, pdit says so."
-                            }
-                            if let Some((done, total)) = progress {
-                                div { class: "bar",
-                                    i { style: "width: {done as f64 / total.max(1) as f64 * 100.0}%;" }
-                                }
-                                div { class: "small", "Downloading… {mb(done)} of {mb(total)} MB" }
-                            }
-                            if let Some(error) = error {
-                                div { class: "small err", "The download stopped: {error}. You can try again." }
-                            }
-                            div { class: "row",
-                                if progress.is_some() {
-                                    button { class: "btn", r#type: "button", onclick: move |_| ask.cancel(), "Cancel" }
-                                } else {
-                                    button { class: "btn", r#type: "button", onclick: move |_| ask.close(), "Not now" }
-                                    button { class: "btn primary", r#type: "button", onclick: move |_| ask.download(), "Download" }
-                                }
+                        span { class: "small",
+                            "Answers are sentences from the document itself, with their page. Nothing is made up; if no sentence answers, pdit says so."
+                        }
+                        if let Some((done, total)) = progress {
+                            span { class: "small", "Downloading… {mb(done)} of {mb(total)} MB" }
+                            span { class: "ac-bar",
+                                i { style: "width: {done as f64 / total.max(1) as f64 * 100.0}%;" }
                             }
                         }
-                    },
-                    Models::Ready => rsx! {
-                        if messages.is_empty() {
-                            div { class: "pdit-ask-empty", "Ask anything about this document. Answers quote it, with the page." }
+                        if let Some(error) = error {
+                            span { class: "small err", "The download stopped: {error}. You can try again." }
                         }
-                        for (k, m) in messages.into_iter().enumerate() {
-                            match m {
-                                Msg::Me(q) => rsx! {
-                                    div { key: "{k}", class: "pdit-ask-me", div { "{q}" } }
-                                },
-                                Msg::Wait(what) => rsx! {
-                                    div { key: "{k}", class: "pdit-ask-sec is-wait",
-                                        div { class: "lab", b { "Looking" } }
-                                        p { "{what}" }
-                                    }
-                                },
-                                Msg::Found(sentences) => rsx! {
-                                    for (i, (page, text)) in sentences.into_iter().enumerate() {
-                                        div { key: "{k}-{i}", class: "pdit-ask-sec",
-                                            div { class: "lab",
-                                                if i == 0 {
-                                                    b { "Page {page}" }
-                                                    span { "of the document" }
-                                                } else {
-                                                    b { "Changed by" }
-                                                    span { "page {page}" }
-                                                }
-                                            }
-                                            p { class: "quote", "{text}" }
-                                            button {
-                                                class: "go",
-                                                r#type: "button",
-                                                onclick: {
-                                                    let text = text.clone();
-                                                    move |_| find.mark(page.saturating_sub(1) as u16, &text)
-                                                },
-                                                "Show on page {page}"
-                                            }
-                                        }
-                                    }
-                                },
-                                Msg::NotFound => rsx! {
-                                    div { key: "{k}", class: "pdit-ask-sec",
-                                        div { class: "lab", b { "Not in the document" } }
-                                        p { "No sentence answers this closely enough, so nothing is guessed." }
-                                    }
-                                },
-                                Msg::WrongLanguage(language) => rsx! {
-                                    div { key: "{k}", class: "pdit-ask-sec",
-                                        div { class: "lab",
-                                            b { "Please ask in {language}" }
-                                            span { "— the document is in {language}" }
-                                        }
-                                        p { "Questions are answered in the document's own language." }
-                                    }
-                                },
-                                Msg::Failed(error) => rsx! {
-                                    div { key: "{k}", class: "pdit-ask-sec",
-                                        div { class: "lab", b { "Something went wrong" } }
-                                        p { "{error}" }
-                                    }
-                                },
+                        div { class: "ac-row",
+                            if progress.is_some() {
+                                button { class: "ac-btn", r#type: "button", onclick: move |_| ask.cancel(), "Cancel" }
+                            } else {
+                                button { class: "ac-btn", r#type: "button", onclick: move |_| frame.leave_ai(), "Not now" }
+                                button { class: "ac-btn primary", r#type: "button", onclick: move |_| ask.download(), "Download" }
                             }
                         }
-                    },
+                    }
                 }
-            }
-            div { class: "pdit-ask-composer",
-                div {
-                    class: "box",
-                    onclick: move |_| next_focus(),
-                    input {
-                        id: INPUT_ID,
-                        "aria-label": "Question",
-                        disabled: models != Models::Ready,
-                        placeholder: if models == Models::Ready { "Ask about this document…" } else { "Download the models first" },
-                        value: "{draft}",
-                        oninput: move |e| ask.draft.set(e.value()),
-                        onkeydown: move |e| {
-                            if e.key() == Key::Enter {
-                                ask.ask();
+                // The analysis (D-055), as a message.
+                if !analysis.steps.is_empty() {
+                    div { class: "ac-msg ai ac-steps",
+                        for (i, s) in analysis.steps.iter().enumerate() {
+                            div {
+                                key: "{i}",
+                                class: match s.state {
+                                    crate::ai_ui::State::Wait => "ac-step",
+                                    crate::ai_ui::State::Run => "ac-step is-run",
+                                    crate::ai_ui::State::Done => "ac-step is-done",
+                                    crate::ai_ui::State::Skip => "ac-step is-skip",
+                                },
+                                span { class: "st",
+                                    match s.state {
+                                        crate::ai_ui::State::Wait => "○",
+                                        crate::ai_ui::State::Run => "…",
+                                        crate::ai_ui::State::Done => "✓",
+                                        crate::ai_ui::State::Skip => "–",
+                                    }
+                                }
+                                div {
+                                    b { "{s.what}" }
+                                    if !s.detail.is_empty() {
+                                        small { "{s.detail}" }
+                                    }
+                                }
+                            }
+                        }
+                        if !analysis.summary.is_empty() {
+                            div { class: "ac-sum", "{analysis.summary}" }
+                        }
+                    }
+                }
+                if models == Models::Unsupported {
+                    div { class: "ac-msg ai",
+                        b { "Asking questions works on Apple-silicon Macs for now" }
+                        div { class: "small", "leafmind's question models need ONNX Runtime, which pdit downloads for Apple-silicon Macs only so far." }
+                    }
+                }
+                if models == Models::Ready && messages.is_empty() && !analysis.running {
+                    div { class: "ac-msg ai", "Ask me anything about this document — I answer with the sentence and its page." }
+                }
+                for (k, m) in messages.into_iter().enumerate() {
+                    match m {
+                        Msg::Me(q) => rsx! {
+                            div { key: "{k}", class: "ac-msg me", "{q}" }
+                        },
+                        Msg::Wait(what) => rsx! {
+                            div { key: "{k}", class: "ac-msg ai is-wait", "{what}" }
+                        },
+                        Msg::Found(sentences) => rsx! {
+                            for (i, (page, text)) in sentences.into_iter().enumerate() {
+                                div { key: "{k}-{i}", class: "ac-msg ai",
+                                    if i > 0 {
+                                        div { class: "small", "Changed by page {page}:" }
+                                    }
+                                    blockquote { "“{text}”" }
+                                    div { class: "ac-row start",
+                                        span { class: "ac-badge", "Page {page}" }
+                                        button {
+                                            class: "ac-chip",
+                                            r#type: "button",
+                                            onclick: {
+                                                let text = text.clone();
+                                                move |_| find.mark(page.saturating_sub(1) as u16, &text)
+                                            },
+                                            span { dangerous_inner_html: ICON_SHOW, style: "display: contents" }
+                                            "Show on page"
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        Msg::NotFound => rsx! {
+                            div { key: "{k}", class: "ac-msg ai",
+                                b { "Not in the document" }
+                                div { class: "small", "No sentence answers this closely enough, so nothing is guessed." }
+                            }
+                        },
+                        Msg::WrongLanguage(language) => rsx! {
+                            div { key: "{k}", class: "ac-msg ai",
+                                b { "Please ask in {language}" }
+                                div { class: "small", "The document is in {language}; questions are answered in its own language." }
+                            }
+                        },
+                        Msg::Failed(error) => rsx! {
+                            div { key: "{k}", class: "ac-msg ai",
+                                b { "Something went wrong" }
+                                div { class: "small", "{error}" }
+                            }
+                        },
+                        Msg::Changed(old, new, n) => rsx! {
+                            div { key: "{k}", class: "ac-msg ai",
+                                b {
+                                    if n == 1 { "Changed 1 place" } else { "Changed {n} places" }
+                                }
+                                div { class: "small", "“{old}” → “{new}”" }
+                                div { class: "ac-row start",
+                                    button {
+                                        class: "ac-chip",
+                                        r#type: "button",
+                                        disabled: !tools.can_undo(),
+                                        onclick: move |_| tools.undo_last(),
+                                        "Undo"
+                                    }
+                                }
+                            }
+                        },
+                        Msg::Info(text) => rsx! {
+                            div { key: "{k}", class: "ac-msg ai", "{text}" }
+                        },
+                        Msg::NothingToChange(old) => rsx! {
+                            div { key: "{k}", class: "ac-msg ai",
+                                b { "“{old}” isn't in the document" }
+                                div { class: "small", "Nothing was changed. If the PDF splits the words into pieces, try a shorter part." }
                             }
                         },
                     }
-                    button {
-                        class: if can_send { "send is-on" } else { "send" },
-                        r#type: "button",
-                        "aria-label": "Send",
-                        disabled: !can_send,
-                        onclick: move |_| ask.ask(),
-                        span { dangerous_inner_html: ICON_SEND, style: "display: contents" }
-                    }
+                }
+            }
+            div {
+                class: "ac-input",
+                onclick: move |_| next_focus(),
+                input {
+                    id: INPUT_ID,
+                    "aria-label": "Question",
+                    placeholder: if models == Models::Ready {
+                        "Ask about this document, or: change all \"old\" to \"new\""
+                    } else {
+                        "Edit in words: change all \"old\" to \"new\""
+                    },
+                    value: "{draft}",
+                    oninput: move |e| ask.draft.set(e.value()),
+                    onkeydown: move |e| {
+                        if e.key() == Key::Enter {
+                            ask.ask();
+                        }
+                    },
+                }
+                button {
+                    class: "ac-send",
+                    r#type: "button",
+                    "aria-label": "Send",
+                    disabled: !can_send,
+                    onclick: move |_| ask.ask(),
+                    span { dangerous_inner_html: ICON_SEND, style: "display: contents" }
                 }
             }
         }

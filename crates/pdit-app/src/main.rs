@@ -1,6 +1,6 @@
-//! pdit web app. Only approved UI pieces are shown: the metal top bar (D-031:
-//! Open, New, Pages, Light/Dark, Save, and a round placeholder button), the opened
-//! PDF's pages with the pages panel, and the right-click menu over them.
+//! pdit web app (redesign D-062): the frame (centre bar with Undo · Edit | AI ·
+//! Redo, bottom bar), the tools rail, the opened PDF's pages with the pages
+//! panel, and the right-click menu over them.
 
 use dioxus::prelude::*;
 use std::rc::Rc;
@@ -20,6 +20,7 @@ mod fonts;
 mod form_edit_ui;
 mod format_bar;
 mod forms_ui;
+mod frame_ui;
 mod island;
 mod links_ui;
 mod page_tools;
@@ -39,15 +40,13 @@ mod update_ui;
 mod zoom_ui;
 
 use context_menu::{ContextMenu, ContextMenuState};
-use editing::{EditPanel, Editing, EditingStyles, use_close_on_outside};
+use editing::{Editing, EditingStyles, use_close_on_outside};
 use fonts::Fonts;
 use forms_ui::{FormFill, FormUi};
-use island::TopBar;
 use page_tools::{PageTools, PageToolsUi};
 use pages::{OpenDocument, PageList};
 use shapes_ui::{ShapeDraw, ShapeStyleBar};
 use signature_ui::{Signature, SignatureUi};
-use thumbnails::ThumbnailsPanel;
 
 const PDFIUM_JS: Asset = asset!("/assets/pdfium/pdfium.js");
 const PDFIUM_WASM: Asset = asset!("/assets/pdfium/pdfium.wasm");
@@ -57,18 +56,15 @@ pub(crate) const FALLBACK_FONT: Asset = asset!("/assets/fonts/NotoSans-Regular.t
 const FILE_INPUT_ID: &str = "pdit-open-pdf";
 
 fn main() {
-    theme::apply_saved();
+    theme::apply();
     dioxus::launch(App);
 }
 
 #[component]
 fn App() -> Element {
     let mut engine_ready = use_signal(|| false);
+    use_context_provider(|| EngineReady(engine_ready));
     let document = use_context_provider(|| Signal::new(None::<OpenDocument>));
-    // The pages panel is shown by default; the bar's Pages hides it (D-031).
-    let mut pages_panel_open = use_signal(|| true);
-    // Shared, so the bookmarks list can take the Pages panel's place (D-043).
-    use_context_provider(|| bookmarks_ui::PagesPanel(pages_panel_open));
     let mut editing = Editing::provide();
     ContextMenuState::provide();
     PageTools::provide();
@@ -84,8 +80,9 @@ fn App() -> Element {
     search_ui::Find::provide();
     print_ui::Print::provide();
     find_fields_ui::FindFields::provide();
-    let ai = ai_ui::Ai::provide();
-    let ask = ask_ui::Ask::provide();
+    ai_ui::Ai::provide();
+    ask_ui::Ask::provide();
+    let frame = frame_ui::Frame::provide();
     update_ui::Updates::provide();
     doc_ui::DocTools::provide();
     use_close_on_outside(editing);
@@ -112,25 +109,7 @@ fn App() -> Element {
     rsx! {
         Fonts {}
         EditingStyles {}
-        TopBar {
-            has_doc: document.read().is_some(),
-            pages_shown: pages_panel_open(),
-            ai: ai.view(),
-            on_ai: move |_| ai.opened(),
-            on_ai_pick: move |id: String| ai.pick(&id),
-            on_ai_download: move |_| consume_context::<ask_ui::Ask>().download(),
-            on_ai_cancel: move |_| consume_context::<ask_ui::Ask>().cancel(),
-            on_open: move |_| click_file_input(),
-            on_new: move |_| {
-                if !engine_ready() {
-                    return log("pdit: the PDF engine is still starting; try again in a moment");
-                }
-                let bytes = pdit_core::page_ops::blank_document();
-                show_document(editing, document, bytes, "Untitled.pdf".into());
-            },
-            on_save: move |_| save_open_document(editing, document),
-            on_toggle_pages: move |_| pages_panel_open.toggle(),
-        }
+        frame_ui::FrameBars {}
         input {
             id: FILE_INPUT_ID,
             r#type: "file",
@@ -151,12 +130,10 @@ fn App() -> Element {
             },
         }
         PageList {}
-        if document.read().is_some() {
-            // Ask and Analysis open in the Pages panel's place (D-059).
-            ThumbnailsPanel { open: pages_panel_open() && !ai.panel_open() && !ask.is_open() }
+        // Without a document the rail holds Open, New and About; AI mode hides it.
+        if !frame.is_ai() {
+            tools_ui::ToolRail { has_document: document.read().is_some() }
         }
-        // Without a document the rail holds only About (and an update row).
-        tools_ui::ToolRail { has_document: document.read().is_some() }
         ContextMenu {}
         PageToolsUi {}
         FormUi {}
@@ -166,7 +143,7 @@ fn App() -> Element {
         annotations_ui::CommentsPanel {}
         bookmarks_ui::BookmarksPanel {}
         form_edit_ui::FormEditBar {}
-        zoom_ui::ZoomBar {}
+        zoom_ui::ZoomKeys {}
         search_ui::FindCard {}
         print_ui::PrintUi {}
         update_ui::UpdateUi {}
@@ -176,7 +153,7 @@ fn App() -> Element {
             ask_ui::AskUi {}
         }
         doc_ui::DocWindow {}
-        EditPanel {}
+        editing::SelectionUi {}
     }
 }
 
@@ -202,7 +179,7 @@ fn show_document(
                 name,
                 page_sizes,
             }));
-            // A new document starts at its first page, below the top bar, not
+            // A new document starts at its first page, below the centre bar, not
             // at the scroll position of the one before.
             if let Some(window) = web_sys::window() {
                 window.scroll_to_with_x_and_y(0.0, 0.0);
@@ -210,6 +187,34 @@ fn show_document(
         }
         Err(error) => log(&format!("pdit: could not open the PDF: {error}")),
     }
+}
+
+/// The PDF engine has started (Open and New wait for it).
+#[derive(Clone, Copy)]
+struct EngineReady(Signal<bool>);
+
+/// Open (rail): the system's file picker.
+pub(crate) fn open_file() {
+    click_file_input();
+}
+
+/// New (rail): a blank A4 document.
+pub(crate) fn new_document() {
+    if !*consume_context::<EngineReady>().0.peek() {
+        return log("pdit: the PDF engine is still starting; try again in a moment");
+    }
+    let bytes = pdit_core::page_ops::blank_document();
+    show_document(
+        consume_context(),
+        consume_context(),
+        bytes,
+        "Untitled.pdf".into(),
+    );
+}
+
+/// Save (bottom bar).
+pub(crate) fn save_current() {
+    save_open_document(consume_context(), consume_context());
 }
 
 /// Save (D-020): keeps an edit that is waiting for Keep/Discard, then hands

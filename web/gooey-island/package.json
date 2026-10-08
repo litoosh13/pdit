@@ -5,11 +5,13 @@
   "license": "AGPL-3.0-only",
   "description": "Bundles the Gooey (liquid-gooey) React plus menu into one local ES module for the pdit app.",
   "scripts": {
-    "build": "esbuild src/index.jsx --bundle --format=esm --minify --target=es2020 --jsx=automatic --loader:.svg=text --define:process.env.NODE_ENV=\\\"production\\\" --legal-comments=external --outfile=../../crates/pdit-app/assets/islands/gooey-island.js"
+    "build": "esbuild src/index.jsx --alias:@devigner-ui/icons=./src/devigner-icons.js --bundle --format=esm --minify --target=es2020 --jsx=automatic --loader:.svg=text --define:process.env.NODE_ENV=\\\"production\\\" --legal-comments=external --outfile=../../crates/pdit-app/assets/islands/gooey-island.js"
   },
   "dependencies": {
+    "@devigner-ui/icons": "3.3.0",
+    "devignerui": "1.7.0",
     "liquid-gooey": "0.2.1",
-    "metal-fx": "2.0.10",
+    "motion": "14.0.0",
     "react": "19.3.0",
     "react-dom": "19.3.0"
   },

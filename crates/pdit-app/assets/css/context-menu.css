@@ -70,29 +70,6 @@
   --ink-3: #9a9da3;
 }
 
-/* Dark: follows the system unless the user picked a theme (D-022). */
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme='light']) .cm-menu {
-    --cm-surface: #202020;
-    --cm-shadow: 0 0 0 1px rgba(255, 255, 255, 0.04) inset, 0 1px 0 0 rgba(255, 255, 255, 0.03) inset,
-      0 0 0 1px rgba(0, 0, 0, 0.06), 0 2px 6px 0 rgba(0, 0, 0, 0.05), 0 4px 42px 0 rgba(0, 0, 0, 0.24);
-    --cm-hover: rgba(255, 255, 255, 0.06);
-    --ink: #f2f3f4;
-    --ink-2: #a5a8ad;
-    --ink-3: #6c6f75;
-  }
-}
-
-:root[data-theme='dark'] .cm-menu {
-  --cm-surface: #202020;
-  --cm-shadow: 0 0 0 1px rgba(255, 255, 255, 0.04) inset, 0 1px 0 0 rgba(255, 255, 255, 0.03) inset,
-    0 0 0 1px rgba(0, 0, 0, 0.06), 0 2px 6px 0 rgba(0, 0, 0, 0.05), 0 4px 42px 0 rgba(0, 0, 0, 0.24);
-  --cm-hover: rgba(255, 255, 255, 0.06);
-  --ink: #f2f3f4;
-  --ink-2: #a5a8ad;
-  --ink-3: #6c6f75;
-}
-
 /* ---- Beautiful UI .records-filter-menu ---- */
 .cm-menu {
   position: fixed;
@@ -143,7 +120,7 @@
   outline: none;
 }
 
-/* Koboyo icons at the Selection Actions icon size. */
+/* Icons at the Selection Actions icon size. */
 .cm-menu button svg {
   width: 14px;
   height: 14px;

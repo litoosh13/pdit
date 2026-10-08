@@ -1,8 +1,8 @@
-//! The pages panel (D-029): a left panel that slides in with Transitions.dev
-//! "Panel reveal" and lists the open PDF's pages as Beautiful UI mini cards,
-//! each a thumbnail rendered lazily as it scrolls into the panel's view. It is
-//! shown by default; the top bar's Pages item toggles the `open` prop (D-031). Cards can be dragged to reorder the document (page_ops::move_page,
-//! with the Undo toast).
+//! The page thumbnails (D-029): the open PDF's pages as Beautiful UI mini
+//! cards, each rendered lazily as it scrolls into view. Since D-062 they sit in
+//! the tools rail's Page section (docked panel), opened from the rail or the
+//! bottom bar's page count. Cards can be dragged to reorder the document
+//! (page_ops::move_page, with the Undo toast).
 
 use crate::page_tools::PageTools;
 use crate::pages::OpenDocument;
@@ -14,12 +14,12 @@ use wasm_bindgen::prelude::*;
 
 const THUMBS_CSS: Asset = asset!("/assets/css/thumbnails.css");
 
-/// CSS pixels the thumbnail is drawn at (before the device pixel ratio); about
-/// the width of the panel's card content.
-const THUMB_WIDTH_CSS: f64 = 180.0;
+/// CSS pixels the thumbnail is drawn at (before the device pixel ratio): the
+/// card's width in the docked panel (thumbnails.css `.pdit-thumbs-wrap`).
+const THUMB_WIDTH_CSS: f64 = 200.0;
 
 #[component]
-pub fn ThumbnailsPanel(open: bool) -> Element {
+pub fn PageThumbs() -> Element {
     let document = use_context::<Signal<Option<OpenDocument>>>();
     let tools = use_context::<PageTools>();
     let doc = document();
@@ -59,17 +59,11 @@ pub fn ThumbnailsPanel(open: bool) -> Element {
     rsx! {
         document::Stylesheet { href: THUMBS_CSS }
         if let Some(doc) = doc {
-            aside {
-                class: "pdit-panel t-panel-slide",
-                "data-open": if open { "true" } else { "false" },
-                "aria-label": "Pages",
-                // A drag that ends over the header (or leaves the panel) still drops.
+            div {
+                class: "pdit-thumbs-wrap",
+                // A drag that ends outside the cards (or leaves the list) still drops.
                 onpointerup: move |_| apply(),
                 onpointerleave: move |_| apply(),
-                div { class: "pdit-panel-head",
-                    span { class: "title", "Pages" }
-                    span { class: "count", "{doc.page_sizes.len()}" }
-                }
                 div {
                     class: "pdit-thumbs",
                     // While dragging, reorder the view as the pointer passes cards.

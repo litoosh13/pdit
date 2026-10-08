@@ -108,5 +108,9 @@ pub fn open_project_page(page: String) -> Result<(), String> {
     };
     #[cfg(all(unix, not(target_os = "macos")))]
     let mut command = std::process::Command::new("xdg-open");
-    command.arg(url).spawn().map(|_| ()).map_err(|e| e.to_string())
+    command
+        .arg(url)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
 }

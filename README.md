@@ -6,8 +6,9 @@ Edit text and images, fill and create forms, comment, sign, add links and bookma
 find and replace, print — and, with [leafmind](https://github.com/litoosh13/leafmind), find form fields,
 read scanned pages (OCR) and answer questions about a document, all on your device.
 
-pdit is written in Rust (PDFium for PDFs, Dioxus for the interface). It runs as a desktop app (macOS) and
-in the browser. It is in early development.
+pdit is written in Rust (PDFium for showing PDFs; in the desktop app MuPDF edits text, re-wrapping paragraphs
+and shaping Persian and Arabic; Dioxus for the interface). It runs as a desktop app (macOS) and in the browser.
+It is in early development.
 
 ## Download
 

@@ -7,10 +7,10 @@ use dioxus::prelude::*;
 use pdit_core::ShapeKind;
 
 const SHAPES_CSS: Asset = asset!("/assets/css/shapes.css");
-const ICON_RECT: &str = include_str!("../assets/icons/cartoon-rectangle-sides.svg");
-const ICON_ELLIPSE: &str = include_str!("../assets/icons/circle-small.svg");
-const ICON_LINE: &str = include_str!("../assets/icons/pen-line.svg");
-const ICON_ARROW: &str = include_str!("../assets/icons/arrow-up-right.svg");
+const ICON_RECT: &str = include_str!("../assets/icons/devigner/Stop.svg");
+const ICON_ELLIPSE: &str = include_str!("../assets/icons/devigner/Stop2.svg");
+const ICON_LINE: &str = include_str!("../assets/icons/devigner/Minus.svg");
+const ICON_ARROW: &str = include_str!("../assets/icons/devigner/ArrowRightUp.svg");
 
 /// The table grid's ink and line width (D-038: no style bar for tables).
 pub const TABLE_INK: [u8; 3] = [31, 33, 36];
@@ -56,7 +56,7 @@ pub const PEN_INKS: [(&str, [u8; 3]); 4] = [
     ("Red", [211, 58, 44]),
     ("Green", [31, 157, 85]),
 ];
-const ICON_PEN: &str = include_str!("../assets/icons/cartoon-pen.svg");
+const ICON_PEN: &str = include_str!("../assets/icons/devigner/Pen.svg");
 
 impl ShapeDraw {
     pub fn provide() -> Self {

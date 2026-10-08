@@ -11,7 +11,7 @@ pdit fills PDF form fields the way a person typing does, through PDFium's form-f
 fresh appearance and are visible in every viewer. pdfium-render's bindings implement those calls, but in
 0.9.4 the handles and the bindings accessor they need are crate-private.
 
-## Changes (only visibility; no behaviour changed)
+## Visibility changes
 
 - `src/pdfium.rs`: `PdfiumLibraryBindingsAccessor` is `pub` instead of `pub(crate)` (both the
   `thread_safe` and the plain variant). The upstream author called the `pub(crate)` a mistake in
@@ -19,6 +19,13 @@ fresh appearance and are visible in every viewer. pdfium-render's bindings imple
 - `src/pdf/document/form.rs`: `PdfForm::handle()` is `pub`.
 - `src/pdf/document.rs`: `PdfDocument::handle()` is `pub`.
 - `src/pdf/document/page.rs`: `PdfPage::page_handle()` is `pub`.
+
+## Behaviour fix (2026-10-08)
+
+- `src/bindings/wasm_bindings.rs`, `FPDFFont_GetFontData`: the first, length-only call (`buffer` null,
+  `buflen` 0) copied the font into the null buffer and panicked (`ptr::copy` precondition) in the browser
+  build. Now it copies only when a buffer is given, and at most `buflen` bytes. Needed by `PdfFont::data()`,
+  which pdit uses to check a subset font has glyphs for new text.
 
 ## Removed from the copy (not needed to build pdit)
 

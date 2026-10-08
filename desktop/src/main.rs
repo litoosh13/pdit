@@ -3,11 +3,13 @@
 //! the macOS/Linux webview (WebKit) has no showSaveFilePicker, so pdit's Save
 //! falls back to a browser download, which is turned into a native Save
 //! dialog here. OCR (D-055): the web app sends scanned pages to `ocr_language` /
-//! `ocr_read`, which run leafmind's Tesseract reader on this computer.
+//! `ocr_read`, which run leafmind's Tesseract reader on this computer. Paragraph edits (D-065): `edit_paragraph`
+//! (edit.rs) runs them with MuPDF.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod cache;
+mod edit;
 mod qa;
 mod update;
 
@@ -155,6 +157,7 @@ fn handlers() -> impl Fn(tauri::ipc::Invoke) -> bool {
         ocr_available,
         cache::analysis_get,
         cache::analysis_put,
+        edit::edit_paragraph,
         debug_log
     ]
 }
@@ -177,7 +180,8 @@ fn handlers() -> impl Fn(tauri::ipc::Invoke) -> bool {
         update::open_project_page,
         ocr_available,
         cache::analysis_get,
-        cache::analysis_put
+        cache::analysis_put,
+        edit::edit_paragraph
     ]
 }
 

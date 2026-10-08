@@ -1,159 +1,15 @@
 /*
- * Text edit panel (D-035, the user's design, approved from a live preview on
- * 2026-09-23): the selected line keeps a light-grey outline and a thin grey
- * connector leads to one box beside the page. The box holds, unchanged, the
- * format bar (Gooey DragCard, D-027, inline) and the Selection Actions text
- * row (Beautiful UI, D-019, selection-actions.css), divided by the 1px card-bar
- * line the Pages panel's cards use (Beautiful UI). Surface and shadow: the
- * Gooey surface (--modal-bg, gooey-surface.css) with the Pages panel's
- * "Figma soft" shadow (thumbnails.css). Motion: the Transitions.dev
- * "Panel reveal" tokens used by the Pages panel (open 400ms / close 350ms,
- * ease cubic-bezier(.22,1,.36,1), blur 2px, opacity 0<->1), on the X axis
- * from the right. The outline, the connector and the layout are the user's
- * own design. The theme follows the system unless the user picked one (D-022).
+ * The selected text (D-019; redesign D-062, approved mockup
+ * .claude/research/canva-ui/, after the Canva editor):
+ *   - the selected line keeps a light-grey outline (the user's design, D-035);
+ *   - its toolbar floats under the centre bar: the format bar (Gooey DragCard,
+ *     D-027, inline) and a Link chip, on Devigner UI's surface (white, the
+ *     elevated shadow);
+ *   - Devigner's MenuDock sits just above the line (island); placed by
+ *     editing.rs (`measure`);
+ *   - editing is inline (user 2026-10-08): a white box over the text, in its
+ *     size, wrapping at the block's width; the outline stays its border.
  */
-
-.pdit-edit-panel {
-  --panel-open-dur: 400ms;
-  --panel-close-dur: 350ms;
-  --panel-ease: cubic-bezier(0.22, 1, 0.36, 1);
-  --panel-blur: 2px;
-  --edit-w: 404px;
-  --edit-shadow: 0 0 0 1px rgba(0, 0, 0, 0.06), 0 2px 6px rgba(0, 0, 0, 0.05),
-    0 4px 42px rgba(0, 0, 0, 0.06);
-
-  position: fixed;
-  z-index: 9;
-  width: var(--edit-w);
-  max-width: calc(100vw - 32px);
-  opacity: 0;
-  filter: blur(var(--panel-blur));
-  transform: translateX(32px);
-  pointer-events: none;
-  transition: opacity var(--panel-close-dur) var(--panel-ease),
-    transform var(--panel-close-dur) var(--panel-ease),
-    filter var(--panel-close-dur) var(--panel-ease),
-    top 320ms cubic-bezier(0.77, 0, 0.175, 1);
-}
-
-.pdit-edit-panel[data-open='true'] {
-  opacity: 1;
-  filter: none;
-  transform: none;
-  pointer-events: auto;
-  transition-duration: var(--panel-open-dur), var(--panel-open-dur), var(--panel-open-dur), 320ms;
-}
-
-.pdit-edit-box {
-  background: var(--modal-bg);
-  border-radius: 23px;
-  box-shadow: var(--edit-shadow);
-}
-
-/* The edit box inverts against the theme (user pref, [[pdit-edit-box-inverts-theme]]):
-   a dark card in light mode, a light card in dark mode, so it stands out as the
-   working surface. We swap the box's colour tokens to the opposite theme's
-   values, so its background, the format bar, the text field, the buttons and the
-   icons all flip together to contrast with the box. The compound selector
-   (all three of the panel's classes) keeps these ahead of the base .pdit-plus-menu
-   / .sa-root token rules regardless of stylesheet load order. */
-.pdit-edit-panel.pdit-plus-menu.sa-root {
-  /* Light mode → dark palette. */
-  --modal-bg: #202020;
-  --btn-text: #fbfbfb;
-  --hover-veil: rgba(255, 255, 255, 0.06);
-  --canvas: #1c1d1f;
-  --surface: #232427;
-  --hover: #2a2b2e;
-  --ink: #f2f3f4;
-  --ink-3: #6c6f75;
-  --line: #2e3033;
-  --line-strong: #3a3c40;
-  --accent: #3d9aff;
-  --accent-tint: #3d9aff29;
-}
-:root[data-theme='dark'] .pdit-edit-panel.pdit-plus-menu.sa-root {
-  /* Dark mode → light palette. */
-  --modal-bg: #ffffff;
-  --btn-text: #17181c;
-  --hover-veil: rgba(0, 0, 0, 0.04);
-  --canvas: #f1f2f3;
-  --surface: #ffffff;
-  --hover: #f4f5f6;
-  --ink: #1f2124;
-  --ink-3: #9a9da3;
-  --line: #ecedef;
-  --line-strong: #e0e2e5;
-  --accent: #0285ff;
-  --accent-tint: #e9f3ff;
-}
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme='light']) .pdit-edit-panel.pdit-plus-menu.sa-root {
-    --modal-bg: #ffffff;
-    --btn-text: #17181c;
-    --hover-veil: rgba(0, 0, 0, 0.04);
-    --canvas: #f1f2f3;
-    --surface: #ffffff;
-    --hover: #f4f5f6;
-    --ink: #1f2124;
-    --ink-3: #9a9da3;
-    --line: #ecedef;
-    --line-strong: #e0e2e5;
-    --accent: #0285ff;
-    --accent-tint: #e9f3ff;
-  }
-}
-
-
-/* The Selection Actions text row, inside the box. */
-.pdit-edit-text {
-  border-top: 1px solid var(--line);
-  padding: 5px 5px 5px 8px;
-}
-
-.pdit-edit-text .sa-anchor {
-  position: relative;
-  transform: none;
-  transition: none;
-}
-
-.pdit-edit-text .sa-bar {
-  width: 100%;
-  max-width: none;
-  height: auto;
-  min-height: 36px;
-  align-items: flex-end;
-  padding: 0;
-  background: transparent;
-  box-shadow: none;
-  animation: none;
-}
-
-.pdit-edit-text .sa-content {
-  width: 100%;
-  justify-content: flex-start;
-}
-
-/* Editing: the text field takes the row, the arrow sits at its end. Keep and
-   Discard stay side by side, as in the bar (D-019). */
-.pdit-edit-text .sa-content:has(.sa-form) {
-  justify-content: space-between;
-}
-
-.pdit-edit-text .sa-form {
-  flex: 1;
-  height: auto;
-}
-
-.pdit-edit-text textarea.sa-input {
-  display: block;
-  height: auto;
-  resize: none;
-  overflow: hidden;
-  line-height: 18px;
-  padding: 5px 10px 5px 12px;
-  white-space: pre-wrap;
-}
 
 /* The selected line: a light-grey outline instead of the fill. */
 .sa-highlight.pdit-line-outline {
@@ -164,93 +20,87 @@
   border-radius: 4px;
 }
 
-/* The connector from the outline to the text row. */
-.pdit-edit-link {
+/* The toolbar under the centre bar (14px + 44px, then 8px). */
+.pdit-sel-toolbar {
   position: fixed;
-  inset: 0;
-  width: 100vw;
-  height: 100vh;
-  overflow: visible;
+  top: 66px;
+  left: 50%;
+  z-index: 25;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 6px;
+  border-radius: 12px;
+  background: #ffffff;
+  box-shadow: 0 8px 32px -8px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(0, 0, 0, 0.04);
+  transform: translate(-50%, -8px);
+  opacity: 0;
   pointer-events: none;
-  z-index: 8;
+  transition:
+    opacity 180ms ease,
+    transform 180ms ease;
+}
+.pdit-sel-toolbar[data-open='true'] {
+  transform: translate(-50%, 0);
+  opacity: 1;
+  pointer-events: auto;
+}
+.pdit-sel-sep {
+  width: 1px;
+  height: 20px;
+  margin: 0 6px;
+  background: #ecedef;
+}
+.pdit-sel-chip {
+  height: 32px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: #1f2124;
+  font-family: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.pdit-sel-chip:hover {
+  background: #f4f5f6;
 }
 
-.pdit-edit-link line {
-  stroke: var(--edit-outline, #c9ccd1);
-  stroke-width: 1;
+/* The dock's place at the line: its centre x, and its foot (above the line) or
+   top (below); the MenuDock grows from there. */
+.pdit-sel-dock {
+  position: fixed;
+  z-index: 24;
+  transform: translateX(-50%);
+  display: none;
+}
+.pdit-sel-dock[data-open='true'] {
+  display: block;
 }
 
-.pdit-edit-link circle {
-  fill: var(--edit-outline, #c9ccd1);
+/* The inline box: over the outlined text (same place and padding), white so
+   the old text does not show through, growing with what is typed. */
+.pdit-inline-wrap {
+  position: absolute;
+  z-index: 3;
 }
-
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme='light']) {
-    --edit-outline: #5a5d63;
-  }
-
-  /* No dark-mode fill either (selection-actions.css tints the highlight). */
-  :root:not([data-theme='light']) .sa-highlight.pdit-line-outline {
-    background: none;
-  }
-
-  :root:not([data-theme='light']) .pdit-edit-panel {
-    --edit-shadow: 0 0 0 1px rgba(255, 255, 255, 0.04) inset, 0 0 0 1px rgba(0, 0, 0, 0.06),
-      0 2px 6px rgba(0, 0, 0, 0.05), 0 4px 42px rgba(0, 0, 0, 0.24);
-  }
+.pdit-inline-edit {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  margin: 0;
+  padding: 3px;
+  border: 1px solid var(--edit-outline, #c9ccd1);
+  border-radius: 4px;
+  outline: none;
+  resize: none;
+  overflow: hidden;
+  background: #ffffff;
+  color: #000000;
+  font-family: Helvetica, Arial, sans-serif;
+  caret-color: #0170dd;
 }
-
-:root[data-theme='dark'] {
-  --edit-outline: #5a5d63;
-}
-
-:root[data-theme='dark'] .sa-highlight.pdit-line-outline {
-  background: none;
-}
-
-:root[data-theme='dark'] .pdit-edit-panel {
-  --edit-shadow: 0 0 0 1px rgba(255, 255, 255, 0.04) inset, 0 0 0 1px rgba(0, 0, 0, 0.06),
-    0 2px 6px rgba(0, 0, 0, 0.05), 0 4px 42px rgba(0, 0, 0, 0.24);
-}
-
-/* Wide windows: the panel is a column 20px right of the page (placed by
-   editing.rs, 16px from the window edge); the page list keeps room for it (box
-   + 20px gap + 16px margin), instead of the Pages panel's room, so page and
-   panel stay centred together (the tools rail's :has makes it win over
-   thumbnails.css). */
-@media (min-width: 1181px) {
-  body:has(.pdit-rail):has(.pdit-edit-panel[data-open='true']) .page-list {
-    padding-right: calc(var(--edit-w, 404px) + 36px);
-  }
-}
-
-/* Narrow windows: no room for three columns, so the panel docks at the bottom
-   of the page area (never over the Pages panel), and the page list gets room
-   below it. No connector here (the outline marks the line). */
-@media (max-width: 1180px) {
-  /* !important: wins over the column position editing.rs sets inline, which
-     can remain after the window becomes narrow. */
-  .pdit-edit-panel.is-docked {
-    top: auto !important;
-    bottom: 20px;
-    left: 50% !important;
-    transform: translate(-50%, 24px);
-  }
-
-  .pdit-edit-panel.is-docked[data-open='true'] {
-    transform: translate(-50%, 0);
-  }
-
-  body:has(.pdit-edit-panel[data-open='true']) .page-list {
-    padding-bottom: 180px;
-  }
-}
-
-@media (min-width: 721px) and (max-width: 1180px) {
-  /* Centre over the page list between the tools rail (92px on the left) and
-     the Pages panel's room (248px on the right): 78px left of the window's centre (D-050). */
-  body:has(.pdit-rail) .pdit-edit-panel.is-docked {
-    left: calc(50% - 78px) !important;
-    max-width: calc(100vw - 372px);
-  }
+.pdit-inline-edit.is-error {
+  border-color: var(--red, #e3474c);
 }

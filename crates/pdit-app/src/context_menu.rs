@@ -1,7 +1,7 @@
 //! Right-click menu (D-023, D-025, D-050): only the options of the item under
 //! the pointer — a link, a form field, a comment, a text line, an image — or,
 //! on empty space, the page's own actions. Every tool lives in the tools rail
-//! (tools_ui.rs), which runs the same [`Action`]s through [`run`].
+//! (), which runs the same [`Action`]s through [`run`].
 //! Look and motion: assets/css/context-menu.css.
 
 use crate::editing::Editing;
@@ -13,26 +13,26 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 
 const CONTEXT_MENU_CSS: Asset = asset!("/assets/css/context-menu.css");
-const ICON_EDIT_TEXT: &str = include_str!("../assets/icons/cartoon-pencil.svg");
-const ICON_ADD_TEXT: &str = include_str!("../assets/icons/cartoon-type.svg");
-const ICON_ROTATE: &str = include_str!("../assets/icons/cartoon-rotate-ccw.svg");
-const ICON_BLANK: &str = include_str!("../assets/icons/cartoon-blank-page.svg");
-const ICON_COPY: &str = include_str!("../assets/icons/cartoon-copy.svg");
-const ICON_EXTRACT: &str = include_str!("../assets/icons/cartoon-file-output.svg");
-const ICON_IMPORT: &str = include_str!("../assets/icons/cartoon-import.svg");
-const ICON_TRASH: &str = include_str!("../assets/icons/cartoon-trash.svg");
-const ICON_ADD_IMAGE: &str = include_str!("../assets/icons/cartoon-image-plus.svg");
-const ICON_SELECT_IMAGE: &str = include_str!("../assets/icons/person-selecting-note.svg");
-const ICON_RECT: &str = include_str!("../assets/icons/cartoon-rectangle-sides.svg");
-const ICON_ELLIPSE: &str = include_str!("../assets/icons/circle-small.svg");
-const ICON_LINE: &str = include_str!("../assets/icons/pen-line.svg");
-const ICON_ARROW: &str = include_str!("../assets/icons/arrow-up-right.svg");
-const ICON_TABLE: &str = include_str!("../assets/icons/fact-table.svg");
-const ICON_SIGNATURE: &str = include_str!("../assets/icons/signature.svg");
-const ICON_DRAW: &str = include_str!("../assets/icons/cartoon-pen.svg");
-const ICON_STAMP: &str = include_str!("../assets/icons/cartoon-stamp.svg");
-const ICON_COMMENTS: &str = include_str!("../assets/icons/cartoon-message-square.svg");
-const ICON_SETTINGS: &str = include_str!("../assets/icons/cartoon-settings.svg");
+const ICON_EDIT_TEXT: &str = include_str!("../assets/icons/devigner/Pen2.svg");
+const ICON_ADD_TEXT: &str = include_str!("../assets/icons/devigner/Text.svg");
+const ICON_ROTATE: &str = include_str!("../assets/icons/devigner/RotateLeft.svg");
+const ICON_BLANK: &str = include_str!("../assets/icons/devigner/DocumentNormal.svg");
+const ICON_COPY: &str = include_str!("../assets/icons/devigner/Copy.svg");
+const ICON_EXTRACT: &str = include_str!("../assets/icons/devigner/Export.svg");
+const ICON_IMPORT: &str = include_str!("../assets/icons/devigner/Import.svg");
+const ICON_TRASH: &str = include_str!("../assets/icons/devigner/TrashBinMinimalistic.svg");
+const ICON_ADD_IMAGE: &str = include_str!("../assets/icons/devigner/GalleryAdd.svg");
+const ICON_SELECT_IMAGE: &str = include_str!("../assets/icons/devigner/Cursor.svg");
+const ICON_RECT: &str = include_str!("../assets/icons/devigner/Stop.svg");
+const ICON_ELLIPSE: &str = include_str!("../assets/icons/devigner/Stop2.svg");
+const ICON_LINE: &str = include_str!("../assets/icons/devigner/Minus.svg");
+const ICON_ARROW: &str = include_str!("../assets/icons/devigner/ArrowRightUp.svg");
+const ICON_TABLE: &str = include_str!("../assets/icons/devigner/Grid3x3.svg");
+const ICON_SIGNATURE: &str = include_str!("../assets/icons/devigner/Magicpen.svg");
+const ICON_DRAW: &str = include_str!("../assets/icons/devigner/Pen.svg");
+const ICON_STAMP: &str = include_str!("../assets/icons/devigner/Sticker.svg");
+const ICON_COMMENTS: &str = include_str!("../assets/icons/devigner/Messages.svg");
+const ICON_SETTINGS: &str = include_str!("../assets/icons/devigner/Settings.svg");
 
 /// The Transitions.dev dropdown's close duration (--duration-quick).
 const CLOSE_MS: i32 = 150;
@@ -177,8 +177,9 @@ impl Action {
             Action::Page(PageAction::Delete) => ICON_TRASH,
             Action::ExtractPage => ICON_EXTRACT,
             Action::InsertPdf => ICON_IMPORT,
-            // ponytail: no icon until the user picks a Koboyo one.
-            Action::Print | Action::FindFields => "",
+            Action::Print => crate::tools_ui::ICON_PRINT,
+            // ponytail: no icon until the user picks a Devigner one.
+            Action::FindFields => "",
         }
     }
 
@@ -489,7 +490,10 @@ pub(crate) fn run(action: Action, page: u16, x: f32, y: f32) {
             tools.select_image(page, x, y);
             tools.delete_image_selection();
         }
-        Action::EditText => editing.select_at(page, x, y),
+        Action::EditText => {
+            editing.select_at(page, x, y);
+            editing.open_edit();
+        }
         Action::AddText => {
             // In a table cell, snap into the cell (D-038).
             let (x, y) = tools.snap_to_cell(page, x, y);

@@ -3,8 +3,8 @@
  * demos/DragCard.tsx and demo.css .dgc-card, .dgc-chip and the content-deform
  * rules, MIT, Copyright (c) 2026 Jakub Antalik). pdit changes: fixed to the
  * window and dragged only by its chip, so the controls stay clickable; the
- * card sits above the liquid layer (position/z-index); the theme follows pdit's
- * light/dark choice. Controls use the Selection Actions buttons
+ * card sits above the liquid layer (position/z-index); light only (D-062).
+ * Controls use the Selection Actions buttons
  * (selection-actions.css) and the right-click menu's dropdown (context-menu.css),
  * both loaded by the app.
  */
@@ -58,19 +58,6 @@
 
 .pdit-format-bar .dgc-chip:active {
   cursor: grabbing;
-}
-
-/* Dark: follows the system unless the user picked a theme (D-022). */
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme='light']) .pdit-format-bar .dgc-chip {
-    background: rgba(255, 255, 255, 0.06);
-    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
-  }
-}
-
-:root[data-theme='dark'] .pdit-format-bar .dgc-chip {
-  background: rgba(255, 255, 255, 0.06);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
 }
 
 .pdit-format-bar .dgc-card > * {

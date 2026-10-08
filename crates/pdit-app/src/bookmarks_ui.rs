@@ -8,21 +8,14 @@ use crate::page_tools::PageTools;
 use dioxus::prelude::*;
 use pdit_core::bookmarks::{self, Bookmark};
 
-pub const ICON_BOOKMARK: &str = include_str!("../assets/icons/cartoon-bookmark.svg");
-const ICON_EDIT: &str = include_str!("../assets/icons/cartoon-pencil.svg");
-const ICON_TRASH: &str = include_str!("../assets/icons/cartoon-trash.svg");
-
-/// Whether the Pages panel is open; shared so the bookmarks list can take
-/// its place.
-#[derive(Clone, Copy)]
-pub struct PagesPanel(pub Signal<bool>);
+pub const ICON_BOOKMARK: &str = include_str!("../assets/icons/devigner/Bookmark.svg");
+const ICON_EDIT: &str = include_str!("../assets/icons/devigner/Pen2.svg");
+const ICON_TRASH: &str = include_str!("../assets/icons/devigner/TrashBinMinimalistic.svg");
 
 /// Shared bookmarks-panel state.
 #[derive(Clone, Copy)]
 pub struct BookmarksUi {
     open: Signal<bool>,
-    /// The Pages panel's state before the list opened, restored on close.
-    pages_before: Signal<bool>,
     /// The row being renamed and its draft title.
     renaming: Signal<Option<(usize, String)>>,
 }
@@ -31,7 +24,6 @@ impl BookmarksUi {
     pub fn provide() -> Self {
         use_context_provider(|| BookmarksUi {
             open: Signal::new(false),
-            pages_before: Signal::new(false),
             renaming: Signal::new(None),
         })
     }
@@ -41,18 +33,12 @@ impl BookmarksUi {
         if *self.open.peek() {
             return;
         }
-        let mut pages = consume_context::<PagesPanel>().0;
-        self.pages_before.set(*pages.peek());
-        pages.set(false);
         self.open.set(true);
     }
 
     fn close(mut self) {
         self.open.set(false);
         self.renaming.set(None);
-        consume_context::<PagesPanel>()
-            .0
-            .set(*self.pages_before.peek());
     }
 
     /// Writes `list` as the document's bookmarks, with Undo.

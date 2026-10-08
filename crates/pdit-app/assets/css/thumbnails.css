@@ -16,7 +16,7 @@
  * The theme follows the system unless the user picked one (D-022).
  */
 
-:is(.pdit-panel, .pdit-rail, .pdit-fly) {
+:is(.pdit-panel, .pdit-rail, .pdit-dock) {
   /* Transitions.dev "Panel reveal" tokens (X axis for a side panel). */
   --panel-open-dur: 400ms;
   --panel-close-dur: 350ms;
@@ -36,44 +36,14 @@
     0 4px 42px rgba(0, 0, 0, 0.06);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme='light']) :is(.pdit-panel, .pdit-rail, .pdit-fly) {
-    --ink: oklch(96.4% 0.002 247.839);
-    --ink-2: oklch(73.1% 0.008 260.731);
-    --ink-3: oklch(54.1% 0.01 264.484);
-    --line: oklch(30.8% 0.006 258.354);
-    --surface: oklch(26% 0.006 271.191);
-    --inset: oklch(24.3% 0.004 264.492);
-    --panel-surface: #202020;
-    --panel-shadow: 0 0 0 1px rgba(255, 255, 255, 0.04) inset,
-      0 1px 0 0 rgba(255, 255, 255, 0.03) inset, 0 0 0 1px rgba(0, 0, 0, 0.06),
-      0 2px 6px 0 rgba(0, 0, 0, 0.05), 0 4px 42px 0 rgba(0, 0, 0, 0.24);
-  }
-}
-
-:root[data-theme='dark'] :is(.pdit-panel, .pdit-rail, .pdit-fly) {
-  --ink: oklch(96.4% 0.002 247.839);
-  --ink-2: oklch(73.1% 0.008 260.731);
-  --ink-3: oklch(54.1% 0.01 264.484);
-  --line: oklch(30.8% 0.006 258.354);
-  --surface: oklch(26% 0.006 271.191);
-  --inset: oklch(24.3% 0.004 264.492);
-  --panel-surface: #202020;
-  --panel-shadow: 0 0 0 1px rgba(255, 255, 255, 0.04) inset,
-    0 1px 0 0 rgba(255, 255, 255, 0.03) inset, 0 0 0 1px rgba(0, 0, 0, 0.06),
-    0 2px 6px 0 rgba(0, 0, 0, 0.05), 0 4px 42px 0 rgba(0, 0, 0, 0.24);
-}
-
 /* ---------- the panel (Gooey surface + Panel reveal) ---------- */
 
-:is(.pdit-panel, .pdit-rail, .pdit-fly) {
+.pdit-panel {
   position: fixed;
   left: 16px;
-  /* Level with the top bar on wide windows (user request); below it on
-     narrow ones, where the bar spans the width (D-031: bar at 20px, 56px
-     tall, then a 20px gap). */
+  /* Above the bottom bar (D-062: 52px, then a 16px gap). */
   top: 20px;
-  bottom: 16px;
+  bottom: 68px;
   width: 208px;
   z-index: 9;
   box-sizing: border-box;
@@ -141,8 +111,18 @@
   box-shadow: 0 0 0 1px var(--line);
 }
 
+/* In the docked panel's Page section, under the page actions (D-062). */
+.pdit-thumbs-wrap {
+  margin-top: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.pdit-thumbs-wrap .pdit-thumbs {
+  width: 200px;
+  margin: 0 auto;
+}
+
 .pdit-thumbs {
-  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -215,22 +195,26 @@
   }
 }
 
-/* The Pages panel sits on the right (D-050) and slides in from there. */
+/* The right-hand panels (comments, bookmarks; Analysis and Ask) slide in from
+   the right. */
 .pdit-panel {
   left: auto;
   right: 16px;
   --panel-translate-x: 32px;
 }
 
-/* With a document open the pages keep room for the tools rail (16 + 60px)
-   and, on wide windows, the Pages panel (16 + 208px) whether it is shown or
-   not, so hiding or showing it never moves the pages (D-050). The top bar is
-   centred over that room (top-bar.css). */
+/* The pages make room for the tools rail (72px) and, while it is open, its
+   docked panel (320px), which so pushes the pages over (D-062, tools.css). */
 body:has(.pdit-rail) .page-list {
-  padding-left: 92px;
+  padding-left: 96px;
+  transition: padding-left 280ms cubic-bezier(0.22, 1, 0.36, 1);
 }
+body:has(.pdit-dock[data-open='true']) .page-list {
+  padding-left: 416px;
+}
+/* A right-hand panel (comments, bookmarks) open in Edit mode: room on the right. */
 @media (min-width: 721px) {
-  body:has(.pdit-rail) .page-list {
+  body:not(.pdit-ai-mode):has(.pdit-panel[data-open='true']) .page-list {
     padding-right: 248px;
   }
 }

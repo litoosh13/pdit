@@ -1,7 +1,7 @@
 //! The format bar (D-027): a Gooey island (web/gooey-island, `mountFormatBar`)
 //! shown while a text line is selected. It shows the line's style and reports
-//! changes, which are previewed like edits (Keep / Discard). Since D-035 it sits
-//! inline at the top of the edit panel (editing.rs) instead of floating.
+//! changes, which are previewed like edits (Keep / Discard). Since D-062 it sits
+//! inline in the selection toolbar under the centre bar (editing.rs).
 
 use crate::editing::Editing;
 use dioxus::prelude::*;
@@ -35,7 +35,7 @@ pub fn FormatBar() -> Element {
 
     rsx! {
         div {
-            // Inline in the edit panel (D-035); the island draws no surface.
+            // Inline in the selection toolbar (D-062); the island draws no surface.
             class: "pdit-edit-format",
             onmounted: move |event| {
                 let update = update.clone();

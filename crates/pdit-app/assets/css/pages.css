@@ -14,21 +14,6 @@
     0 1.2px 3.1px rgba(0, 0, 0, 0.01), 0 0.5px 1.3px rgba(0, 0, 0, 0.01);
 }
 
-/* Dark: follows the system unless the user picked a theme (D-022). */
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme='light']) {
-    --page-bg: oklch(0.226 0.004 264.485);
-    --shadow-card: 0 0 0 1px oklch(100% 0 0 / 0.11), 0 1px 2px oklch(0% 0 0 / 0.2),
-      0 2px 6px oklch(0% 0 0 / 0.2);
-  }
-}
-
-:root[data-theme='dark'] {
-  --page-bg: oklch(0.226 0.004 264.485);
-  --shadow-card: 0 0 0 1px oklch(100% 0 0 / 0.11), 0 1px 2px oklch(0% 0 0 / 0.2),
-    0 2px 6px oklch(0% 0 0 / 0.2);
-}
-
 html,
 body {
   margin: 0;
@@ -43,11 +28,13 @@ body {
   align-items: flex-start;
   gap: 24px;
   padding: 24px;
-  /* Room for the top bar (D-031: at 20px, 56px tall, then a 20px gap). */
+  /* Room for the centre bar (D-062: at 14px, 44px tall) and the bottom bar
+     (52px). */
   padding-top: 96px;
+  padding-bottom: 76px;
 }
 
-/* A thumbnail click scrolls its page to the top, below the top bar (same
+/* A thumbnail click scrolls its page to the top, below the centre bar (same
    room as the list's padding-top). */
 .page-list .page {
   margin-inline: auto;
@@ -68,4 +55,38 @@ body {
 .page > .t-skel-content {
   border-radius: inherit;
   overflow: hidden;
+}
+
+/* ---- Page tools (D-062): the row above each page, and "+ Add page" ---- */
+.page-list .pdit-page-tools {
+  margin-inline: auto;
+  /* Close to its page (the list's gap is 24px). */
+  margin-bottom: -18px;
+  min-height: 36px;
+  flex-shrink: 0;
+}
+.page-list .pdit-add-page {
+  margin-inline: auto;
+  width: min(100%, 600px);
+  height: 40px;
+  flex-shrink: 0;
+  border: 1px solid #e0e2e5;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #1f2124;
+  font-family: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+  font-size: 13.5px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.page-list .pdit-add-page:hover {
+  border-color: #c9ccd1;
+}
+/* A locked page: no tools, no arming cursor. */
+.page.is-locked {
+  cursor: default;
+}
+/* AI mode: just the page. */
+body.pdit-ai-mode .page-list :is(.pdit-page-tools, .pdit-add-page) {
+  display: none;
 }

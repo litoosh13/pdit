@@ -42,20 +42,6 @@
   --sb-line: #e0e2e5;
   --sb-hover: #f4f5f6;
 }
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme='light']) {
-    --sb-surface: #232427;
-    --sb-ink: #f2f3f4;
-    --sb-line: #3a3c40;
-    --sb-hover: #2a2b2e;
-  }
-}
-:root[data-theme='dark'] {
-  --sb-surface: #232427;
-  --sb-ink: #f2f3f4;
-  --sb-line: #3a3c40;
-  --sb-hover: #2a2b2e;
-}
 .pdit-shape-bar .grp {
   display: inline-flex;
   align-items: center;

@@ -1,9 +1,8 @@
 # Other third-party parts
 
-
 ## React, React DOM, Scheduler (MIT)
 
-react 19.3.0, react-dom 19.3.0, scheduler 0.28.0 — bundled into the top-bar island (web/gooey-island). https://github.com/facebook/react
+react 19.3.0, react-dom 19.3.0, scheduler 0.28.0 — bundled into the React island (web/gooey-island). https://github.com/facebook/react
 
 ```
 MIT License
@@ -57,9 +56,206 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-## metal-fx (MIT)
+## Devigner UI (MIT)
 
-metal-fx 2.0.10, from Libraries.dev Metal (https://libraries.dev/metal).
+devignerui 1.7.0 (https://ui.devigner.cc) — the Slider and Badge components, bundled into the React island
+(the frame's bottom bar, D-062).
+
+```
+MIT License
+
+Copyright (c) 2026 Devigner
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+## Devigner Icons (MIT; icon artwork CC BY 4.0 and Iconsax terms)
+
+@devigner-ui/icons 3.3.0 (https://icons.devigner.cc) — pdit's interface icons (D-062), bundled into the React island
+and exported as SVG files into crates/pdit-app/assets/icons/devigner.
+
+Credit for the icon artwork: icons from Devigner Icons, derived from the Solar Icon Set by 480 Design
+(https://www.figma.com/community/file/1166831539721848736, licensed under CC BY 4.0,
+https://creativecommons.org/licenses/by/4.0/) and Iconsax by Vuesax (https://iconsax.io, free for personal and
+commercial use). Modified.
+
+```
+Devigner Icons is a free and open-source project. Two different licences apply
+to two different parts of it.
+
+The CODE is MIT licensed and original work.
+The ICON ARTWORK is derived from third-party sets and carries their terms.
+
+See ATTRIBUTION.md for the full provenance of the artwork, what changed, and
+how to credit it in your own project.
+
+================================================================================
+CODE
+================================================================================
+
+Applies to the React components, the CLI, the build scripts, the type
+definitions, the generated metadata and embeddings, the website and the
+documentation.
+
+MIT License
+
+Copyright (c) 2026 Devigner
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+================================================================================
+ICON ARTWORK
+================================================================================
+
+The SVG path data is not original work. It is derived from two existing open
+icon sets:
+
+  Iconsax, by Vuesax                                            909 icons
+  https://iconsax.io
+  Free for personal and commercial use.
+
+  Solar Icon Set, by 480 Design                               1,055 icons
+  https://www.figma.com/community/file/1166831539721848736
+  Licensed under CC BY 4.0.
+  https://creativecommons.org/licenses/by/4.0/
+
+Both sets were modified: merged, deduplicated, renamed, recoloured to
+currentColor and rebuilt as React components.
+
+CC BY 4.0 requires attribution. If you ship the Solar-derived icons, free or
+commercial, open or closed, credit the original author somewhere you keep
+third-party notices:
+
+  Icons from Devigner Icons, derived from Solar Icon Set by 480 Design
+  (CC BY 4.0) and Iconsax by Vuesax. Modified.
+
+CC BY 4.0 does not require you to open-source your own project.
+
+================================================================================
+TRADEMARKS
+================================================================================
+
+Around 35 icons reproduce third-party logos and wordmarks. Those marks belong
+to their respective owners. Nothing in this licence grants any right to use
+them, and each owner's brand guidelines govern instead. See ATTRIBUTION.md.
+```
+
+## Motion (MIT)
+
+motion 14.0.0, framer-motion 14.0.0, motion-dom 14.0.0, motion-utils 14.0.0 (https://motion.dev) — used by Devigner
+UI's components, bundled into the React island.
+
+```
+The MIT License (MIT)
+
+Copyright (c) 2024 [Motion](https://motion.dev) B.V.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+```
+The MIT License (MIT)
+
+Copyright (c) 2018 Framer B.V.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+## cn (MIT)
+
+cn 0.3.3 — class-name helper used by Devigner UI, bundled into the React island.
+
+```
+MIT License
+
+Copyright (c) 2026 shadcn
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+## thinking-orbs (MIT)
+
+thinking-orbs 0.3.2 — a dependency of Devigner UI, bundled into the React island.
 
 ```
 MIT License
@@ -83,35 +279,6 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-```
-
-## metal-fx NOTICE (Paper Shaders, Apache-2.0)
-
-The liquid-metal shader in metal-fx comes from Paper Shaders (Paper Design, Inc.); the Apache License 2.0 text is in licenses/apache-2.0.txt.
-
-```
-metal-fx
-Copyright (c) Jakub Antalik
-
-This product includes software developed by Paper Design, Inc.
-
-  Paper Shaders (https://github.com/paper-design/shaders)
-  Copyright (c) Paper Design, Inc.
-  Licensed under the Apache License, Version 2.0
-  http://www.apache.org/licenses/LICENSE-2.0
-
-Specifically:
-
-  * The `liquidMetal` fragment shader is consumed unmodified at build time
-    from the `@paper-design/shaders` npm package and inlined into the
-    distributed bundle. See src/engine/shaders.ts.
-
-  * The sizing vertex shader in src/engine/shaders.ts (`VERT_SHADER_SRC`) is
-    copied verbatim from `packages/shaders/src/vertex-shader.ts` @ 0.0.80.
-    It is vendored rather than imported because the package exposes it only
-    through `ShaderMount`, which owns its own canvas and animation loop.
-
-No changes were made to either shader's source.
 ```
 
 ## Beautiful UI (MIT)

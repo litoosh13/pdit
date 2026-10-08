@@ -2,6 +2,16 @@
 
 The fonts bundled with pdit and their licences (SIL Open Font License 1.1).
 
+## Vazirmatn (desktop app)
+
+```
+Copyright 2015 The Vazirmatn Project Authors (https://github.com/rastikerdar/vazirmatn)
+
+This Font Software is licensed under the SIL Open Font License, Version 1.1.
+```
+
+The full licence text is the same as below and comes with the font (`desktop/fonts/vazirmatn/OFL.txt`).
+
 ## Noto Sans
 
 ```

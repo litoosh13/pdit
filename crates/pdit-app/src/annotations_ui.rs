@@ -12,13 +12,13 @@ use pdit_core::annotations::{self as annots, Annotation, AnnotationKind, MarkupK
 const ANNOTATIONS_CSS: Asset = asset!("/assets/css/annotations.css");
 /// Transitions.dev "Tabs sliding" lives there; the link box uses it (D-043).
 const TABS_CSS: Asset = asset!("/assets/css/signature.css");
-const ICON_HIGHLIGHT: &str = include_str!("../assets/icons/highlighter.svg");
-const ICON_UNDERLINE: &str = include_str!("../assets/icons/underline-letter.svg");
-const ICON_STRIKEOUT: &str = include_str!("../assets/icons/strikethrough-2.svg");
-pub const ICON_NOTE: &str = include_str!("../assets/icons/comment-bubble.svg");
-const ICON_TRASH: &str = include_str!("../assets/icons/cartoon-trash.svg");
-const ICON_PEN: &str = include_str!("../assets/icons/cartoon-pen.svg");
-const ICON_STAMP: &str = include_str!("../assets/icons/cartoon-stamp.svg");
+const ICON_HIGHLIGHT: &str = include_str!("../assets/icons/devigner/Brush2.svg");
+const ICON_UNDERLINE: &str = include_str!("../assets/icons/devigner/TextUnderline.svg");
+const ICON_STRIKEOUT: &str = include_str!("../assets/icons/devigner/TextCross.svg");
+pub const ICON_NOTE: &str = include_str!("../assets/icons/devigner/MessageText.svg");
+const ICON_TRASH: &str = include_str!("../assets/icons/devigner/TrashBinMinimalistic.svg");
+const ICON_PEN: &str = include_str!("../assets/icons/devigner/Pen.svg");
+const ICON_STAMP: &str = include_str!("../assets/icons/devigner/Sticker.svg");
 const THUMBS_CSS: Asset = asset!("/assets/css/thumbnails.css");
 
 /// The stamps (D-041, approved): label and colour.
@@ -408,12 +408,6 @@ pub fn AnnotationKeys() -> Element {
             }
             if let Some(find) = try_consume_context::<crate::find_fields_ui::FindFields>() {
                 find.cancel();
-            }
-            if let Some(ai) = try_consume_context::<crate::ai_ui::Ai>() {
-                ai.escape();
-            }
-            if let Some(ask) = try_consume_context::<crate::ask_ui::Ask>() {
-                ask.close();
             }
         }
     });

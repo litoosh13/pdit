@@ -41,34 +41,6 @@
 .pdit-find.is-closing {
   animation: pdit-find-pop-out 120ms ease-in both;
 }
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme='light']) .pdit-find {
-    --surface: #232427;
-    --inset: #1f2022;
-    --hover: #2a2b2e;
-    --ink: #f2f3f4;
-    --ink-2: #a5a8ad;
-    --ink-3: #6c6f75;
-    --line: #2e3033;
-    --accent: #3d9aff;
-    --accent-ink: #7ec0ff;
-    --accent-tint: #3d9aff29;
-    --shadow-raised: 0 0 0 1px var(--line), 0 2px 10px #00000038;
-  }
-}
-:root[data-theme='dark'] .pdit-find {
-  --surface: #232427;
-  --inset: #1f2022;
-  --hover: #2a2b2e;
-  --ink: #f2f3f4;
-  --ink-2: #a5a8ad;
-  --ink-3: #6c6f75;
-  --line: #2e3033;
-  --accent: #3d9aff;
-  --accent-ink: #7ec0ff;
-  --accent-tint: #3d9aff29;
-  --shadow-raised: 0 0 0 1px var(--line), 0 2px 10px #00000038;
-}
 /* Beside the Pages panel's room on wide windows (D-050). */
 @media (min-width: 721px) {
   body:has(.pdit-rail) .pdit-find {
@@ -306,4 +278,18 @@
     opacity: 0;
     transform: scale(0.95);
   }
+}
+
+/* Devigner Icons (D-062) at the find bar's sizes. */
+.pdit-find-mag svg {
+  width: 14px;
+  height: 14px;
+}
+.pdit-find-icon svg {
+  width: 12px;
+  height: 12px;
+}
+.pdit-find-clear svg {
+  width: 11px;
+  height: 11px;
 }
