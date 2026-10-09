@@ -24,7 +24,7 @@ allsorts = { version = "=0.17.0", default-features = false, features = ["flate2_
 # Writes what PDFium can't — page links (/Dest) and bookmarks (outlines) — as an
 # incremental update on PDFium's saved bytes (D-045). wasm_js: getrandom for its
 # encryption code in the browser.
-leafmind-fields = { git = "https://github.com/litoosh13/leafmind", tag = "v0.3.1" }
+leafmind-fields = { git = "https://github.com/litoosh13/leafmind", tag = "v0.3.2" }
 lopdf = { version = "0.45", default-features = false, features = ["wasm_js"] }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"

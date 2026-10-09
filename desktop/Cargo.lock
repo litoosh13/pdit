@@ -2378,16 +2378,16 @@ checksum = "20870f649af7073d53e38067b2a84312175d56ea15217e1b15bc83506ec50afb"
 
 [[package]]
 name = "leafmind-ocr"
-version = "0.3.1"
-source = "git+https://github.com/litoosh13/leafmind?tag=v0.3.1#14e58882dba5742cd1b9add468e7cf0a144eba29"
+version = "0.3.2"
+source = "git+https://github.com/litoosh13/leafmind?tag=v0.3.2#cb93f4f847f88e2393c4151e071e31bb63dd2d0d"
 dependencies = [
  "libloading 0.9.0",
 ]
 
 [[package]]
 name = "leafmind-qa"
-version = "0.3.1"
-source = "git+https://github.com/litoosh13/leafmind?tag=v0.3.1#14e58882dba5742cd1b9add468e7cf0a144eba29"
+version = "0.3.2"
+source = "git+https://github.com/litoosh13/leafmind?tag=v0.3.2#cb93f4f847f88e2393c4151e071e31bb63dd2d0d"
 dependencies = [
  "lingua",
  "ort",
@@ -3301,7 +3301,7 @@ dependencies = [
 [[package]]
 name = "pdf-inspector"
 version = "1.24.0"
-source = "git+https://github.com/litoosh13/leafmind?tag=v0.3.1#14e58882dba5742cd1b9add468e7cf0a144eba29"
+source = "git+https://github.com/litoosh13/leafmind?tag=v0.3.2#cb93f4f847f88e2393c4151e071e31bb63dd2d0d"
 dependencies = [
  "env_logger",
  "include_dir",
