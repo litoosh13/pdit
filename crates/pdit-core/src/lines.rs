@@ -43,6 +43,22 @@ pub(crate) struct Line {
     size: f32,
 }
 
+impl Line {
+    /// Its text objects, left to right.
+    pub(crate) fn indices(&self) -> &[usize] {
+        &self.indices
+    }
+
+    pub(crate) fn text(&self) -> &str {
+        &self.text
+    }
+
+    /// Left, bottom, right, top in PDF points.
+    pub(crate) fn bounds(&self) -> [f32; 4] {
+        [self.l, self.b, self.r, self.t]
+    }
+}
+
 /// Groups `pieces` into visual lines: pieces whose baselines are within a
 /// third of the size of each other, left to right, split where the gap is over
 /// 1.5 × the size (a table column). The text joins the pieces as they are, with

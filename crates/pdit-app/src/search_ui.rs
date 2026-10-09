@@ -161,25 +161,20 @@ impl Find {
             self.with.peek().clone(),
             *self.options.peek(),
         );
-        // One edit per line; highest index first on each page, so earlier
-        // indices stay valid.
-        let lines: Vec<(u16, usize, String, Option<usize>)> = if all {
-            let mut lines: Vec<_> = results
-                .iter()
-                .map(|m| (m.page, m.object_index, m.line.clone(), None))
-                .collect();
-            lines.dedup_by_key(|l| (l.0, l.1));
-            lines
+        if all {
+            // Over the joined lines, so a phrase split into pieces is replaced too.
+            if let Err(error) = replace_all_in_lines(&query, &with, options, &noto) {
+                crate::log(&format!("pdit: replace all: {error}"));
+            }
         } else {
-            vec![(
+            let line = (
                 current.page,
                 current.object_index,
                 current.line.clone(),
                 Some(current.nth),
-            )]
-        };
-        let count = if all { results.len() } else { 1 };
-        replace_lines(lines, &query, &with, options, count, &noto);
+            );
+            replace_lines(vec![line], &query, &with, options, 1, &noto);
+        }
         self.search();
     }
 }
@@ -218,8 +213,6 @@ fn replace_lines(
 /// The AI chat's `change all "old" to "new"` (D-062): every `query` in the
 /// document (any letter case, any part of a word) becomes `with`, as one step
 /// with Undo. Returns how many were changed.
-/// ponytail: matches inside one text object only, like Find; a phrase the PDF
-/// splits into pieces isn't found — search the joined lines (lines.rs) for that.
 pub(crate) fn replace_everywhere(query: &str, with: &str) -> Result<usize, String> {
     let editing = consume_context::<crate::editing::Editing>();
     let noto = editing
@@ -228,22 +221,76 @@ pub(crate) fn replace_everywhere(query: &str, with: &str) -> Result<usize, Strin
         .clone()
         .ok_or("the fallback font is still loading; try again in a moment")?;
     editing.keep_waiting();
-    let options = search::FindOptions::default();
-    let pages = pdit_core::page_ops::page_sizes().map_or(0, |s| s.len());
-    let mut found = Vec::new();
+    replace_all_in_lines(query, with, search::FindOptions::default(), &noto)
+}
+
+/// Every match of `query` in the document's visual lines (pieces on one
+/// baseline joined, so a phrase the PDF split into several text objects is
+/// found) becomes `with`, as one step with Undo; nothing changes if any line
+/// fails. A line with a match is rewritten as one text object (one piece: an
+/// ordinary line edit). Returns how many were replaced.
+fn replace_all_in_lines(
+    query: &str,
+    with: &str,
+    options: search::FindOptions,
+    noto: &[u8],
+) -> Result<usize, String> {
+    let pages = pdit_core::page_ops::page_sizes().map_or(0, |s| s.len()) as u16;
+    // A point inside each line with a match: object numbers change with every
+    // edit, so each line is found again by where it is (lines don't overlap).
+    let mut targets = Vec::new();
+    let mut count = 0;
     for page in 0..pages {
-        found.extend(search::find(page as u16, query, options).map_err(|e| e.to_string())?);
+        for line in pdit_core::visual_text_lines(page).map_err(|e| e.to_string())? {
+            let n = search::find_in(&line.text, query, options).len();
+            if n > 0 {
+                count += n;
+                let [l, b, _, t] = line.bounds;
+                targets.push((page, l + 0.5, (b + t) / 2.0));
+            }
+        }
     }
-    let count = found.len();
-    let mut lines: Vec<_> = found
-        .into_iter()
-        .map(|m| (m.page, m.object_index, m.line, None))
-        .collect();
-    lines.dedup_by_key(|l| (l.0, l.1));
-    if count > 0 {
-        replace_lines(lines, query, with, options, count, &noto);
+    if count == 0 {
+        return Ok(0);
     }
-    Ok(count)
+    let message = if count == 1 {
+        "Replaced 1".to_owned()
+    } else {
+        format!("Replaced {count}")
+    };
+    let mut failure = None;
+    consume_context::<PageTools>().apply(&message, ICON_FIND, || {
+        let fonts = pdit_core::Fonts {
+            look_alike: None,
+            noto_sans: noto,
+        };
+        let before = pdit_core::page_ops::snapshot()?;
+        let result: Result<(), pdit_core::Error> = (|| {
+            for &(page, x, y) in &targets {
+                let lines = pdit_core::visual_text_lines(page)?;
+                let Some(line) = lines.iter().find(|ln| {
+                    let [l, b, r, t] = ln.bounds;
+                    x >= l && x <= r && y >= b && y <= t
+                }) else {
+                    continue;
+                };
+                let new = search::replace_in(&line.text, query, with, options, None);
+                pdit_core::preview_line(page, &line.object_indices, &new, &fonts)?;
+                pdit_core::keep_edit();
+            }
+            Ok(())
+        })();
+        if let Err(error) = &result {
+            failure = Some(error.to_string());
+            let _ = pdit_core::discard_edit();
+            let _ = pdit_core::page_ops::restore(before);
+        }
+        result
+    });
+    match failure {
+        Some(error) => Err(error),
+        None => Ok(count),
+    }
 }
 
 /// Brings the current match into the middle of the window.

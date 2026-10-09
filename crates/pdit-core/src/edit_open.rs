@@ -96,20 +96,58 @@ pub fn text_lines(page: u16) -> Result<Vec<TextLine>, Error> {
 pub fn paragraph_at(page: u16, x: f32, y: f32) -> Result<Option<Paragraph>, Error> {
     with_open(|document| {
         let pdf_page = document.pages().get(page.into())?;
-        let mut pieces = Vec::new();
-        for (index, object) in pdf_page.objects().iter().enumerate() {
-            if let Some(text) = object.as_text_object() {
-                pieces.push(Piece {
-                    index,
-                    text: text.text(),
-                    bounds: rect(object.bounds()?),
-                    baseline: object.matrix()?.f(),
-                    size: text.scaled_font_size().value,
-                });
-            }
-        }
-        Ok(paragraph_in(visual_lines(pieces), x, y))
+        Ok(paragraph_in(visual_lines(pieces(&pdf_page)?), x, y))
     })
+}
+
+/// A line of text as it looks: the text objects on one baseline that touch,
+/// joined (see [`crate::lines`]).
+#[derive(Debug, Clone, PartialEq)]
+pub struct VisualLine {
+    /// Its text objects, left to right.
+    pub object_indices: Vec<usize>,
+    pub text: String,
+    /// Left, bottom, right, top in PDF points.
+    pub bounds: [f32; 4],
+}
+
+/// The page's visual lines, top to bottom, left to right. Find and replace
+/// over these finds a phrase the PDF split into several objects.
+pub fn visual_text_lines(page: u16) -> Result<Vec<VisualLine>, Error> {
+    with_open(|document| {
+        let pdf_page = document.pages().get(page.into())?;
+        let mut lines: Vec<VisualLine> = visual_lines(pieces(&pdf_page)?)
+            .into_iter()
+            .map(|line| VisualLine {
+                object_indices: line.indices().to_vec(),
+                text: line.text().to_owned(),
+                bounds: line.bounds(),
+            })
+            .collect();
+        lines.sort_by(|a, b| {
+            b.bounds[3]
+                .total_cmp(&a.bounds[3])
+                .then(a.bounds[0].total_cmp(&b.bounds[0]))
+        });
+        Ok(lines)
+    })
+}
+
+/// The page's text objects as pieces for [`visual_lines`].
+fn pieces(pdf_page: &PdfPage<'_>) -> Result<Vec<Piece>, Error> {
+    let mut pieces = Vec::new();
+    for (index, object) in pdf_page.objects().iter().enumerate() {
+        if let Some(text) = object.as_text_object() {
+            pieces.push(Piece {
+                index,
+                text: text.text(),
+                bounds: rect(object.bounds()?),
+                baseline: object.matrix()?.f(),
+                size: text.scaled_font_size().value,
+            });
+        }
+    }
+    Ok(pieces)
 }
 
 /// Which font a line uses (D-027).
@@ -466,7 +504,8 @@ fn insert_text(
             .as_text_object()
             .map(|t| t.text())
             .unwrap_or_default();
-        if read_back == text {
+        // PDFium can read a space-only object next to it as a trailing space.
+        if read_back.trim_end() == text.trim_end() {
             let bounds = rect(inserted.bounds()?);
             drop(inserted);
             let mut added = 1;
@@ -674,6 +713,31 @@ pub fn preview_reflow(
     style: Option<&TextStyle>,
     fonts: &Fonts<'_>,
 ) -> Result<EditPreview, Error> {
+    reflow(page, indices, new_text, style, fonts, true)
+}
+
+/// Replaces one visual line (its text objects `indices`, from
+/// [`visual_text_lines`]) with `new_text` as a single text object at the
+/// line's left, in its left-most piece's look, without wrapping — find and
+/// replace across pieces the PDF split the line into. A single object is
+/// edited as one line ([`preview_edit`]).
+pub fn preview_line(
+    page: u16,
+    indices: &[usize],
+    new_text: &str,
+    fonts: &Fonts<'_>,
+) -> Result<EditPreview, Error> {
+    reflow(page, indices, new_text, None, fonts, false)
+}
+
+fn reflow(
+    page: u16,
+    indices: &[usize],
+    new_text: &str,
+    style: Option<&TextStyle>,
+    fonts: &Fonts<'_>,
+    wrap: bool,
+) -> Result<EditPreview, Error> {
     discard_edit()?;
     let mut idx: Vec<usize> = indices.to_vec();
     idx.sort_unstable();
@@ -703,6 +767,18 @@ pub fn preview_reflow(
                 top_index = i;
             }
         }
+        // One line: its look and baseline come from its left-most piece.
+        if !wrap {
+            let mut left_most = (f32::MAX, min);
+            for &i in &idx {
+                let matrix = pdf_page.objects().get(i)?.matrix()?;
+                if matrix.e() < left_most.0 {
+                    left_most = (matrix.e(), i);
+                    top_baseline = matrix.f();
+                }
+            }
+            top_index = left_most.1;
+        }
         let mut base = with_underline(&pdf_page, top_index)?;
         base.underline = false; // v1: reflow doesn't carry per-line underlines.
         let style = style.copied().unwrap_or(base.style());
@@ -714,8 +790,21 @@ pub fn preview_reflow(
         } else {
             base.size.value * base.scale() * 1.2
         };
-        let wrap_width = (max_right - left_x).max(1.0);
-        // Wrap the new text to the column (measured before removing anything).
+        let wrap_width = if wrap {
+            (max_right - left_x).max(1.0)
+        } else {
+            f32::INFINITY
+        };
+        // Take the block's objects off the page (last first, so the places
+        // stay right), to restore on discard or free on keep. First, so the
+        // words measured below aren't read over identical old text (PDFium's
+        // text reading drops text drawn twice in one place).
+        let mut removed = Vec::new();
+        for &i in idx.iter().rev() {
+            removed.push((i, pdf_page.objects_mut().remove_object_at_index(i)?));
+        }
+        removed.reverse();
+        // Wrap the new text to the column.
         let Some(lines) = wrap_lines(
             document,
             &mut pdf_page,
@@ -726,18 +815,12 @@ pub fn preview_reflow(
             wrap_width,
         )?
         else {
+            put_back(&mut pdf_page, removed)?;
             return Err(Error::UnsupportedCharacters {
                 intended: new_text.to_owned(),
                 reads_back_as: String::new(),
             });
         };
-        // Take the block's objects off the page (last first, so the places
-        // stay right), to restore on discard or free on keep.
-        let mut removed = Vec::new();
-        for &i in idx.iter().rev() {
-            removed.push((i, pdf_page.objects_mut().remove_object_at_index(i)?));
-        }
-        removed.reverse();
         // Draw the new lines where the block's last-drawn piece was: anything
         // drawn between its pieces (a white box, a table) stays under the text,
         // as it was under that piece.

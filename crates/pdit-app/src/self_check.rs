@@ -67,6 +67,7 @@ pub async fn run(font_url: &str) {
     form_edit_session();
     menus_session(&font);
     find_session(&font);
+    split_replace_session(&font);
     print_session();
     save_names();
     bundled_fonts().await;
@@ -721,6 +722,77 @@ fn menus_session(font: &[u8]) {
             format!("{got} (setup: {linked:?} {note:?} {field:?})"),
         );
     }
+}
+
+/// Change all across pieces (fixtures/synthetic-split-lines.pdf): phrases the
+/// PDF splits into several text objects ("bor"+"row", "be"+"fore", "Visitors" +
+/// " " + "sign…") are found in the joined lines and replaced, the way the AI
+/// chat's `change all` and Find's Replace all do it; the other lines stay.
+fn split_replace_session(font: &[u8]) {
+    use pdit_core::search::{FindOptions, find, find_in, replace_in};
+    let check = |name: &str, ok: bool, detail: String| {
+        log(&format!(
+            "pdit self-check {}: split replace: {name}: {detail}",
+            if ok { "PASS" } else { "FAIL" }
+        ))
+    };
+    if let Err(error) = pdit_core::open_document(SPLIT.to_vec()) {
+        return check("open", false, error.to_string());
+    }
+    let fonts = pdit_core::Fonts::noto(font);
+    let any = FindOptions::default();
+    let per_object = find(0, "borrow", any).map(|m| m.len()).unwrap_or(99);
+    let joined = |q: &str| {
+        pdit_core::visual_text_lines(0)
+            .map(|lines| {
+                lines
+                    .iter()
+                    .map(|l| find_in(&l.text, q, any).len())
+                    .sum::<usize>()
+            })
+            .unwrap_or(0)
+    };
+    check(
+        "a word split mid-way is only found in the joined lines",
+        per_object == 0 && joined("borrow") == 1 && joined("before dusk") == 1,
+        format!("per object {per_object}, joined {}", joined("borrow")),
+    );
+    let mut result = Ok(());
+    for (old, new) in [
+        ("borrow", "lend"),
+        ("before dusk", "after dawn"),
+        ("Visitors sign", "Guests sign"),
+    ] {
+        let lines = pdit_core::visual_text_lines(0).unwrap_or_default();
+        let Some(line) = lines
+            .iter()
+            .find(|l| !find_in(&l.text, old, any).is_empty())
+        else {
+            result = Err(format!("{old:?} not found"));
+            break;
+        };
+        let text = replace_in(&line.text, old, new, any, None);
+        if let Err(error) = pdit_core::preview_line(0, &line.object_indices, &text, &fonts) {
+            result = Err(error.to_string());
+            break;
+        }
+        pdit_core::keep_edit();
+    }
+    let lines: Vec<String> = pdit_core::visual_text_lines(0)
+        .map(|lines| lines.into_iter().map(|l| l.text).collect())
+        .unwrap_or_default();
+    check(
+        "three split phrases replaced, line by line",
+        result.is_ok()
+            && lines
+                == [
+                    "The garden club keeps a shared shed where members lend tools,",
+                    "provided each tool is cleaned and hung on its hook after dawn.",
+                    "Guests sign the book.",
+                ],
+        format!("{result:?} {lines:?}"),
+    );
+    pdit_core::close_document();
 }
 
 /// Find & replace (D-051) on a synthetic page: matches with per-word boxes,

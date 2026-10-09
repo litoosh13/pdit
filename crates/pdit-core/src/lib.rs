@@ -38,9 +38,9 @@ pub use edit::{EditMethod, EditReport, EditResult, replace_text_verified};
 #[cfg(target_arch = "wasm32")]
 pub use edit_open::{
     AddPreview, EditPreview, FontChoice, FontTraits, Fonts, LayerWord, LookAlike, Paragraph,
-    TextLine, TextStyle, add_text_layer, discard_edit, font_traits, font_traits_near, keep_edit,
-    paragraph_at, preview_add, preview_edit, preview_reflow, preview_styled, save_document,
-    style_near, text_lines, text_style,
+    TextLine, TextStyle, VisualLine, add_text_layer, discard_edit, font_traits, font_traits_near,
+    keep_edit, paragraph_at, preview_add, preview_edit, preview_line, preview_reflow,
+    preview_styled, save_document, style_near, text_lines, text_style, visual_text_lines,
 };
 pub use error::Error;
 #[cfg(target_arch = "wasm32")]
