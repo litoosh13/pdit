@@ -235,6 +235,8 @@ pub fn ToolRail(has_document: bool) -> Element {
         aside {
             class: "pdit-rail t-panel-slide",
             "data-open": "true",
+            // No bottom bar without a document: the rail then reaches the window's bottom.
+            "data-bare": !has_document,
             "aria-label": "Tools",
             // File actions (D-062): Open, New, and Print once a PDF is open.
             div { class: "sb-nav pdit-rail-file",

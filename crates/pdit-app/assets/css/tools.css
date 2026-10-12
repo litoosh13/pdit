@@ -22,6 +22,11 @@
   -webkit-font-smoothing: antialiased;
 }
 
+/* Without a document there is no bottom bar: the rail goes down to the bottom. */
+.pdit-rail[data-bare='true'] {
+  bottom: 0;
+}
+
 /* The rail (D-062, after the Canva editor): the left edge, icon over a name. */
 .pdit-rail {
   left: 0;
