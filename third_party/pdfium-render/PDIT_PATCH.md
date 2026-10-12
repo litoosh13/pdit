@@ -27,6 +27,17 @@ fresh appearance and are visible in every viewer. pdfium-render's bindings imple
   build. Now it copies only when a buffer is given, and at most `buflen` bytes. Needed by `PdfFont::data()`,
   which pdit uses to check a subset font has glyphs for new text.
 
+## Behaviour fix (2026-10-09, P-043)
+
+- `src/pdf/document/page/annotation/private.rs`, the fallbacks of `fill_color_impl`, `set_fill_color_impl`,
+  `stroke_color_impl` and `set_stroke_color_impl` (taken when `FPDFAnnot_GetColor` / `SetColor` fail, e.g. an
+  annotation with an appearance stream): upstream passed the annotation handle itself to
+  `FPDFPageObj_GetStrokeColor` and friends (`self.handle() as FPDF_PAGEOBJECT`), so PDFium read — or, on set,
+  wrote — an annotation as if it were a page object. In the browser build this gave "memory access out of bounds"
+  in `FPDFPageObj_GetStrokeColor` on some runs (P-043) and could corrupt memory on set. Now they use the
+  annotation's first appearance object (`FPDFAnnot_GetObject(annot, 0)`), or null when it has none (PDFium then
+  returns false: no colour). New helper `first_object_or_null` on `PdfPageAnnotationPrivate`.
+
 ## Removed from the copy (not needed to build pdit)
 
 - `src/bindgen/pdfium_*.rs` except `pdfium_7881.rs` (pdit uses the `pdfium_latest` feature = 7881; the

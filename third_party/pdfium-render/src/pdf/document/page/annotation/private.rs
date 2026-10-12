@@ -133,6 +133,18 @@ pub(crate) mod internal {
         /// Returns the ownership hierarchy for this [PdfPageAnnotation].
         fn ownership(&self) -> &PdfPageObjectOwnership;
 
+        /// pdit patch (P-043): the annotation's first appearance object, or null when it has none — for the
+        /// colour fallbacks below, which upstream passed the annotation handle itself to `FPDFPageObj_*Color`
+        /// (an `FPDF_ANNOTATION` read and written as an `FPDF_PAGEOBJECT`: garbage colours, out-of-bounds
+        /// reads, memory corruption on set). PDFium's `FPDFPageObj_*Color` return false for null.
+        fn first_object_or_null(&self) -> FPDF_PAGEOBJECT {
+            if unsafe { self.bindings().FPDFAnnot_GetObjectCount(self.handle()) } > 0 {
+                unsafe { self.bindings().FPDFAnnot_GetObject(self.handle(), 0) }
+            } else {
+                std::ptr::null_mut()
+            }
+        }
+
         /// Returns the [PdfPageAnnotationType] of this [PdfPageAnnotation].
         fn get_annotation_type(&self) -> PdfPageAnnotationType {
             PdfPageAnnotationType::from_pdfium(unsafe {
@@ -408,7 +420,7 @@ pub(crate) mod internal {
 
                 if self.bindings().is_true(unsafe {
                     self.bindings().FPDFPageObj_GetFillColor(
-                        self.handle() as FPDF_PAGEOBJECT,
+                        self.first_object_or_null(),
                         &mut r,
                         &mut g,
                         &mut b,
@@ -446,7 +458,7 @@ pub(crate) mod internal {
 
                 if self.bindings().is_true(unsafe {
                     self.bindings().FPDFPageObj_SetFillColor(
-                        self.handle() as FPDF_PAGEOBJECT,
+                        self.first_object_or_null(),
                         fill_color.red() as c_uint,
                         fill_color.green() as c_uint,
                         fill_color.blue() as c_uint,
@@ -492,7 +504,7 @@ pub(crate) mod internal {
 
                 if self.bindings().is_true(unsafe {
                     self.bindings().FPDFPageObj_GetStrokeColor(
-                        self.handle() as FPDF_PAGEOBJECT,
+                        self.first_object_or_null(),
                         &mut r,
                         &mut g,
                         &mut b,
@@ -530,7 +542,7 @@ pub(crate) mod internal {
 
                 if self.bindings().is_true(unsafe {
                     self.bindings().FPDFPageObj_SetStrokeColor(
-                        self.handle() as FPDF_PAGEOBJECT,
+                        self.first_object_or_null(),
                         stroke_color.red() as c_uint,
                         stroke_color.green() as c_uint,
                         stroke_color.blue() as c_uint,

@@ -38,10 +38,17 @@ pub struct OpenDocument {
 #[derive(Clone, Copy)]
 pub struct PageLocks(pub Signal<std::collections::HashSet<u16>>);
 
+impl PageLocks {
+    /// At the app's root: the rail's Clean all (D-068) skips locked pages too.
+    pub fn provide() {
+        use_context_provider(|| PageLocks(Signal::new(Default::default())));
+    }
+}
+
 #[component]
 pub fn PageList() -> Element {
     let document = use_context::<Signal<Option<OpenDocument>>>();
-    let mut locks = use_context_provider(|| PageLocks(Signal::new(Default::default()))).0;
+    let mut locks = use_context::<PageLocks>().0;
     let tools = use_context::<PageTools>();
     let count = document.read().as_ref().map_or(0, |d| d.page_sizes.len());
     use_effect(use_reactive!(|count| {
@@ -180,6 +187,9 @@ fn PageView(index: u16, count: usize, width_pt: f32, height_pt: f32) -> Element 
     }));
 
     let scale = (slot_width() / f64::from(width_pt)) as f32;
+    // Where the visible area starts in PDF points (a cropped page, D-070): clicks
+    // add it, and the overlays below are shifted by it.
+    let (ox, oy) = pdit_core::page_ops::page_origin(index).unwrap_or((0.0, 0.0));
     let arming = shapes.drawing() || rail.placing();
     let page_class = match (revealed(), arming) {
         (true, true) => "page t-skel is-revealed pdit-arming",
@@ -227,8 +237,8 @@ fn PageView(index: u16, count: usize, width_pt: f32, height_pt: f32) -> Element 
                 slot_width.set(rect.width());
                 let point = event.client_coordinates();
                 let per_pt = rect.width() / f64::from(width_pt);
-                let x = ((point.x - rect.left()) / per_pt) as f32;
-                let y = height_pt - ((point.y - rect.top()) / per_pt) as f32;
+                let x = ((point.x - rect.left()) / per_pt) as f32 + ox;
+                let y = height_pt - ((point.y - rect.top()) / per_pt) as f32 + oy;
                 // A drag across words (D-040) or a pen stroke (D-041) ends in a
                 // click: not an edit.
                 // A tool armed in the tools rail (D-050) is placed here.
@@ -260,8 +270,8 @@ fn PageView(index: u16, count: usize, width_pt: f32, height_pt: f32) -> Element 
                 let rect = slot.get_bounding_client_rect();
                 let point = event.client_coordinates();
                 let per_pt = rect.width() / f64::from(width_pt);
-                let x = ((point.x - rect.left()) / per_pt) as f32;
-                let y = height_pt - ((point.y - rect.top()) / per_pt) as f32;
+                let x = ((point.x - rect.left()) / per_pt) as f32 + ox;
+                let y = height_pt - ((point.y - rect.top()) / per_pt) as f32 + oy;
                 // An armed rail tool waits for the click (onclick).
                 if rail.placing() {
                     return;
@@ -322,8 +332,8 @@ fn PageView(index: u16, count: usize, width_pt: f32, height_pt: f32) -> Element 
                         let rect = slot.get_bounding_client_rect();
                         let point = event.client_coordinates();
                         let per_pt = rect.width() / f64::from(width_pt);
-                        let x = ((point.x - rect.left()) / per_pt) as f32;
-                        let y = height_pt - ((point.y - rect.top()) / per_pt) as f32;
+                        let x = ((point.x - rect.left()) / per_pt) as f32 + ox;
+                        let y = height_pt - ((point.y - rect.top()) / per_pt) as f32 + oy;
                         forms.drag_to(x, y);
                     }
                     return;
@@ -335,8 +345,8 @@ fn PageView(index: u16, count: usize, width_pt: f32, height_pt: f32) -> Element 
                         let rect = slot.get_bounding_client_rect();
                         let point = event.client_coordinates();
                         let per_pt = rect.width() / f64::from(width_pt);
-                        let x = ((point.x - rect.left()) / per_pt) as f32;
-                        let y = height_pt - ((point.y - rect.top()) / per_pt) as f32;
+                        let x = ((point.x - rect.left()) / per_pt) as f32 + ox;
+                        let y = height_pt - ((point.y - rect.top()) / per_pt) as f32 + oy;
                         shapes.update(x, y);
                     }
                     return;
@@ -346,8 +356,8 @@ fn PageView(index: u16, count: usize, width_pt: f32, height_pt: f32) -> Element 
                         let rect = slot.get_bounding_client_rect();
                         let point = event.client_coordinates();
                         let per_pt = rect.width() / f64::from(width_pt);
-                        let x = ((point.x - rect.left()) / per_pt) as f32;
-                        let y = height_pt - ((point.y - rect.top()) / per_pt) as f32;
+                        let x = ((point.x - rect.left()) / per_pt) as f32 + ox;
+                        let y = height_pt - ((point.y - rect.top()) / per_pt) as f32 + oy;
                         annotate.drag_to(x, y);
                     }
                     return;
@@ -408,8 +418,8 @@ fn PageView(index: u16, count: usize, width_pt: f32, height_pt: f32) -> Element 
                 let rect = slot.get_bounding_client_rect();
                 let point = event.client_coordinates();
                 let per_pt = rect.width() / f64::from(width_pt);
-                let x = ((point.x - rect.left()) / per_pt) as f32;
-                let y = height_pt - ((point.y - rect.top()) / per_pt) as f32;
+                let x = ((point.x - rect.left()) / per_pt) as f32 + ox;
+                let y = height_pt - ((point.y - rect.top()) / per_pt) as f32 + oy;
                 if context_menu.open_at(point.x, point.y, index, (x, y)) {
                     event.prevent_default();
                 }
@@ -420,66 +430,77 @@ fn PageView(index: u16, count: usize, width_pt: f32, height_pt: f32) -> Element 
             div { class: "t-skel-content",
                 canvas { "aria-label": "Page {index + 1}" }
             }
-            SelectionOverlay {
-                page: index,
-                page_width_pt: width_pt,
-                page_height_pt: height_pt,
-                scale,
-            }
-            ImageOverlay {
-                page: index,
-                page_height_pt: height_pt,
-                scale,
-            }
-            crate::search_ui::FindOverlay {
-                page: index,
-                page_height_pt: height_pt,
-                scale,
-            }
-            crate::forms_ui::FormOverlay {
-                page: index,
-                page_height_pt: height_pt,
-                scale,
-            }
-            crate::shapes_ui::ShapeDrawOverlay {
-                page: index,
-                page_height_pt: height_pt,
-                scale,
-            }
-            crate::annotations_ui::AnnotationOverlay {
-                page: index,
-                page_width_pt: width_pt,
-                page_height_pt: height_pt,
-                scale,
-            }
-            crate::find_fields_ui::FindFieldsOverlay {
-                page: index,
-                page_height_pt: height_pt,
-                scale,
-            }
-            crate::form_edit_ui::FormEditOverlay {
-                page: index,
-                page_width_pt: width_pt,
-                page_height_pt: height_pt,
-                scale,
-            }
-            crate::links_ui::LinkOverlay {
-                page: index,
-                page_width_pt: width_pt,
-                page_height_pt: height_pt,
-                scale,
-            }
-            crate::doc_ui::DocPreview {
-                page: index,
-                page_width_pt: width_pt,
-                page_height_pt: height_pt,
-                scale,
-            }
-            crate::table_ui::TableOverlay {
-                page: index,
-                page_width_pt: width_pt,
-                page_height_pt: height_pt,
-                scale,
+            // Overlays are placed from PDF coordinates that start at the page's
+            // corner; a cropped page starts elsewhere (D-070).
+            div {
+                class: "pdit-origin",
+                style: "left: {-ox * scale}px; top: {oy * scale}px;",
+                SelectionOverlay {
+                    page: index,
+                    page_width_pt: width_pt,
+                    page_height_pt: height_pt,
+                    scale,
+                }
+                ImageOverlay {
+                    page: index,
+                    page_height_pt: height_pt,
+                    scale,
+                }
+                crate::search_ui::FindOverlay {
+                    page: index,
+                    page_height_pt: height_pt,
+                    scale,
+                }
+                crate::forms_ui::FormOverlay {
+                    page: index,
+                    page_height_pt: height_pt,
+                    scale,
+                }
+                crate::shapes_ui::ShapeDrawOverlay {
+                    page: index,
+                    page_height_pt: height_pt,
+                    scale,
+                }
+                crate::annotations_ui::AnnotationOverlay {
+                    page: index,
+                    page_width_pt: width_pt,
+                    page_height_pt: height_pt,
+                    scale,
+                }
+                crate::find_fields_ui::FindFieldsOverlay {
+                    page: index,
+                    page_height_pt: height_pt,
+                    scale,
+                }
+                crate::form_edit_ui::FormEditOverlay {
+                    page: index,
+                    page_width_pt: width_pt,
+                    page_height_pt: height_pt,
+                    scale,
+                }
+                crate::links_ui::LinkOverlay {
+                    page: index,
+                    page_width_pt: width_pt,
+                    page_height_pt: height_pt,
+                    scale,
+                }
+                crate::doc_ui::DocPreview {
+                    page: index,
+                    page_width_pt: width_pt,
+                    page_height_pt: height_pt,
+                    scale,
+                }
+                crate::table_ui::TableOverlay {
+                    page: index,
+                    page_width_pt: width_pt,
+                    page_height_pt: height_pt,
+                    scale,
+                }
+                crate::crop_ui::CropOverlay {
+                    page: index,
+                    page_height_pt: height_pt,
+                    scale,
+                }
             }
         }
     }
@@ -625,6 +646,8 @@ fn PageBar(index: u16, count: usize, locked: bool, revealed: bool, width_style: 
     let on_duplicate = use_callback(move |_: ()| tools.run(PageAction::Duplicate, index));
     let on_add = use_callback(move |_: ()| tools.run(PageAction::InsertBlank, index));
     let on_delete = use_callback(move |_: ()| tools.run(PageAction::Delete, index));
+    let on_clean = use_callback(move |_: ()| tools.clean_scans(&[index]));
+    let on_crop = use_callback(move |_: ()| consume_context::<crate::crop_ui::Crop>().start(index));
 
     // Mount when the page is near the screen.
     let mount_into = controller.clone();
@@ -643,6 +666,8 @@ fn PageBar(index: u16, count: usize, locked: bool, revealed: bool, width_style: 
                 ("onDuplicate", on_duplicate),
                 ("onAdd", on_add),
                 ("onDelete", on_delete),
+                ("onClean", on_clean),
+                ("onCrop", on_crop),
             ] {
                 let f = Closure::<dyn FnMut()>::new(move || cb.call(()));
                 let _ = js_sys::Reflect::set(&options, &name.into(), f.as_ref());
@@ -676,6 +701,15 @@ fn PageBar(index: u16, count: usize, locked: bool, revealed: bool, width_style: 
         let _ = js_sys::Reflect::set(&state, &"page".into(), &f64::from(index).into());
         let _ = js_sys::Reflect::set(&state, &"count".into(), &(count as f64).into());
         let _ = js_sys::Reflect::set(&state, &"locked".into(), &locked.into());
+        // A scanned page gets Clean scan (D-068).
+        let scan = pdit_core::scan_clean::is_scan_page(index).unwrap_or(false);
+        let _ = js_sys::Reflect::set(&state, &"scan".into(), &scan.into());
+        // Its page number when the PDF numbers it differently (D-070): "Page iii (3)".
+        if let Ok(Some(label)) = pdit_core::page_ops::page_label(index)
+            && label != (index + 1).to_string()
+        {
+            let _ = js_sys::Reflect::set(&state, &"label".into(), &label.into());
+        }
         let _ = update.call1(&JsValue::NULL, &state);
     }));
     let unmount = controller.clone();

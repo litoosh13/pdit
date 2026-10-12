@@ -69,6 +69,11 @@ impl Updates {
         }
     }
 
+    /// The pill is on screen (another prompt waits for it).
+    pub fn on_screen(&self) -> bool {
+        (self.shown)() && *self.stage.read() != Stage::None
+    }
+
     pub fn show(mut self) {
         self.shown.set(true);
         self.open.set(false);

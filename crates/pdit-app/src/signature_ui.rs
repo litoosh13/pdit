@@ -496,7 +496,7 @@ fn place_pill() {
 }
 
 /// For the self-check: a small transparent PNG drawn by the pad's exporter.
-#[cfg(debug_assertions)]
+#[cfg(any(debug_assertions, feature = "self-check"))]
 pub fn sample_png() -> Option<Vec<u8>> {
     let strokes = [Stroke {
         ink: INKS[0].1,

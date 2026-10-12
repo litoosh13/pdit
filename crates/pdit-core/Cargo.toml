@@ -12,6 +12,8 @@ allsorts.workspace = true
 image.workspace = true
 leafmind-fields.workspace = true
 lopdf.workspace = true
+# Lossless pictures for From images (D-071); already in the tree via allsorts.
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 pdfium-render.workspace = true
 serde.workspace = true
 

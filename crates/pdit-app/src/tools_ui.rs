@@ -77,14 +77,23 @@ fn rows(i: usize, stamps: bool) -> Vec<Action> {
             form.push(Action::FindFields);
             form
         }
-        "Document" => vec![
-            Action::HeaderFooter,
-            Action::Watermark,
-            Action::LinkWebAddresses,
-            Action::Bookmarks,
-            Action::InsertPdf,
-            Action::Print,
-        ],
+        "Document" => {
+            // Compress PDF is MuPDF's, in the desktop app (D-069).
+            let compress = crate::ai_ui::desktop::available().then_some(Action::Compress);
+            [Action::Export]
+                .into_iter()
+                .chain(compress)
+                .chain([
+                    Action::CleanScans,
+                    Action::HeaderFooter,
+                    Action::Watermark,
+                    Action::LinkWebAddresses,
+                    Action::Bookmarks,
+                    Action::InsertPdf,
+                    Action::Print,
+                ])
+                .collect()
+        }
         _ => page_actions(),
     }
 }
@@ -244,6 +253,15 @@ pub fn ToolRail(has_document: bool) -> Element {
                     onclick: move |_| crate::new_document(),
                     span { dangerous_inner_html: ICON_NEW, style: "display: contents" }
                     span { "New" }
+                }
+                // From images (D-071): pictures into a new PDF.
+                button {
+                    class: "sb-item",
+                    r#type: "button",
+                    title: "Make a PDF from pictures",
+                    onclick: move |_| consume_context::<crate::images_ui::FromImages>().pick(),
+                    span { dangerous_inner_html: crate::images_ui::ICON_FROM_IMAGES, style: "display: contents" }
+                    span { "From images" }
                 }
                 if has_document {
                     button {

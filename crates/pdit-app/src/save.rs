@@ -29,9 +29,34 @@ pub fn derived_name(original: &str, suffix: &str) -> String {
     format!("{stem}-{suffix}.pdf")
 }
 
-/// Hands `bytes` to the user as `name`. Returns false when the user cancelled
-/// the dialog, which is not an error.
-pub async fn save_pdf(bytes: &[u8], name: &str) -> Result<bool, JsValue> {
+/// A file's media type and description, from its name's extension (PDF unless known otherwise).
+fn kind(name: &str) -> (&'static str, &'static str, &'static str) {
+    let ext = name
+        .rsplit('.')
+        .next()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    match ext.as_str() {
+        "png" => ("image/png", "PNG picture", ".png"),
+        "jpg" | "jpeg" => ("image/jpeg", "JPEG picture", ".jpg"),
+        "txt" => ("text/plain", "Text", ".txt"),
+        "docx" => (
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "Word document",
+            ".docx",
+        ),
+        "odt" => (
+            "application/vnd.oasis.opendocument.text",
+            "OpenDocument text",
+            ".odt",
+        ),
+        _ => ("application/pdf", "PDF document", ".pdf"),
+    }
+}
+
+/// Hands `bytes` to the user as `name` (its type from the extension). Returns
+/// false when the user cancelled the dialog, which is not an error.
+pub async fn save_file(bytes: &[u8], name: &str) -> Result<bool, JsValue> {
     let window = web_sys::window().ok_or("no window")?;
     let data = Uint8Array::from(bytes);
     let picker = Reflect::get(&window, &"showSaveFilePicker".into())?;
@@ -47,14 +72,11 @@ async fn save_with_picker(
     data: &Uint8Array,
     name: &str,
 ) -> Result<bool, JsValue> {
+    let (mime, description, ext) = kind(name);
     let accept = Object::new();
-    Reflect::set(
-        &accept,
-        &"application/pdf".into(),
-        &Array::of1(&".pdf".into()),
-    )?;
+    Reflect::set(&accept, &mime.into(), &Array::of1(&ext.into()))?;
     let pdf_type = Object::new();
-    Reflect::set(&pdf_type, &"description".into(), &"PDF document".into())?;
+    Reflect::set(&pdf_type, &"description".into(), &description.into())?;
     Reflect::set(&pdf_type, &"accept".into(), &accept)?;
     let options = Object::new();
     Reflect::set(&options, &"suggestedName".into(), &name.into())?;
@@ -74,7 +96,7 @@ async fn save_with_picker(
 /// Firefox and Safari: a download to the browser's download folder.
 fn download(window: &web_sys::Window, data: &Uint8Array, name: &str) -> Result<(), JsValue> {
     let options = web_sys::BlobPropertyBag::new();
-    options.set_type("application/pdf");
+    options.set_type(kind(name).0);
     let blob = web_sys::Blob::new_with_u8_array_sequence_and_options(&Array::of1(data), &options)?;
     let url = web_sys::Url::create_object_url_with_blob(&blob)?;
     let document = window.document().ok_or("no document")?;
@@ -107,4 +129,109 @@ fn error_name(error: &JsValue) -> String {
         .ok()
         .and_then(|n| n.as_string())
         .unwrap_or_default()
+}
+
+/// Where Split into files (D-070) puts its files: picked once, then filled.
+pub enum Folder {
+    /// The desktop app's picked folder (desktop/src/files.rs), by name.
+    Desktop(String),
+    /// A folder from the browser's showDirectoryPicker (Chrome, Edge), and its name.
+    Browser(JsValue, String),
+    /// No folder picker: one download per file.
+    Downloads,
+}
+
+impl Folder {
+    /// Asks the user for a folder; None when they cancelled.
+    pub async fn pick() -> Result<Option<Folder>, JsValue> {
+        if crate::ai_ui::desktop::available() {
+            let name = crate::ai_ui::desktop::invoke("pick_folder", &Object::new()).await?;
+            return Ok(name.as_string().map(Folder::Desktop));
+        }
+        let window = web_sys::window().ok_or("no window")?;
+        let Ok(picker) =
+            Reflect::get(&window, &"showDirectoryPicker".into())?.dyn_into::<js_sys::Function>()
+        else {
+            return Ok(Some(Folder::Downloads));
+        };
+        let options = Object::new();
+        Reflect::set(&options, &"mode".into(), &"readwrite".into())?;
+        match JsFuture::from(Promise::from(picker.call1(&window, &options)?)).await {
+            Ok(dir) => {
+                let name = Reflect::get(&dir, &"name".into())?
+                    .as_string()
+                    .unwrap_or_default();
+                Ok(Some(Folder::Browser(dir, name)))
+            }
+            Err(error) if error_name(&error) == "AbortError" => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
+    /// The folder's name for messages ("Downloads" for downloads).
+    pub fn name(&self) -> &str {
+        match self {
+            Folder::Desktop(name) | Folder::Browser(_, name) => name,
+            Folder::Downloads => "Downloads",
+        }
+    }
+
+    /// Writes `bytes` as `name` (or "name (2).pdf" when taken), returning the name used.
+    pub async fn save(&self, bytes: &[u8], name: &str) -> Result<String, JsValue> {
+        match self {
+            Folder::Desktop(_) => {
+                let encoded = String::from(js_sys::encode_uri_component(name));
+                let used = crate::ai_ui::desktop::invoke_raw(
+                    "save_into_folder",
+                    bytes,
+                    &[("x-name", encoded)],
+                )
+                .await?;
+                Ok(used.as_string().unwrap_or_else(|| name.to_owned()))
+            }
+            Folder::Browser(dir, _) => {
+                let (stem, ext) = name.rsplit_once('.').unwrap_or((name, "pdf"));
+                let mut used = name.to_owned();
+                for k in 2..1000 {
+                    // Taken when the folder already has a file by that name.
+                    if JsFuture::from(Promise::from(call1(
+                        dir,
+                        "getFileHandle",
+                        &used.as_str().into(),
+                    )?))
+                    .await
+                    .is_err()
+                    {
+                        break;
+                    }
+                    used = format!("{stem} ({k}).{ext}");
+                }
+                let options = Object::new();
+                Reflect::set(&options, &"create".into(), &true.into())?;
+                let get =
+                    Reflect::get(dir, &"getFileHandle".into())?.dyn_into::<js_sys::Function>()?;
+                let handle = JsFuture::from(Promise::from(get.call2(
+                    dir,
+                    &used.as_str().into(),
+                    &options,
+                )?))
+                .await?;
+                let writable =
+                    JsFuture::from(Promise::from(call0(&handle, "createWritable")?)).await?;
+                JsFuture::from(Promise::from(call1(
+                    &writable,
+                    "write",
+                    &Uint8Array::from(bytes),
+                )?))
+                .await?;
+                JsFuture::from(Promise::from(call0(&writable, "close")?)).await?;
+                Ok(used)
+            }
+            Folder::Downloads => {
+                let window = web_sys::window().ok_or("no window")?;
+                download(&window, &Uint8Array::from(bytes), name)?;
+                Ok(name.to_owned())
+            }
+        }
+    }
 }

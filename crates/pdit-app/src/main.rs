@@ -11,9 +11,12 @@ mod analysis_cache;
 mod annotations_ui;
 mod ask_ui;
 mod bookmarks_ui;
+mod compress_ui;
 mod context_menu;
+mod crop_ui;
 mod doc_ui;
 mod editing;
+mod export_ui;
 mod find_fields_ui;
 mod font_catalog;
 mod fonts;
@@ -21,17 +24,20 @@ mod form_edit_ui;
 mod format_bar;
 mod forms_ui;
 mod frame_ui;
+mod images_ui;
 mod island;
+mod labels_ui;
 mod links_ui;
 mod page_tools;
 mod pages;
 mod print_ui;
 mod save;
 mod search_ui;
-#[cfg(debug_assertions)]
+#[cfg(any(debug_assertions, feature = "self-check"))]
 mod self_check;
 mod shapes_ui;
 mod signature_ui;
+mod split_ui;
 mod table_ui;
 mod theme;
 mod thumbnails;
@@ -68,6 +74,7 @@ fn App() -> Element {
     let mut editing = Editing::provide();
     ContextMenuState::provide();
     PageTools::provide();
+    pages::PageLocks::provide();
     FormFill::provide();
     ShapeDraw::provide();
     Signature::provide();
@@ -79,6 +86,12 @@ fn App() -> Element {
     tools_ui::Tools::provide();
     search_ui::Find::provide();
     print_ui::Print::provide();
+    compress_ui::Compress::provide();
+    crop_ui::Crop::provide();
+    split_ui::SplitFiles::provide();
+    labels_ui::PageNumbers::provide();
+    export_ui::Export::provide();
+    images_ui::FromImages::provide();
     find_fields_ui::FindFields::provide();
     ai_ui::Ai::provide();
     ask_ui::Ask::provide();
@@ -86,6 +99,7 @@ fn App() -> Element {
     update_ui::Updates::provide();
     doc_ui::DocTools::provide();
     use_close_on_outside(editing);
+    use_hook(install_offline);
     use_hook(|| {
         spawn(async move {
             match pdit_core::engine::start(&PDFIUM_JS.to_string(), &PDFIUM_WASM.to_string()).await {
@@ -98,7 +112,7 @@ fn App() -> Element {
                             "pdit: could not load the fallback font: {error:?}"
                         )),
                     }
-                    #[cfg(debug_assertions)]
+                    #[cfg(any(debug_assertions, feature = "self-check"))]
                     self_check::run(&FALLBACK_FONT.to_string()).await;
                 }
                 Err(error) => log(&format!("pdit: {error}")),
@@ -107,6 +121,9 @@ fn App() -> Element {
     });
 
     rsx! {
+        // The online version's install manifest and tab icon (public/; relative: the page sits at the site's base path).
+        document::Link { rel: "manifest", href: "manifest.webmanifest" }
+        document::Link { rel: "icon", r#type: "image/svg+xml", href: "pdit-icon.svg" }
         Fonts {}
         EditingStyles {}
         frame_ui::FrameBars {}
@@ -146,7 +163,14 @@ fn App() -> Element {
         zoom_ui::ZoomKeys {}
         search_ui::FindCard {}
         print_ui::PrintUi {}
+        compress_ui::CompressUi {}
+        crop_ui::CropUi {}
+        split_ui::SplitUi {}
+        labels_ui::LabelsUi {}
+        export_ui::ExportUi {}
+        images_ui::FromImagesUi {}
         update_ui::UpdateUi {}
+        ask_ui::ModelsPrompt {}
         find_fields_ui::FindFieldsBar {}
         if document.read().is_some() {
             ai_ui::AiUi {}
@@ -212,6 +236,14 @@ pub(crate) fn new_document() {
     );
 }
 
+/// Opens `bytes` (a PDF pdit made, e.g. From images) as the document on screen, named `name`.
+pub(crate) fn open_bytes(bytes: Vec<u8>, name: String) {
+    if !*consume_context::<EngineReady>().0.peek() {
+        return log("pdit: the PDF engine is still starting; try again in a moment");
+    }
+    show_document(consume_context(), consume_context(), bytes, name);
+}
+
 /// Save (bottom bar).
 pub(crate) fn save_current() {
     save_open_document(consume_context(), consume_context());
@@ -231,7 +263,7 @@ fn save_open_document(editing: Editing, document: Signal<Option<OpenDocument>>) 
     ai_ui::saved_file(&bytes);
     spawn(async move {
         // Only the size is logged: document contents stay out of the console.
-        match save::save_pdf(&bytes, &name).await {
+        match save::save_file(&bytes, &name).await {
             Ok(true) => log(&format!("pdit: saved a PDF of {} bytes", bytes.len())),
             Ok(false) => log("pdit: saving was cancelled"),
             Err(error) => log(&format!("pdit: could not save the PDF: {error:?}")),
@@ -260,8 +292,33 @@ fn click_file_input() {
     }
 }
 
+/// The online version keeps its files for offline use (public/sw.js, M-007). Not in the desktop app (its files are
+/// on disk) or debug builds (dx serve would keep serving old files).
+fn install_offline() {
+    if cfg!(debug_assertions) || ai_ui::desktop::internals().is_some() {
+        return;
+    }
+    let register = || -> Result<(), wasm_bindgen::JsValue> {
+        use js_sys::Reflect;
+        let window = web_sys::window().ok_or("no window")?;
+        let workers = Reflect::get(
+            &Reflect::get(&window, &"navigator".into())?,
+            &"serviceWorker".into(),
+        )?;
+        if workers.is_undefined() {
+            return Ok(());
+        }
+        let register: js_sys::Function = Reflect::get(&workers, &"register".into())?.dyn_into()?;
+        let _ = register.call1(&workers, &"sw.js".into())?;
+        Ok(())
+    };
+    if let Err(error) = register() {
+        log(&format!("pdit: offline use is not available: {error:?}"));
+    }
+}
+
 pub(crate) fn log(message: &str) {
     web_sys::console::log_1(&message.into());
-    #[cfg(debug_assertions)]
+    #[cfg(any(debug_assertions, feature = "self-check"))]
     ai_ui::desktop::log(message);
 }

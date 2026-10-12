@@ -99,9 +99,10 @@ pub fn FrameBars() -> Element {
         let _ = open_seq;
         frame.set_mode(Mode::Edit);
     }));
-    // AI mode: analyse once the models allow it (downloaded, or not needed here).
+    // AI mode: analyse (D-066); the models arriving later finish the questions step.
     use_effect(move || {
-        if frame.is_ai() && ask.can_analyze() {
+        let _models = ask.models();
+        if frame.is_ai() {
             ai.analyze_if_needed();
         }
     });
@@ -124,6 +125,10 @@ pub fn FrameBars() -> Element {
         (frame.mode)(),
         *zoom.percent.read(),
         tools.can_undo(),
+        {
+            let a = ai.analysis();
+            a.percent().map(|p| (p, a.needs_models(), a.now()))
+        },
     );
     let push = update.clone();
     use_effect(use_reactive!(|state| {
@@ -131,7 +136,7 @@ pub fn FrameBars() -> Element {
         let Some(update) = push.borrow().clone() else {
             return;
         };
-        let (doc, mode, percent, can_undo) = state;
+        let (doc, mode, percent, can_undo, ready) = state;
         let s = Object::new();
         let _ = Reflect::set(&s, &"hasDoc".into(), &doc.is_some().into());
         if let Some((name, pages)) = doc {
@@ -142,6 +147,12 @@ pub fn FrameBars() -> Element {
         let _ = Reflect::set(&s, &"mode".into(), &mode.into());
         let _ = Reflect::set(&s, &"zoom".into(), &f64::from(percent).into());
         let _ = Reflect::set(&s, &"canUndo".into(), &can_undo.into());
+        // How ready the AI is (D-066): the AI tab's badge.
+        if let Some((pct, waiting, now)) = ready {
+            let _ = Reflect::set(&s, &"aiPercent".into(), &f64::from(pct).into());
+            let _ = Reflect::set(&s, &"aiWaiting".into(), &waiting.into());
+            let _ = Reflect::set(&s, &"aiNow".into(), &now.into());
+        }
         let _ = update.call1(&JsValue::NULL, &s);
     }));
 

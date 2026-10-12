@@ -10,3 +10,4 @@ Synthetic files for pdit's self-checks. None contain personal data.
 | `synthetic-split-lines.pdf` | Lines split into several text objects, even mid-word, with a shape between pieces (`scripts/make_split_fixture.py`). |
 | `synthetic-form.pdf` | A small fillable form: two text fields, a checkbox, a dropdown (`scripts/make_form_fixture.py`). |
 | `synthetic-image.png` | A small image for the image tools. |
+| `synthetic-scan.pdf` | Two made-up pages as images for Clean scan: a flat scan with tint, uneven light and a shadow; a bent page photographed on a dark table (`scripts/make_scan_fixture.py`). |

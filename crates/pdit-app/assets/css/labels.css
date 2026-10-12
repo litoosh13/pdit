@@ -1,0 +1,47 @@
+/* Page numbers (D-070; approved mockup .claude/research/page-tools-ui/). The window is doc.css's (as Print); the
+   style menu is the right-click menu's list (context-menu.css), opening under its button. */
+
+.lb-ranges {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+.lb-range {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+}
+.lb-range label {
+  white-space: nowrap;
+}
+.lb-num.doc-field {
+  width: 56px;
+}
+.lb-prefix.doc-field {
+  width: 70px;
+}
+.lb-style {
+  position: relative;
+}
+.lb-style .cm-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 5;
+  min-width: 140px;
+}
+.lb-remove svg {
+  width: 16px;
+  height: 16px;
+}
+.lb-preview,
+.lb-status {
+  padding: 0 2px;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.lb-preview b {
+  color: var(--ink);
+}

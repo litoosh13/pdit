@@ -1,12 +1,14 @@
 # MuPDF and the libraries it is built with (desktop app)
 
 pdit's desktop app edits text with **MuPDF** (D-065), built from source by the `mupdf-sys` 0.8.0 crate with its
-`html` and `base14-fonts` features, through the `mupdf` 0.8.0 crate (patched copy in `third_party/mupdf-rs`).
+`html`, `base14-fonts` and `docx-output` features, through the `mupdf` 0.8.0 crate (patched copy in
+`third_party/mupdf-rs`). `docx-output` adds Artifex's **extract** library (Export as Word / OpenDocument, D-071).
 
-## MuPDF, the mupdf crates, jbig2dec, the URW base-14 fonts (AGPL-3.0)
+## MuPDF, the mupdf crates, jbig2dec, extract, the URW base-14 fonts (AGPL-3.0)
 
 MuPDF © Artifex Software, Inc. (https://mupdf.com), mupdf-rs © its authors (https://github.com/messense/mupdf-rs),
-jbig2dec © Artifex Software, Inc., and the URW++ base-14 fonts as distributed with MuPDF: all under the GNU Affero
+jbig2dec and extract (https://github.com/ArtifexSoftware/extract) © Artifex Software, Inc., and the URW++ base-14
+fonts as distributed with MuPDF: all under the GNU Affero
 General Public License version 3, the same licence as pdit — see [../LICENSE](../LICENSE).
 
 ## FreeType (FreeType License)

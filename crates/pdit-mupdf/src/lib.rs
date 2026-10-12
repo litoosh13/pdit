@@ -13,7 +13,7 @@ use mupdf::pdf::{
     PdfRedactTextMethod,
 };
 use mupdf::{Rect, TextPageFlags};
-use mupdf_sys::{fz_context, fz_rect, pdf_document, pdf_page};
+use mupdf_sys::{fz_buffer, fz_context, fz_rect, pdf_document, pdf_page};
 
 #[derive(Debug)]
 pub enum Error {
@@ -22,6 +22,8 @@ pub enum Error {
     Story(String),
     /// The new text needs more room than the page has below the paragraph.
     DoesNotFit,
+    /// Compressing failed (MuPDF's message).
+    Compress(String),
 }
 
 impl From<mupdf::Error> for Error {
@@ -36,6 +38,7 @@ impl std::fmt::Display for Error {
             Error::Mupdf(e) => write!(f, "MuPDF: {e}"),
             Error::Story(e) => write!(f, "laying out the text: {e}"),
             Error::DoesNotFit => write!(f, "the new text doesn't fit on the page"),
+            Error::Compress(e) => write!(f, "compressing: {e}"),
         }
     }
 }
@@ -505,11 +508,359 @@ fn fix_story_unicode<'a>(
     Ok(())
 }
 
+/// How hard Compress PDF (D-069) works: pictures are only touched by Medium and Smallest.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Level {
+    /// Lossless: unused objects and duplicates go, streams and fonts are packed.
+    BestQuality,
+    /// Pictures over 225 dpi to 150 dpi, JPEG quality 75.
+    Medium,
+    /// Pictures over 150 dpi to 100 dpi, JPEG quality 60.
+    Smallest,
+}
+
+unsafe extern "C" {
+    fn pdit_compress(
+        ctx: *mut fz_context,
+        data: *const u8,
+        len: usize,
+        level: i32,
+        out: *mut *mut fz_buffer,
+        err: *mut c_char,
+        errlen: usize,
+    ) -> i32;
+}
+
+/// `pdf` compressed at `level` (M-009): a new file; text, pages and fields are kept. A picture is only
+/// re-encoded when that makes it smaller.
+pub fn compress(pdf: &[u8], level: Level) -> Result<Vec<u8>, Error> {
+    let ctx = mupdf::context::context();
+    let mut out: *mut fz_buffer = std::ptr::null_mut();
+    let mut err = [0 as c_char; 512];
+    let level = match level {
+        Level::BestQuality => 0,
+        Level::Medium => 1,
+        Level::Smallest => 2,
+    };
+    let code = unsafe {
+        pdit_compress(
+            ctx,
+            pdf.as_ptr(),
+            pdf.len(),
+            level,
+            &mut out,
+            err.as_mut_ptr(),
+            err.len(),
+        )
+    };
+    if code != 0 || out.is_null() {
+        let msg = unsafe { std::ffi::CStr::from_ptr(err.as_ptr()) };
+        return Err(Error::Compress(msg.to_string_lossy().into_owned()));
+    }
+    unsafe {
+        let mut data: *mut u8 = std::ptr::null_mut();
+        let len = mupdf_sys::fz_buffer_storage(ctx, out, &mut data);
+        let bytes = std::slice::from_raw_parts(data, len).to_vec();
+        mupdf_sys::fz_drop_buffer(ctx, out);
+        Ok(bytes)
+    }
+}
+
+unsafe extern "C" {
+    #[allow(clippy::too_many_arguments)]
+    fn pdit_set_page_labels(
+        ctx: *mut fz_context,
+        data: *const u8,
+        len: usize,
+        n: i32,
+        firsts: *const i32,
+        styles: *const i32,
+        prefixes: *const *const c_char,
+        starts: *const i32,
+        out: *mut *mut fz_buffer,
+        err: *mut c_char,
+        errlen: usize,
+    ) -> i32;
+}
+
+/// A page-number range for [`set_page_labels`]: from page `first` (from 0), `style` ('D' 1 2 3, 'r' i ii, 'R'
+/// I II, 'a' a b, 'A' A B, 0 none), `prefix`, counting from `start`.
+pub struct LabelRange {
+    pub first: i32,
+    pub style: u8,
+    pub prefix: String,
+    pub start: i32,
+}
+
+/// `pdf` with its page numbers (page labels, D-070) replaced by `ranges`; none: plain 1, 2, 3.
+pub fn set_page_labels(pdf: &[u8], ranges: &[LabelRange]) -> Result<Vec<u8>, Error> {
+    let ctx = mupdf::context::context();
+    let prefixes: Vec<CString> = ranges
+        .iter()
+        .map(|r| CString::new(r.prefix.replace('\0', "")).unwrap_or_default())
+        .collect();
+    let prefix_ptrs: Vec<*const c_char> = prefixes.iter().map(|p| p.as_ptr()).collect();
+    let firsts: Vec<i32> = ranges.iter().map(|r| r.first).collect();
+    let styles: Vec<i32> = ranges.iter().map(|r| i32::from(r.style)).collect();
+    let starts: Vec<i32> = ranges.iter().map(|r| r.start.max(1)).collect();
+    let mut out: *mut fz_buffer = std::ptr::null_mut();
+    let mut err = [0 as c_char; 512];
+    let code = unsafe {
+        pdit_set_page_labels(
+            ctx,
+            pdf.as_ptr(),
+            pdf.len(),
+            ranges.len() as i32,
+            firsts.as_ptr(),
+            styles.as_ptr(),
+            prefix_ptrs.as_ptr(),
+            starts.as_ptr(),
+            &mut out,
+            err.as_mut_ptr(),
+            err.len(),
+        )
+    };
+    if code != 0 || out.is_null() {
+        let msg = unsafe { std::ffi::CStr::from_ptr(err.as_ptr()) };
+        return Err(Error::Compress(msg.to_string_lossy().into_owned()));
+    }
+    unsafe {
+        let mut data: *mut u8 = std::ptr::null_mut();
+        let len = mupdf_sys::fz_buffer_storage(ctx, out, &mut data);
+        let bytes = std::slice::from_raw_parts(data, len).to_vec();
+        mupdf_sys::fz_drop_buffer(ctx, out);
+        Ok(bytes)
+    }
+}
+
+unsafe extern "C" {
+    #[allow(clippy::too_many_arguments)]
+    fn pdit_convert_office(
+        ctx: *mut fz_context,
+        data: *const u8,
+        len: usize,
+        first: i32,
+        last: i32,
+        odt: i32,
+        out: *mut *mut fz_buffer,
+        err: *mut c_char,
+        errlen: usize,
+    ) -> i32;
+}
+
+/// Pages `first`..=`last` (from 0) of `pdf` as a Word (.docx) or, with `odt`, OpenDocument (.odt) file (D-071):
+/// MuPDF's writer, with its picture and line-break bugs worked around (src/convert.c).
+pub fn to_office(pdf: &[u8], first: i32, last: i32, odt: bool) -> Result<Vec<u8>, Error> {
+    let ctx = mupdf::context::context();
+    let mut out: *mut fz_buffer = std::ptr::null_mut();
+    let mut err = [0 as c_char; 512];
+    let code = unsafe {
+        pdit_convert_office(
+            ctx,
+            pdf.as_ptr(),
+            pdf.len(),
+            first,
+            last,
+            i32::from(odt),
+            &mut out,
+            err.as_mut_ptr(),
+            err.len(),
+        )
+    };
+    if code != 0 || out.is_null() {
+        let msg = unsafe { std::ffi::CStr::from_ptr(err.as_ptr()) };
+        return Err(Error::Compress(msg.to_string_lossy().into_owned()));
+    }
+    unsafe {
+        let mut data: *mut u8 = std::ptr::null_mut();
+        let len = mupdf_sys::fz_buffer_storage(ctx, out, &mut data);
+        let bytes = std::slice::from_raw_parts(data, len).to_vec();
+        mupdf_sys::fz_drop_buffer(ctx, out);
+        Ok(bytes)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     const WRAPPED: &[u8] = include_bytes!("../../../fixtures/synthetic-wrapped.pdf");
+    const FORM: &[u8] = include_bytes!("../../../fixtures/synthetic-form.pdf");
+    const SCAN: &[u8] = include_bytes!("../../../fixtures/synthetic-scan.pdf");
+
+    /// A zip package's entries (name, contents), read with MuPDF's archive code.
+    fn entries(zip: &[u8]) -> Vec<(String, Vec<u8>)> {
+        let ctx = mupdf::context::context();
+        unsafe {
+            let stm = mupdf_sys::fz_open_memory(ctx, zip.as_ptr(), zip.len());
+            let arch = mupdf_sys::fz_open_zip_archive_with_stream(ctx, stm);
+            let out = (0..mupdf_sys::fz_count_archive_entries(ctx, arch))
+                .map(|k| {
+                    let name = mupdf_sys::fz_list_archive_entry(ctx, arch, k);
+                    let buf = mupdf_sys::fz_read_archive_entry(ctx, arch, name);
+                    let mut data: *mut u8 = std::ptr::null_mut();
+                    let len = mupdf_sys::fz_buffer_storage(ctx, buf, &mut data);
+                    let entry = (
+                        std::ffi::CStr::from_ptr(name)
+                            .to_string_lossy()
+                            .into_owned(),
+                        std::slice::from_raw_parts(data, len).to_vec(),
+                    );
+                    mupdf_sys::fz_drop_buffer(ctx, buf);
+                    entry
+                })
+                .collect();
+            mupdf_sys::fz_drop_archive(ctx, arch);
+            mupdf_sys::fz_drop_stream(ctx, stm);
+            out
+        }
+    }
+
+    /// Word and OpenDocument: the text comes through as paragraphs, every page's picture is in the package, and
+    /// no Word line break sits inside a text element (or in an .odt at all).
+    #[test]
+    fn office_files_are_whole() {
+        const SPLIT: &[u8] = include_bytes!("../../../fixtures/synthetic-split-lines.pdf");
+        for (input, last, pictures) in [(WRAPPED, 0, 0), (SPLIT, 0, 0), (SCAN, 1, 2)] {
+            for odt in [false, true] {
+                let file = to_office(input, 0, last, odt).unwrap();
+                let entries = entries(&file);
+                let (xml_name, media) = if odt {
+                    ("content.xml", "Pictures/")
+                } else {
+                    ("word/document.xml", "word/media/")
+                };
+                let xml = entries
+                    .iter()
+                    .find(|(n, _)| n == xml_name)
+                    .map(|(_, d)| String::from_utf8_lossy(d).into_owned())
+                    .unwrap();
+                let images = entries.iter().filter(|(n, _)| n.starts_with(media)).count();
+                assert_eq!(
+                    images,
+                    pictures,
+                    "odt {odt}: {:?}",
+                    entries.iter().map(|e| &e.0).collect::<Vec<_>>()
+                );
+                if odt {
+                    assert!(!xml.contains("<w:br/>"), "a Word break in an .odt");
+                    assert_eq!(entries[0].0, "mimetype", "an .odt starts with its mimetype");
+                    // Every picture fits the text width (6.5 in).
+                    for frame in xml.split("<draw:frame").skip(1) {
+                        let width: f32 = frame
+                            .split("svg:width=\"")
+                            .nth(1)
+                            .and_then(|w| w.split("in\"").next())
+                            .and_then(|w| w.parse().ok())
+                            .unwrap();
+                        assert!(width > 0.0 && width <= 6.5 + 1e-3, "frame {width} in");
+                    }
+                } else {
+                    // Every picture has a size within the text width (6.5 in = 5943600 EMU).
+                    for inline in xml.split("<wp:inline").skip(1) {
+                        let cx: f64 = inline
+                            .split("<wp:extent cx=\"")
+                            .nth(1)
+                            .and_then(|c| c.split('"').next())
+                            .and_then(|c| c.parse().ok())
+                            .expect("a size");
+                        assert!(cx > 0.0 && cx <= 5_943_600.0, "picture {cx} EMU");
+                        assert!(inline.contains("<a:ext cx="), "and its shape's size");
+                    }
+                    // Every <w:br/> is outside a text element.
+                    for (at, _) in xml.match_indices("<w:br/>") {
+                        let (open, close) = (xml[..at].rfind("<w:t"), xml[..at].rfind("</w:t>"));
+                        assert!(open.is_none() || close > open, "break inside text at {at}");
+                    }
+                }
+                if input == WRAPPED {
+                    assert!(xml.contains("A separate short note stands alone."), "{xml}");
+                }
+            }
+        }
+    }
+
+    /// Page numbers written by MuPDF read back as labels (MuPDF's own reader), and removing them leaves none.
+    #[test]
+    fn page_labels_are_written() {
+        let label = |pdf: &[u8], page: i32| {
+            let doc = PdfDocument::from_bytes(pdf).unwrap();
+            let mut buf = [0 as c_char; 64];
+            unsafe {
+                mupdf_sys::pdf_page_label(
+                    mupdf::context::context(),
+                    doc.as_raw(),
+                    page,
+                    buf.as_mut_ptr(),
+                    buf.len(),
+                )
+            };
+            unsafe { std::ffi::CStr::from_ptr(buf.as_ptr()) }
+                .to_string_lossy()
+                .into_owned()
+        };
+        let two = compress(SCAN, Level::BestQuality).unwrap();
+        let labelled = set_page_labels(
+            &two,
+            &[
+                LabelRange {
+                    first: 0,
+                    style: b'r',
+                    prefix: String::new(),
+                    start: 1,
+                },
+                LabelRange {
+                    first: 1,
+                    style: b'D',
+                    prefix: "P-".into(),
+                    start: 7,
+                },
+            ],
+        )
+        .unwrap();
+        assert_eq!(
+            (label(&labelled, 0), label(&labelled, 1)),
+            ("i".into(), "P-7".into())
+        );
+        let plain = set_page_labels(&labelled, &[]).unwrap();
+        assert_eq!(
+            (label(&plain, 0), label(&plain, 1)),
+            // No labels left: readers number the pages 1, 2 themselves.
+            (String::new(), String::new())
+        );
+    }
+
+    /// Every level keeps the pages, the text and the form's fields, and never makes a file bigger.
+    #[test]
+    fn compress_keeps_pages_text_and_fields() {
+        let fields = |pdf: &[u8]| {
+            let doc = PdfDocument::from_bytes(pdf).unwrap();
+            (0..doc.page_count().unwrap())
+                .map(|i| doc.load_pdf_page(i).unwrap().widgets().count())
+                .sum::<usize>()
+        };
+        for input in [WRAPPED, FORM, SCAN] {
+            let before = Editor::open(input).unwrap();
+            let pages = before.page_count().unwrap();
+            let text: Vec<String> = (0..pages).map(|p| before.page_text(p).unwrap()).collect();
+            for level in [Level::BestQuality, Level::Medium, Level::Smallest] {
+                let out = compress(input, level).unwrap();
+                let after = Editor::open(&out).unwrap();
+                assert_eq!(after.page_count().unwrap(), pages, "{level:?}");
+                for (p, t) in text.iter().enumerate() {
+                    assert_eq!(&after.page_text(p as i32).unwrap(), t, "{level:?} page {p}");
+                }
+                assert_eq!(fields(&out), fields(input), "{level:?} fields");
+                assert!(
+                    out.len() <= input.len() + 64,
+                    "{level:?}: {} -> {}",
+                    input.len(),
+                    out.len()
+                );
+            }
+        }
+        assert!(fields(FORM) >= 4, "the form fixture has its fields");
+    }
     const NOTO: &[u8] = include_bytes!("../../pdit-app/assets/fonts/NotoSans-Regular.ttf");
 
     fn normalize(s: &str) -> String {

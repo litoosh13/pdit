@@ -3,7 +3,25 @@
 //! (preview / discard / keep) on the open-document API, and logs the outcome to
 //! the browser console. Not compiled into release builds.
 
-use crate::log;
+use std::cell::Cell;
+
+thread_local! {
+    /// Checks passed and failed this run (for the summary, and the CI run's exit code).
+    static COUNTS: Cell<(u32, u32)> = const { Cell::new((0, 0)) };
+}
+
+/// Logs a self-check line, counting its PASS / FAIL.
+fn log(message: &str) {
+    COUNTS.with(|c| {
+        let (pass, fail) = c.get();
+        if message.starts_with("pdit self-check PASS") {
+            c.set((pass + 1, fail));
+        } else if message.starts_with("pdit self-check FAIL") {
+            c.set((pass, fail + 1));
+        }
+    });
+    crate::log(message);
+}
 use pdit_core::{EditMethod, Error, FontChoice, TextStyle, replace_text_verified};
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
@@ -14,6 +32,7 @@ const IMAGE: &[u8] = include_bytes!("../../../fixtures/synthetic-image.png");
 const WRAPPED: &[u8] = include_bytes!("../../../fixtures/synthetic-wrapped.pdf");
 const FORM: &[u8] = include_bytes!("../../../fixtures/synthetic-form.pdf");
 const SPLIT: &[u8] = include_bytes!("../../../fixtures/synthetic-split-lines.pdf");
+const SCAN: &[u8] = include_bytes!("../../../fixtures/synthetic-scan.pdf");
 
 pub async fn run(font_url: &str) {
     let font = match fetch_bytes(font_url).await {
@@ -69,6 +88,10 @@ pub async fn run(font_url: &str) {
     find_session(&font);
     split_replace_session(&font);
     print_session();
+    clean_scan_session();
+    crop_session();
+    split_session();
+    export_session();
     save_names();
     bundled_fonts().await;
     look_alike_session(&font).await;
@@ -76,9 +99,28 @@ pub async fn run(font_url: &str) {
     scan_session().await;
     ask_session().await;
     mupdf_session().await;
+    compress_session().await;
+    labels_session().await;
+    office_session().await;
     about_session().await;
     page_session();
     expose_page_ops();
+    finish().await;
+}
+
+/// The summary line; in the desktop app also `self_check_done`, which ends a CI run (selfcheck.yml) with the
+/// result as its exit code.
+async fn finish() {
+    let (pass, fail) = COUNTS.with(Cell::get);
+    log(&format!(
+        "pdit self-check summary: {pass} passed, {fail} failed"
+    ));
+    if crate::ai_ui::desktop::available() {
+        let args = js_sys::Object::new();
+        let _ = js_sys::Reflect::set(&args, &"pass".into(), &pass.into());
+        let _ = js_sys::Reflect::set(&args, &"fail".into(), &fail.into());
+        let _ = crate::ai_ui::desktop::invoke("self_check_done", &args).await;
+    }
 }
 
 /// Paragraph grouping + reflow (D-035 later item): on the synthetic wrapped
@@ -707,12 +749,18 @@ fn menus_session(font: &[u8]) {
             .map(|(label, actions)| format!("{label}: {}", actions.len()))
             .unwrap_or_default()
     };
+    // Page numbers… (D-070) is the desktop app's only.
+    let page = if crate::ai_ui::desktop::available() {
+        "Page: 7"
+    } else {
+        "Page: 6"
+    };
     let cases = [
         ("text line", centre(visit), "Text: 2"),
         ("link", centre(today), "Link: 3"),
         ("note", (405.0, 495.0), "Note: 2"),
         ("form field", (150.0, 310.0), "Form field: 2"),
-        ("empty space", (300.0, 150.0), "Page: 5"),
+        ("empty space", (300.0, 150.0), page),
     ];
     for (name, point, want) in cases {
         let got = menu(point);
@@ -923,6 +971,224 @@ fn find_session(font: &[u8]) {
 
 /// Print (D-052): a page drawn for paper is 200 dpi wide, and "Leave out"
 /// really leaves comments and marks out (a stamp on a blank page).
+/// Clean scan (D-068) on fixtures/synthetic-scan.pdf: both pages are scans;
+/// the flat scan's shadowed paper turns white, and the photographed page is cut
+/// out of the dark table (its corners become paper).
+fn clean_scan_session() {
+    use pdit_core::scan_clean::{clean_scan, is_scan_page};
+    let check = |name: &str, ok: bool, detail: String| {
+        log(&format!(
+            "pdit self-check {}: clean scan: {name}: {detail}",
+            if ok { "PASS" } else { "FAIL" }
+        ))
+    };
+    if let Err(error) = pdit_core::open_document(SCAN.to_vec()) {
+        return check("open", false, error.to_string());
+    }
+    let scans = (is_scan_page(0), is_scan_page(1));
+    check(
+        "both pages are scans",
+        matches!(scans, (Ok(true), Ok(true))),
+        format!("{scans:?}"),
+    );
+    // The darkest of a few pixels at (x, y) fractions of the page, rendered 400 px wide.
+    let darkest = |page: u16, spots: &[(f32, f32)]| {
+        pdit_core::render_page(page, 400).map(|image| {
+            let (w, data) = (image.width() as f32, image.data());
+            let h = data.len() as f32 / 4.0 / w;
+            spots
+                .iter()
+                .map(|&(x, y)| {
+                    let i = (((y * h) as usize) * w as usize + (x * w) as usize) * 4;
+                    data[i].min(data[i + 1]).min(data[i + 2])
+                })
+                .min()
+                .unwrap_or(0)
+        })
+    };
+    // Paper in the shadow (upper right), the lower right, and the table's corners.
+    let paper = [(0.85, 0.12), (0.9, 0.9)];
+    let corners = [(0.02, 0.02), (0.98, 0.02), (0.98, 0.98), (0.02, 0.98)];
+    // Where the title's text starts on the flat scan (it must not move: no cut there).
+    let title_x = || {
+        pdit_core::render_page(0, 400).map(|image| {
+            let (w, data) = (image.width() as usize, image.data());
+            let row = (data.len() / 4 / w) * 8 / 100;
+            (0..w).find(|&x| data[(row * w + x) * 4] < 100)
+        })
+    };
+    let before = (darkest(0, &paper), darkest(1, &corners));
+    let title_before = title_x();
+    let cleaned = (clean_scan(0), clean_scan(1));
+    let after = (darkest(0, &paper), darkest(1, &corners));
+    let title_after = title_x();
+    check(
+        "a flat scan isn't cut (its text stays put)",
+        matches!((&title_before, &title_after), (Ok(Some(a)), Ok(Some(b))) if a.abs_diff(*b) <= 2),
+        format!("title starts at {title_before:?} → {title_after:?}"),
+    );
+    let ok = matches!(cleaned, (Ok(true), Ok(true)))
+        && matches!(after, (Ok(a), Ok(b)) if a >= 235 && b >= 200);
+    check(
+        "shadowed paper white, table cut away",
+        ok,
+        format!("cleaned {cleaned:?}; darkest before {before:?}, after {after:?}"),
+    );
+    let size = pdit_core::save_document().map(|b| b.len());
+    check(
+        "saves",
+        size.is_ok(),
+        format!("{size:?} bytes (fixture {})", SCAN.len()),
+    );
+}
+
+/// Crop (D-070) on the synthetic rental page: the crop box sets the shown size
+/// and where the visible area starts; the content's bounds are on the page; the
+/// whole page brings everything back.
+fn crop_session() {
+    use pdit_core::page_ops::{content_bounds, crop_page, page_boxes, page_origin, page_sizes};
+    let check = |name: &str, ok: bool, detail: String| {
+        log(&format!(
+            "pdit self-check {}: crop: {name}: {detail}",
+            if ok { "PASS" } else { "FAIL" }
+        ))
+    };
+    if let Err(error) = pdit_core::open_document(RENTAL.to_vec()) {
+        return check("open", false, error.to_string());
+    }
+    let whole = page_boxes(0).map(|(_, w)| w);
+    let content = content_bounds(0);
+    check(
+        "content is on the page",
+        matches!((&whole, &content), (Ok(w), Ok(Some(c))) if c[0] >= w[0] && c[2] <= w[2] && c[2] > c[0]),
+        format!("whole {whole:?}, content {content:?}"),
+    );
+    let cropped = crop_page(0, [100.0, 400.0, 500.0, 700.0]);
+    let (size, origin) = (page_sizes().map(|s| s[0]), page_origin(0));
+    check(
+        "a crop sets the size and the start",
+        cropped.is_ok()
+            && matches!(size, Ok((w, h)) if (w - 400.0).abs() < 0.5 && (h - 300.0).abs() < 0.5)
+            && matches!(origin, Ok((x, y)) if (x - 100.0).abs() < 0.5 && (y - 400.0).abs() < 0.5),
+        format!("{cropped:?}; size {size:?}, origin {origin:?}"),
+    );
+    let back = whole.as_ref().map(|w| crop_page(0, *w));
+    let size = page_sizes().map(|s| s[0]);
+    check(
+        "the whole page comes back",
+        matches!((&back, &size, &whole), (Ok(Ok(())), Ok((w, h)), Ok(b)) if (w - (b[2] - b[0])).abs() < 0.5 && (h - (b[3] - b[1])).abs() < 0.5),
+        format!("{back:?}; size {size:?}"),
+    );
+    let saved = crop_page(0, [100.0, 400.0, 500.0, 700.0])
+        .and_then(|()| pdit_core::save_document())
+        .and_then(|bytes| pdit_core::open_document(bytes).map(|_| page_origin(0)));
+    check(
+        "the crop is saved",
+        matches!(saved, Ok(Ok((x, _))) if (x - 100.0).abs() < 0.5),
+        format!("{saved:?}"),
+    );
+}
+
+/// Split into files (D-070) on the 2-page scan fixture: each group becomes a PDF
+/// with just those pages; a range that isn't there fails; the open document keeps
+/// its pages.
+fn split_session() {
+    use pdit_core::page_ops::{extract_pages, page_sizes};
+    use pdit_core::split::{Split, groups};
+    let check = |name: &str, ok: bool, detail: String| {
+        log(&format!(
+            "pdit self-check {}: split: {name}: {detail}",
+            if ok { "PASS" } else { "FAIL" }
+        ))
+    };
+    if let Err(error) = pdit_core::open_document(SCAN.to_vec()) {
+        return check("open", false, error.to_string());
+    }
+    let pages_in = |bytes: Vec<u8>| -> usize {
+        pdit_core::open_document(bytes)
+            .map(|sizes| sizes.len())
+            .unwrap_or(0)
+    };
+    let files: Vec<Result<Vec<u8>, String>> = groups(2, &Split::EveryPage)
+        .into_iter()
+        .map(|(a, b)| extract_pages(a, b).map_err(|e| e.to_string()))
+        .collect();
+    let both = extract_pages(0, 1).map_err(|e| e.to_string());
+    let bad = extract_pages(1, 2).is_err() && extract_pages(1, 0).is_err();
+    let open_pages = page_sizes().map(|s| s.len());
+    let counts: Vec<usize> = files.into_iter().map(|f| f.map_or(0, pages_in)).collect();
+    let both_pages = both.map_or(0, pages_in);
+    check(
+        "every page and both pages; bad ranges refused; the open PDF unchanged",
+        counts == [1, 1] && both_pages == 2 && bad && matches!(open_pages, Ok(2)),
+        format!("files {counts:?}, both {both_pages}, bad refused {bad}, open {open_pages:?}"),
+    );
+}
+
+/// Export as (D-071) on the synthetic rental page: PNG and JPEG pictures of the
+/// right size with white paper (not transparent), and the page's text.
+fn export_session() {
+    use pdit_core::page_ops::{page_picture, pages_text};
+    let check = |name: &str, ok: bool, detail: String| {
+        log(&format!(
+            "pdit self-check {}: export: {name}: {detail}",
+            if ok { "PASS" } else { "FAIL" }
+        ))
+    };
+    if let Err(error) = pdit_core::open_document(RENTAL.to_vec()) {
+        return check("open", false, error.to_string());
+    }
+    for jpeg in [false, true] {
+        let picture = page_picture(0, 96.0, jpeg)
+            .map_err(|e| e.to_string())
+            .and_then(|bytes| {
+                pdit_core::image::load_from_memory(&bytes).map_err(|e| e.to_string())
+            });
+        let detail = match &picture {
+            Ok(img) => {
+                let corner = img.to_rgba8().get_pixel(2, 2).0;
+                format!("{}x{}, corner {corner:?}", img.width(), img.height())
+            }
+            Err(error) => error.clone(),
+        };
+        check(
+            if jpeg {
+                "JPEG at 96 dpi"
+            } else {
+                "PNG at 96 dpi"
+            },
+            picture.is_ok_and(|img| {
+                let corner = img.to_rgba8().get_pixel(2, 2).0;
+                img.width().abs_diff(793) <= 1 && corner[3] == 255 && corner[0] > 245
+            }),
+            detail,
+        );
+    }
+    // From images (D-071): the PNG fixture and a JPEG of this page make a 2-page PDF.
+    let made = page_picture(0, 96.0, true)
+        .and_then(|jpeg| {
+            pdit_core::images_pdf::pdf_from_images(
+                &[IMAGE.to_vec(), jpeg],
+                pdit_core::images_pdf::PageSize::A4,
+            )
+        })
+        .and_then(pdit_core::open_document);
+    check(
+        "from images: two pictures, two A4 pages",
+        matches!(&made, Ok(sizes) if sizes.len() == 2 && sizes.iter().all(|(w, h)| (w.min(*h) - 595.0).abs() < 1.0)),
+        format!("{made:?}"),
+    );
+    if let Err(error) = pdit_core::open_document(RENTAL.to_vec()) {
+        return check("reopen", false, error.to_string());
+    }
+    let text = pages_text(0, 0);
+    check(
+        "the page's text",
+        text.as_ref().is_ok_and(|t| t.contains("Synthetic")),
+        format!("{:?}", text.map(|t| t.chars().take(60).collect::<String>())),
+    );
+}
+
 fn print_session() {
     let check = |name: &str, ok: bool, detail: String| {
         log(&format!(
@@ -1100,6 +1366,151 @@ async fn about_session() {
 /// MuPDF paragraph edits (D-065), desktop only: the wrapped fixture's first paragraph goes through the desktop
 /// app's `edit_paragraph` the way an inline edit does, comes back re-wrapped and reads back in PDFium; a point
 /// whose paragraph isn't the app's is declined.
+/// Compress PDF (D-069, desktop): the real `compress_pdf` command at each level
+/// on the synthetic scan and form: the copy opens with the same pages, the form
+/// keeps its fields, and no copy is bigger than its input.
+async fn compress_session() {
+    use crate::ai_ui::desktop;
+    let check = |name: &str, ok: bool, detail: String| {
+        log(&format!(
+            "pdit self-check {}: compress: {name}: {detail}",
+            if ok { "PASS" } else { "FAIL" }
+        ))
+    };
+    if !desktop::available() {
+        return log("pdit self-check: compress: skipped (not the desktop app)");
+    }
+    for (file, input) in [("scan", SCAN), ("form", FORM)] {
+        let _ = pdit_core::open_document(input.to_vec());
+        let (pages, fields) = (
+            pdit_core::page_ops::page_sizes()
+                .map(|s| s.len())
+                .unwrap_or(0),
+            pdit_core::form_fields(0).map(|f| f.len()).unwrap_or(0),
+        );
+        let mut sizes = Vec::new();
+        let mut ok = pages > 0;
+        for level in 0..3 {
+            let t = js_sys::Date::now();
+            match desktop::invoke_raw("compress_pdf", input, &[("x-level", level.to_string())])
+                .await
+            {
+                Ok(value) => {
+                    let out = js_sys::Uint8Array::new(&value).to_vec();
+                    let reopened = pdit_core::open_document(out.clone()).is_ok();
+                    let same_pages = pdit_core::page_ops::page_sizes()
+                        .map(|s| s.len())
+                        .unwrap_or(0)
+                        == pages;
+                    let same_fields =
+                        pdit_core::form_fields(0).map(|f| f.len()).unwrap_or(0) == fields;
+                    ok &= reopened && same_pages && same_fields && out.len() <= input.len() + 64;
+                    sizes.push(format!(
+                        "{} B in {:.0} ms",
+                        out.len(),
+                        js_sys::Date::now() - t
+                    ));
+                }
+                Err(error) => {
+                    ok = false;
+                    sizes.push(format!("{error:?}"));
+                }
+            }
+        }
+        check(
+            &format!("{file}: three levels, same pages and fields, never bigger"),
+            ok,
+            format!(
+                "{} B, {pages} pages, {fields} fields → {}",
+                input.len(),
+                sizes.join(" | ")
+            ),
+        );
+    }
+}
+
+/// Page numbers (D-070, desktop): the real `set_page_labels` command on the 2-page
+/// scan; PDFium reads the labels back, and they read back as the same ranges.
+async fn labels_session() {
+    use pdit_core::labels::{Range, Style, ranges_from_labels};
+    let check = |name: &str, ok: bool, detail: String| {
+        log(&format!(
+            "pdit self-check {}: page numbers: {name}: {detail}",
+            if ok { "PASS" } else { "FAIL" }
+        ))
+    };
+    if !crate::ai_ui::desktop::available() {
+        return log("pdit self-check: page numbers: skipped (not the desktop app)");
+    }
+    let ranges = vec![
+        Range {
+            first: 0,
+            style: Style::RomanLower,
+            prefix: String::new(),
+            start: 1,
+        },
+        Range {
+            first: 1,
+            style: Style::Decimal,
+            prefix: "P-".into(),
+            start: 7,
+        },
+    ];
+    let headers = [(
+        "x-labels",
+        String::from(js_sys::encode_uri_component(&crate::labels_ui::spec(
+            &ranges,
+        ))),
+    )];
+    let read = match crate::ai_ui::desktop::invoke_raw("set_page_labels", SCAN, &headers).await {
+        Ok(value) => {
+            let bytes = js_sys::Uint8Array::new(&value).to_vec();
+            pdit_core::open_document(bytes)
+                .map_err(|e| e.to_string())
+                .and_then(|_| pdit_core::page_ops::page_labels().map_err(|e| e.to_string()))
+        }
+        Err(error) => Err(format!("{error:?}")),
+    };
+    let ok = matches!(&read, Ok(l) if l == &[Some("i".to_owned()), Some("P-7".to_owned())])
+        && read.as_ref().is_ok_and(|l| ranges_from_labels(l) == ranges);
+    check(
+        "written by MuPDF, read by PDFium as i, P-7",
+        ok,
+        format!("{read:?}"),
+    );
+}
+
+/// Export as Word / OpenDocument (D-071, desktop): the real `to_office` command
+/// on the wrapped text and the 2-page scan gives zip packages of each kind.
+async fn office_session() {
+    let check = |name: &str, ok: bool, detail: String| {
+        log(&format!(
+            "pdit self-check {}: office: {name}: {detail}",
+            if ok { "PASS" } else { "FAIL" }
+        ))
+    };
+    if !crate::ai_ui::desktop::available() {
+        return log("pdit self-check: office: skipped (not the desktop app)");
+    }
+    for (file, input, last, format) in [("wrapped", WRAPPED, 0, "docx"), ("scan", SCAN, 1, "odt")] {
+        let headers = [
+            ("x-first", "0".to_owned()),
+            ("x-last", last.to_string()),
+            ("x-format", format.to_owned()),
+        ];
+        let t = js_sys::Date::now();
+        let out = crate::ai_ui::desktop::invoke_raw("to_office", input, &headers)
+            .await
+            .map(|v| js_sys::Uint8Array::new(&v).to_vec());
+        let ms = js_sys::Date::now() - t;
+        check(
+            &format!("{file} → .{format}"),
+            matches!(&out, Ok(b) if b.starts_with(b"PK") && b.len() > 1000),
+            format!("{:?} in {ms:.0} ms", out.as_ref().map(Vec::len)),
+        );
+    }
+}
+
 async fn mupdf_session() {
     use crate::ai_ui::desktop;
     let check = |name: &str, ok: bool, detail: String| {

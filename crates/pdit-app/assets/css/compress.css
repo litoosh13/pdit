@@ -1,0 +1,28 @@
+/* Compress PDF (M-009, D-069; approved mockup .claude/research/compress-ui/). The window is doc.css's (as Print);
+   this adds the size line, the level's note and the status. */
+
+.cz-size {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 2px 2px 0;
+  font-size: 13px;
+}
+.cz-size b {
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+}
+.cz-size .from {
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+}
+.cz-size .less {
+  color: #0a7a3d;
+  font-weight: 600;
+}
+.cz-what,
+.cz-status {
+  padding: 0 2px;
+  font-size: 12px;
+  color: var(--ink-2);
+}

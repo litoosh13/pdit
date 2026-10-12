@@ -46,7 +46,7 @@ pub enum Family {
 
 impl Family {
     /// Every family (used by the debug self-check).
-    #[cfg(debug_assertions)]
+    #[cfg(any(debug_assertions, feature = "self-check"))]
     pub const ALL: [Family; 5] = [
         Family::Sans,
         Family::Serif,

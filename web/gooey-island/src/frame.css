@@ -45,6 +45,10 @@
   background: var(--primary);
   color: var(--primary-foreground);
 }
+/* The readiness badge (D-066) stays readable on the selected tab. */
+.fr-tabs button.is-on > span:last-child {
+  color: var(--primary-foreground) !important;
+}
 .fr-tabs svg {
   width: 16px;
   height: 16px;

@@ -23,6 +23,8 @@ import { IconChatRound } from '../node_modules/@devigner-ui/icons/dist/icons/Cha
 import { IconTrashBinMinimalistic } from '../node_modules/@devigner-ui/icons/dist/icons/TrashBinMinimalistic.js';
 import { IconMenuDots } from '../node_modules/@devigner-ui/icons/dist/icons/MenuDots.js';
 import { IconLink } from '../node_modules/@devigner-ui/icons/dist/icons/Link.js';
+import { IconBroom } from '../node_modules/@devigner-ui/icons/dist/icons/Broom.js';
+import { IconCrop2 } from '../node_modules/@devigner-ui/icons/dist/icons/Crop2.js';
 import 'devignerui/styles.css';
 import './gooey-surface.css';
 import './format-bar.css';
@@ -66,7 +68,14 @@ function useCurrentPage(count) {
   return Math.min(page, Math.max(count, 1));
 }
 
-function Frame({ hasDoc, mode, fileName, zoom, pages, canUndo, onMode, onUndo, onZoom, onSave, onPages }) {
+/** How ready the AI is (D-066): a percent, orange while the models are missing, "Ready" at 100. */
+function ReadyBadge({ percent, waiting }) {
+  if (percent == null) return null;
+  if (percent >= 100) return <Badge size="sm" tone="success">Ready</Badge>;
+  return <Badge size="sm" tone={waiting ? 'warning' : 'info'}>{percent}%</Badge>;
+}
+
+function Frame({ hasDoc, mode, fileName, zoom, pages, canUndo, aiPercent, aiWaiting, aiNow, onMode, onUndo, onZoom, onSave, onPages }) {
   const current = useCurrentPage(pages);
   const ai = mode === 'ai';
   const fullscreen = () => {
@@ -86,9 +95,10 @@ function Frame({ hasDoc, mode, fileName, zoom, pages, canUndo, onMode, onUndo, o
             <IconEdit />
             Edit
           </button>
-          <button type="button" role="tab" aria-selected={ai} className={ai ? 'is-on' : ''} onClick={() => onMode?.('ai')}>
+          <button type="button" role="tab" aria-selected={ai} className={ai ? 'is-on' : ''} title={aiNow} onClick={() => onMode?.('ai')}>
             <IconMagicStar />
             AI
+            <ReadyBadge percent={aiPercent} waiting={aiWaiting} />
           </button>
         </div>
         <span className="fr-sep" />
@@ -139,15 +149,36 @@ export function mountFrame(element, callbacks = {}) {
 
 // ---------- page tools (D-062) ----------
 
-/** The row above a page (Canva's page tools): its number, lock, duplicate, add a page after it, and Devigner's
- *  DeleteButton (asks before it deletes). The last page can't be deleted. */
-function PageToolsRow({ page, count, locked, onLock, onDuplicate, onAdd, onDelete }) {
+/** The row above a page (Canva's page tools): its number, Clean scan on a scanned page (D-068), Crop (D-070), lock, duplicate,
+ *  add a page after it, and Devigner's DeleteButton (asks before it deletes). The last page can't be deleted. */
+function PageToolsRow({ page, count, locked, scan, label, onLock, onDuplicate, onAdd, onDelete, onClean, onCrop }) {
   return (
     <div className="pt-row">
       <span className="pt-label">
-        Page {page + 1}
+        {label ? (
+          <>
+            Page {label} <span className="pt-locked">({page + 1})</span>
+          </>
+        ) : (
+          <>Page {page + 1}</>
+        )}
         {locked && <span className="pt-locked"> · locked</span>}
       </span>
+      {scan && (
+        <button
+          type="button"
+          className="fr-icon"
+          aria-label="Clean scan"
+          title="Clean scan: white paper, no shadows, a photo cut out of the table"
+          disabled={locked}
+          onClick={onClean}
+        >
+          <IconBroom />
+        </button>
+      )}
+      <button type="button" className="fr-icon" aria-label="Crop page" title="Crop page" disabled={locked} onClick={onCrop}>
+        <IconCrop2 />
+      </button>
       <button
         type="button"
         className="fr-icon"
@@ -169,7 +200,7 @@ function PageToolsRow({ page, count, locked, onLock, onDuplicate, onAdd, onDelet
   );
 }
 
-/** Renders a page's tools row into `element`; the app calls `update({ page, count, locked })`. */
+/** Renders a page's tools row into `element`; the app calls `update({ page, count, locked, scan, label })`. */
 export function mountPageTools(element, callbacks = {}) {
   const root = createRoot(element);
   const render = (state) => root.render(<PageToolsRow {...state} {...callbacks} />);

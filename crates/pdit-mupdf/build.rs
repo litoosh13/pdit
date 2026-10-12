@@ -9,6 +9,9 @@ const MUPDF_SYS: &str = "mupdf-sys-0.8.";
 
 fn main() {
     println!("cargo:rerun-if-changed=src/story.c");
+    println!("cargo:rerun-if-changed=src/compress.c");
+    println!("cargo:rerun-if-changed=src/labels.c");
+    println!("cargo:rerun-if-changed=src/convert.c");
     if std::env::var("CARGO_CFG_TARGET_ARCH").as_deref() == Ok("wasm32") {
         return;
     }
@@ -17,6 +20,9 @@ fn main() {
         .expect("mupdf-sys sources (its mupdf/include)");
     cc::Build::new()
         .file("src/story.c")
+        .file("src/compress.c")
+        .file("src/labels.c")
+        .file("src/convert.c")
         .include(include)
         .warnings(false)
         .compile("pdit_story");

@@ -21,6 +21,8 @@ const ICON_IMAGE: &str = include_str!("../assets/icons/devigner/GalleryAdd.svg")
 const ICON_SHAPE: &str = include_str!("../assets/icons/devigner/Stop.svg");
 const ICON_TABLE: &str = include_str!("../assets/icons/devigner/Grid3x3.svg");
 const ICON_SIGNATURE: &str = include_str!("../assets/icons/devigner/Magicpen.svg");
+/// Clean scan (D-068, Devigner Broom, picked by the user).
+pub const ICON_BROOM: &str = include_str!("../assets/icons/devigner/Broom.svg");
 /// The image-options bar's Delete icon (red by CSS, image-select.css, D-023a).
 const ICON_PERMANENT_DELETE: &str =
     include_str!("../assets/icons/devigner/TrashBinMinimalistic.svg");
@@ -159,7 +161,7 @@ impl PageTools {
         match page_ops::extract_page(page) {
             Ok(bytes) => {
                 spawn(async move {
-                    if let Err(error) = crate::save::save_pdf(&bytes, &name).await {
+                    if let Err(error) = crate::save::save_file(&bytes, &name).await {
                         crate::log(&format!("pdit: could not save the page: {error:?}"));
                     }
                 });
@@ -452,6 +454,36 @@ impl PageTools {
         match page_ops::restore(snapshot.as_ref().clone()) {
             Ok(sizes) => refresh(sizes),
             Err(error) => crate::log(&format!("pdit: could not restore: {error}")),
+        }
+    }
+
+    /// Clean scan (D-068): `pages` become white paper with dark text, with one
+    /// Undo; nothing changes if one of them fails.
+    pub fn clean_scans(self, pages: &[u16]) {
+        if pages.is_empty() {
+            return self.show("No scanned pages to clean".into(), ICON_BROOM, None);
+        }
+        consume_context::<Editing>().cancel();
+        let Some(before) = self.snapshot() else {
+            return;
+        };
+        let cleaned = pages
+            .iter()
+            .try_for_each(|&p| pdit_core::scan_clean::clean_scan(p).map(drop));
+        match cleaned {
+            Ok(()) => {
+                self.refresh_pages();
+                let message = match pages.len() {
+                    1 => "Scan cleaned".to_owned(),
+                    n => format!("{n} scanned pages cleaned"),
+                };
+                self.show(message, ICON_BROOM, Some(before));
+            }
+            Err(error) => {
+                self.restore_snapshot(&before);
+                crate::log(&format!("pdit: clean scan: {error}"));
+                self.show("This scan couldn't be cleaned".into(), ICON_BROOM, None);
+            }
         }
     }
 

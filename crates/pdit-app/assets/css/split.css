@@ -1,0 +1,15 @@
+/* Split into files (D-070; approved mockup .claude/research/page-tools-ui/). The window is doc.css's (as Print);
+   this adds the file list, the page-list field and the status. */
+
+.split-files {
+  padding: 0 2px;
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+.split-after.doc-field {
+  width: 120px;
+}
+.split-status {
+  font-size: 12px;
+  color: var(--ink-2);
+}

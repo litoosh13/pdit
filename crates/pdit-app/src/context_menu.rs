@@ -72,6 +72,18 @@ pub enum Action {
     AllComments,
     HeaderFooter,
     Watermark,
+    /// Clean scan on every scanned page (D-068).
+    CleanScans,
+    /// Compress PDF (M-009, D-069; desktop app).
+    Compress,
+    /// Crop (D-070): the frame on this page.
+    Crop,
+    /// Split into files (D-070).
+    Split,
+    /// Page numbers (D-070; desktop app).
+    PageNumbers,
+    /// Export as (D-071).
+    Export,
     LinkWebAddresses,
     Bookmarks,
     /// Form edit mode (D-047), with a field type armed or none.
@@ -116,6 +128,12 @@ impl Action {
             Action::AllComments => "All comments",
             Action::HeaderFooter => "Header & footer…",
             Action::Watermark => "Watermark…",
+            Action::CleanScans => "Clean all scanned pages",
+            Action::Compress => "Compress PDF…",
+            Action::Crop => "Crop page…",
+            Action::Split => "Split into files…",
+            Action::PageNumbers => "Page numbers…",
+            Action::Export => "Export as…",
             Action::LinkWebAddresses => "Link web addresses",
             Action::Bookmarks => "Bookmarks",
             Action::EditForm(None) => "Edit form",
@@ -162,6 +180,12 @@ impl Action {
             Action::AllComments => ICON_COMMENTS,
             Action::HeaderFooter => crate::doc_ui::ICON_HF,
             Action::Watermark => crate::doc_ui::ICON_WM,
+            Action::CleanScans => crate::page_tools::ICON_BROOM,
+            Action::Compress => crate::compress_ui::ICON_BOX,
+            Action::Crop => crate::crop_ui::ICON_CROP,
+            Action::Split => crate::split_ui::ICON_SCISSOR,
+            Action::PageNumbers => crate::labels_ui::ICON_TAG,
+            Action::Export => crate::export_ui::ICON_EXPORT,
             Action::LinkWebAddresses => crate::links_ui::ICON_LINK,
             Action::Bookmarks => crate::bookmarks_ui::ICON_BOOKMARK,
             Action::EditForm(None) | Action::DoneEditingForm => crate::form_edit_ui::ICON_FORM,
@@ -451,8 +475,17 @@ pub(crate) fn page_actions() -> Vec<Action> {
         Action::Page(PageAction::RotateRight),
         Action::Page(PageAction::InsertBlank),
         Action::Page(PageAction::Duplicate),
+        Action::Crop,
         Action::ExtractPage,
     ];
+    // Split needs at least two pages.
+    if pdit_core::page_ops::page_sizes().is_ok_and(|sizes| sizes.len() > 1) {
+        actions.push(Action::Split);
+    }
+    // Page numbers are written by MuPDF, in the desktop app.
+    if crate::ai_ui::desktop::available() {
+        actions.push(Action::PageNumbers);
+    }
     // The last page can't be deleted, so Delete isn't offered then.
     if pdit_core::page_ops::page_sizes().is_ok_and(|sizes| sizes.len() > 1) {
         actions.push(Action::Page(PageAction::Delete));
@@ -511,6 +544,20 @@ pub(crate) fn run(action: Action, page: u16, x: f32, y: f32) {
         Action::AllComments => annotate.open_panel(),
         Action::HeaderFooter => {
             consume_context::<crate::doc_ui::DocTools>().open(crate::doc_ui::Kind::HeaderFooter)
+        }
+        Action::Compress => consume_context::<crate::compress_ui::Compress>().open(),
+        Action::Crop => consume_context::<crate::crop_ui::Crop>().start(page),
+        Action::Split => consume_context::<crate::split_ui::SplitFiles>().open(),
+        Action::PageNumbers => consume_context::<crate::labels_ui::PageNumbers>().open(),
+        Action::Export => consume_context::<crate::export_ui::Export>().open(),
+        Action::CleanScans => {
+            let locks = consume_context::<crate::pages::PageLocks>().0;
+            let count = pdit_core::page_ops::page_sizes().map_or(0, |s| s.len() as u16);
+            let pages: Vec<u16> = (0..count)
+                .filter(|p| !locks.peek().contains(p))
+                .filter(|&p| pdit_core::scan_clean::is_scan_page(p).unwrap_or(false))
+                .collect();
+            consume_context::<PageTools>().clean_scans(&pages);
         }
         Action::Watermark => {
             consume_context::<crate::doc_ui::DocTools>().open(crate::doc_ui::Kind::Watermark)

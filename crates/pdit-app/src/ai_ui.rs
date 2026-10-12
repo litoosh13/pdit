@@ -1,5 +1,5 @@
-//! The analysis (D-055), run in AI mode (D-062, frame_ui.rs) when the PDF was
-//! never analysed or changed since. The analysis decides by itself what each page needs —
+//! The analysis (D-055), run when AI mode opens (D-062, frame_ui.rs) and the PDF was
+//! never analysed or changed since; its percent shows on the AI tab (D-066). The analysis decides by itself what each page needs —
 //! its own text, or OCR for a scan (desktop app: leafmind's Tesseract through
 //! the desktop commands) — looks for form fields with leafmind's finder, and
 //! says whether questions can be asked. Its steps show in a panel on the right.
@@ -27,6 +27,8 @@ pub(crate) struct Step {
     pub(crate) what: String,
     pub(crate) detail: String,
     pub(crate) state: State,
+    /// How far a running step is (0–1), for the percent.
+    frac: f32,
 }
 
 impl Step {
@@ -35,9 +37,23 @@ impl Step {
             what: what.into(),
             detail: detail.into(),
             state,
+            frac: 0.0,
+        }
+    }
+
+    /// A running step, `k` of `n` done.
+    fn part(what: &str, k: usize, n: usize) -> Self {
+        Step {
+            frac: k as f32 / n.max(1) as f32,
+            ..Step::new(what, State::Run, format!("Page {} of {n}…", k + 1))
         }
     }
 }
+
+/// Each step's share of the percent (D-066): pages, OCR, fields, questions.
+const SPANS: [(f32, f32); 4] = [(0.0, 10.0), (10.0, 45.0), (45.0, 75.0), (75.0, 100.0)];
+/// Step 4 waiting for the question models.
+const NEEDS_MODELS: &str = "Needs the AI models (760 MB, downloaded once)";
 
 #[derive(Clone, PartialEq, Default)]
 pub(crate) struct Analysis {
@@ -47,6 +63,43 @@ pub(crate) struct Analysis {
     pub(crate) summary: String,
     /// The document before OCR's text layer, for "Undo OCR".
     before: Option<Rc<Vec<u8>>>,
+}
+
+impl Analysis {
+    /// How ready the AI is, 0–100 (None before AI mode was opened for this PDF).
+    pub(crate) fn percent(&self) -> Option<u8> {
+        if self.steps.is_empty() {
+            return None;
+        }
+        let mut p = 0.0;
+        for (s, (a, b)) in self.steps.iter().zip(SPANS) {
+            match s.state {
+                State::Done | State::Skip => p = b,
+                State::Run => {
+                    p = a + (b - a) * s.frac;
+                    break;
+                }
+                State::Wait => break,
+            }
+        }
+        Some(p as u8)
+    }
+
+    /// Everything else is done; the question models aren't downloaded.
+    pub(crate) fn needs_models(&self) -> bool {
+        !self.running && self.steps.get(3).is_some_and(|s| s.state == State::Wait)
+    }
+
+    /// What it's doing now, for the AI tab's title.
+    pub(crate) fn now(&self) -> String {
+        if self.needs_models() {
+            return "Download the AI models (760 MB, once) to finish".into();
+        }
+        match self.steps.iter().find(|s| s.state == State::Run) {
+            Some(s) => format!("{}…", s.what),
+            None => "AI is ready".into(),
+        }
+    }
 }
 
 /// Shared AI state.
@@ -121,14 +174,54 @@ impl Ai {
         }
     }
 
-    /// In AI mode: analyse the PDF if it never was, or changed since.
-    pub fn analyze_if_needed(self) {
-        let a = self.analysis.peek();
-        if a.running || (self.analyzed.peek().is_some() && !*self.changed.peek()) {
+    /// In AI mode: analyse the PDF if it never was, or changed since; otherwise
+    /// (analysed, or remembered) only get it ready for questions if it isn't yet.
+    pub fn analyze_if_needed(mut self) {
+        if self.analysis.peek().running {
             return;
         }
-        drop(a);
-        self.analyze();
+        if self.analyzed.peek().is_none() || *self.changed.peek() {
+            return self.analyze();
+        }
+        if self.analysis.peek().steps.is_empty() {
+            let steps = remembered_steps(self.record.peek().as_deref());
+            self.analysis.set(Analysis {
+                steps,
+                ..Analysis::default()
+            });
+        }
+        if self.analysis.peek().steps[3].state == State::Wait {
+            self.analysis.with_mut(|a| a.running = true);
+            spawn(async move {
+                self.prepare_questions().await;
+                self.analysis.with_mut(|a| a.running = false);
+            });
+        }
+    }
+
+    /// Step 4: leafmind reads the document for questions now, so the first
+    /// question doesn't wait; it waits itself while the models are missing.
+    async fn prepare_questions(self) {
+        use crate::ask_ui::Models;
+        let ask = consume_context::<crate::ask_ui::Ask>();
+        const WHAT: &str = "Reading the document for questions";
+        let step = match ask.models() {
+            Models::Ready => {
+                self.set_step(3, Step::new(WHAT, State::Run, ""));
+                match ask.prepare().await {
+                    Ok(()) => Step::new("Ready for questions", State::Done, ""),
+                    Err(error) => Step::new("Questions can't be asked", State::Skip, error),
+                }
+            }
+            Models::Unsupported if desktop::available() => Step::new(
+                "Questions need an Apple-silicon Mac for now",
+                State::Skip,
+                "",
+            ),
+            Models::Unsupported => Step::new("Questions need the desktop app", State::Skip, ""),
+            _ => Step::new(WHAT, State::Wait, NEEDS_MODELS),
+        };
+        self.set_step(3, step);
     }
 
     /// Opening a file analysed before (D-060): its record comes back — the
@@ -213,7 +306,7 @@ impl Ai {
                 Step::new("Checking the pages", State::Run, ""),
                 Step::new("Reading scanned pages (OCR)", State::Wait, ""),
                 Step::new("Looking for form fields", State::Wait, ""),
-                Step::new("Getting ready for questions", State::Wait, ""),
+                Step::new("Reading the document for questions", State::Wait, ""),
             ],
             running: true,
             ..Analysis::default()
@@ -314,14 +407,7 @@ impl Ai {
                 let mut made = 0;
                 let mut skipped = 0;
                 for (k, &page) in scans.iter().enumerate() {
-                    self.set_step(
-                        1,
-                        Step::new(
-                            "Reading scanned pages (OCR)",
-                            State::Run,
-                            format!("Page {} of {}…", k + 1, scans.len()),
-                        ),
-                    );
+                    self.set_step(1, Step::part("Reading scanned pages (OCR)", k, scans.len()));
                     crate::print_ui::pause(30).await;
                     match desktop::read(page, lang).await {
                         Ok(words) => {
@@ -380,11 +466,7 @@ impl Ai {
                 for page in 0..pages.len() as u16 {
                     self.set_step(
                         2,
-                        Step::new(
-                            "Looking for form fields",
-                            State::Run,
-                            format!("Page {} of {}…", page + 1, pages.len()),
-                        ),
+                        Step::part("Looking for form fields", usize::from(page), pages.len()),
                     );
                     crate::print_ui::pause(30).await;
                     let have = pdit_core::form_fields(page).unwrap_or_default();
@@ -413,19 +495,8 @@ impl Ai {
                 .set_prepared((n > 0).then_some(suggestions));
             self.set_step(2, Step::new("Form fields", State::Done, detail));
 
-            // 4. Questions (asking comes next; desktop only).
-            self.set_step(
-                3,
-                if desktop {
-                    Step::new(
-                        "Ready for questions",
-                        State::Done,
-                        "The question models (680 MB) download the first time you ask.",
-                    )
-                } else {
-                    Step::new("Questions need the desktop app", State::Skip, "")
-                },
-            );
+            // 4. Questions.
+            self.prepare_questions().await;
             let before = self.analysis.peek().before.clone();
             self.analysis.with_mut(|a| {
                 a.running = false;
@@ -455,6 +526,48 @@ impl Ai {
             consume_context::<crate::find_fields_ui::FindFields>().review_prepared_quietly();
         });
     }
+}
+
+/// The steps of an analysis remembered for this file (D-060); questions still to do.
+fn remembered_steps(record: Option<&crate::analysis_cache::Record>) -> Vec<Step> {
+    let (pages, scans, ocr, fields, language) = record.map_or((0, 0, 0, 0, None), |r| {
+        (
+            r.kinds.len(),
+            r.kinds.iter().filter(|k| *k == "scan").count(),
+            r.ocr.len(),
+            r.suggestions.len(),
+            r.language.as_deref(),
+        )
+    });
+    let mut checked = format!(
+        "{pages} page{} · remembered",
+        if pages == 1 { "" } else { "s" }
+    );
+    if let Some(lang) = language {
+        checked += &format!(" · {}", language_name(lang));
+    }
+    vec![
+        Step::new("Checking the pages", State::Done, checked),
+        if scans == 0 {
+            Step::new("OCR not needed", State::Skip, "")
+        } else {
+            Step::new(
+                "Read scanned pages (OCR)",
+                State::Done,
+                format!("{ocr} of {scans} scanned pages searchable"),
+            )
+        },
+        Step::new(
+            "Form fields",
+            State::Done,
+            if fields == 0 {
+                "No possible fields".to_owned()
+            } else {
+                format!("{fields} possible fields")
+            },
+        ),
+        Step::new("Reading the document for questions", State::Wait, ""),
+    ]
 }
 
 fn language_name(code: &str) -> &'static str {
@@ -518,7 +631,7 @@ pub(crate) mod desktop {
 
     /// Debug builds: the message also goes to the desktop app's terminal
     /// (its window's console can't be read from outside).
-    #[cfg(debug_assertions)]
+    #[cfg(any(debug_assertions, feature = "self-check"))]
     pub fn log(message: &str) {
         let Some(internals) = internals() else { return };
         let Ok(invoke) = Reflect::get(&internals, &"invoke".into())
@@ -592,6 +705,8 @@ pub(crate) mod desktop {
             .copied()
             .unwrap_or((595.0, 842.0));
         let k = width_pt / width as f32;
+        // The picture is the visible area; a cropped page starts elsewhere (D-070).
+        let (ox, oy) = pdit_core::page_ops::page_origin(page).unwrap_or((0.0, 0.0));
         let words = Reflect::get(&value, &"words".into()).map_err(|e| format!("{e:?}"))?;
         let words: js_sys::Array = words.dyn_into().map_err(|_| "no words")?;
         Ok(words
@@ -603,7 +718,12 @@ pub(crate) mod desktop {
                 let (l, t, r, bottom) = (n(0)?, n(1)?, n(2)?, n(3)?);
                 Some(pdit_core::LayerWord {
                     text,
-                    rect: [l * k, height_pt - bottom * k, r * k, height_pt - t * k],
+                    rect: [
+                        ox + l * k,
+                        oy + height_pt - bottom * k,
+                        ox + r * k,
+                        oy + height_pt - t * k,
+                    ],
                 })
             })
             .collect())

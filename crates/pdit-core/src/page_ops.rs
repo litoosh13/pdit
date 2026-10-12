@@ -566,6 +566,157 @@ pub fn delete_image(page: u16, object_index: usize) -> Result<(), Error> {
     })
 }
 
+/// Page `index` as a picture (Export as, D-071): drawn as for print (comments and form fields shown) at `dpi`, as
+/// JPEG (quality 90) or PNG.
+pub fn page_picture(index: u16, dpi: f32, jpeg: bool) -> Result<Vec<u8>, Error> {
+    let width_pt = page_sizes()?
+        .get(usize::from(index))
+        .map(|s| s.0)
+        .ok_or_else(|| Error::Pdfium("no such page".into()))?;
+    let width_px = (width_pt / 72.0 * dpi).round().max(1.0) as u32;
+    let image = crate::render_page_for_print(index, width_px, true)?;
+    let (w, h) = (image.width(), image.height());
+    let rgba = image::RgbaImage::from_raw(w, h, image.data().to_vec())
+        .ok_or_else(|| Error::Pdfium("could not copy the page image".into()))?;
+    let mut out = Vec::new();
+    let encoded = if jpeg {
+        let rgb = image::DynamicImage::ImageRgba8(rgba).to_rgb8();
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 90).encode_image(&rgb)
+    } else {
+        rgba.write_with_encoder(image::codecs::png::PngEncoder::new(&mut out))
+    };
+    encoded.map_err(|e| Error::Pdfium(format!("could not encode the picture: {e}")))?;
+    Ok(out)
+}
+
+/// The text of pages `first`..=`last`, page after page with a blank line between (Export as → Text, D-071).
+pub fn pages_text(first: u16, last: u16) -> Result<String, Error> {
+    with_open(|document| {
+        let mut out = Vec::new();
+        for index in first..=last {
+            out.push(
+                document
+                    .pages()
+                    .get(index.into())?
+                    .text()?
+                    .all()
+                    .trim_end()
+                    .to_owned(),
+            );
+        }
+        Ok(out.join("\n\n"))
+    })
+}
+
+/// Each page's label as the PDF gives it (page numbers, D-070); None when it has none.
+pub fn page_labels() -> Result<Vec<Option<String>>, Error> {
+    with_open(|document| {
+        Ok(document
+            .pages()
+            .iter()
+            .map(|p| p.label().filter(|l| !l.is_empty()).map(str::to_owned))
+            .collect())
+    })
+}
+
+/// Page `index`'s label (page numbers, D-070), when the PDF gives it one.
+pub fn page_label(index: u16) -> Result<Option<String>, Error> {
+    with_open(|document| {
+        Ok(document
+            .pages()
+            .get(index.into())?
+            .label()
+            .filter(|l| !l.is_empty())
+            .map(str::to_owned))
+    })
+}
+
+/// Where page `index`'s visible area starts: its crop box's lower-left corner in
+/// PDF points ((0, 0) for most PDFs; pages cropped here or by other tools
+/// start elsewhere). Overlays and clicks add it (pages.rs, D-070).
+pub fn page_origin(index: u16) -> Result<(f32, f32), Error> {
+    with_open(|document| {
+        let b = document
+            .pages()
+            .get(index.into())?
+            .boundaries()
+            .bounding()?
+            .bounds;
+        Ok((b.left().value, b.bottom().value))
+    })
+}
+
+/// Page `index`'s visible area (crop box) and whole page (media box), each
+/// [left, bottom, right, top] in PDF points (D-070).
+pub fn page_boxes(index: u16) -> Result<([f32; 4], [f32; 4]), Error> {
+    with_open(|document| {
+        let page = document.pages().get(index.into())?;
+        let rect = |b: PdfRect| {
+            [
+                b.left().value,
+                b.bottom().value,
+                b.right().value,
+                b.top().value,
+            ]
+        };
+        let visible = rect(page.boundaries().bounding()?.bounds);
+        let whole = page
+            .boundaries()
+            .media()
+            .map_or(visible, |m| rect(m.bounds));
+        Ok((visible, whole))
+    })
+}
+
+/// What's drawn on page `index`, [left, bottom, right, top] in PDF points,
+/// within the whole page: for "Remove white margins" (D-070). None on an empty page.
+pub fn content_bounds(index: u16) -> Result<Option<[f32; 4]>, Error> {
+    let (_, whole) = page_boxes(index)?;
+    with_open(|document| {
+        let page = document.pages().get(index.into())?;
+        let mut out: Option<[f32; 4]> = None;
+        for object in page.objects().iter() {
+            let [l, b, r, t] = crate::inspect::rect(object.bounds()?);
+            let [l, b, r, t] = [
+                l.max(whole[0]),
+                b.max(whole[1]),
+                r.min(whole[2]),
+                t.min(whole[3]),
+            ];
+            if r <= l || t <= b {
+                continue;
+            }
+            out = Some(out.map_or([l, b, r, t], |o| {
+                [o[0].min(l), o[1].min(b), o[2].max(r), o[3].max(t)]
+            }));
+        }
+        Ok(out)
+    })
+}
+
+/// Shows only `rect` ([left, bottom, right, top], PDF points, kept within the
+/// whole page) of page `index` (D-070): the crop box. Nothing is deleted; the
+/// whole page's rect shows everything again.
+pub fn crop_page(index: u16, rect: [f32; 4]) -> Result<(), Error> {
+    discard_edit()?;
+    let (_, whole) = page_boxes(index)?;
+    let [l, b, r, t] = [
+        rect[0].max(whole[0]),
+        rect[1].max(whole[1]),
+        rect[2].min(whole[2]),
+        rect[3].min(whole[3]),
+    ];
+    if r - l < 1.0 || t - b < 1.0 {
+        return Err(Error::Pdfium("the crop is empty".into()));
+    }
+    with_open(|document| {
+        let mut page = document.pages().get(index.into())?;
+        page.boundaries_mut()
+            .set_crop(PdfRect::new_from_values(b, l, t, r))?;
+        Ok(())
+    })
+}
+
 /// Deletes page `index`. The last page can't be deleted.
 pub fn delete_page(index: u16) -> Result<(), Error> {
     discard_edit()?;
@@ -586,13 +737,22 @@ pub fn delete_page(index: u16) -> Result<(), Error> {
 /// from temporary documents (duplicate / insert), reproducibly; loading a
 /// copy doesn't.
 pub fn extract_page(index: u16) -> Result<Vec<u8>, Error> {
+    extract_pages(index, index)
+}
+
+/// Pages `first`..=`last` as a new PDF (Split into files, D-070), made the
+/// same way as [`extract_page`].
+pub fn extract_pages(first: u16, last: u16) -> Result<Vec<u8>, Error> {
     let copy = snapshot()?;
     reserve_for_pdfium_copy(copy.len());
     let extracted = pdfium().load_pdf_from_byte_vec(copy, None)?;
     let count = extracted.pages().len();
-    let keep = i32::from(index);
+    let keep = i32::from(first)..=i32::from(last);
+    if keep.is_empty() || *keep.end() >= count {
+        return Err(Error::Pdfium("no such pages".into()));
+    }
     for page in (0..count).rev() {
-        if page != keep {
+        if !keep.contains(&page) {
             extracted.pages().get(page)?.delete()?;
         }
     }

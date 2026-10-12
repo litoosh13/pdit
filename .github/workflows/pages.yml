@@ -1,0 +1,71 @@
+# Publishes the online version of pdit on GitHub Pages (https://litoosh13.github.io/pdit/): installable, and works
+# offline after the first visit (public/sw.js). Runs only when started from the Actions tab ("Online version" → Run
+# workflow), so nothing goes online without the user (M-007). One-time setup: the repository's Settings → Pages →
+# Source: "GitHub Actions". The page is static: PDFs are opened and edited in the visitor's browser, never uploaded.
+name: Online version
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust toolchain
+        run: rustup toolchain install
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: PDFium (pinned, checksum-verified)
+        run: scripts/fetch-pdfium.sh
+
+      - name: React island
+        working-directory: web/gooey-island
+        run: npm ci --no-audit --no-fund && npm run build
+
+      - uses: cargo-bins/cargo-binstall@main
+
+      # Served from /pdit/ (the repository's name), so the files are fetched from there.
+      - name: Web app
+        working-directory: crates/pdit-app
+        run: |
+          cargo binstall dioxus-cli@0.7.10 --no-confirm
+          dx build --release --platform web --base-path pdit
+
+      # Offline use (public/sw.js): every file to keep, and a cache name new to this deployment.
+      - name: Offline file list
+        working-directory: target/dx/pdit-app/release/web/public
+        run: |
+          find assets -type f | sort > precache.txt
+          sed -i "s/pdit-dev/pdit-${GITHUB_SHA::12}/" sw.js
+          grep -q "pdit-${GITHUB_SHA::12}" sw.js
+          echo "$(wc -l < precache.txt) files, $(du -sh assets | cut -f1)"
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: target/dx/pdit-app/release/web/public
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

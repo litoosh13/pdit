@@ -1,0 +1,9 @@
+/* Export as (D-071; approved mockup .claude/research/convert-ui/). The window is doc.css's (as Print); this adds
+   the format's note and the status. */
+
+.ex-note,
+.ex-status {
+  padding: 0 2px;
+  font-size: 12px;
+  color: var(--ink-2);
+}

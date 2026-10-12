@@ -18,7 +18,7 @@ const ICON_SHOW: &str = include_str!("../assets/icons/devigner/Eye.svg");
 const INPUT_ID: &str = "pdit-ask-q";
 
 #[derive(Clone, PartialEq)]
-enum Models {
+pub(crate) enum Models {
     /// Checking.
     Unknown,
     /// Not on this Mac (ONNX Runtime 1.30 is Apple-silicon only).
@@ -76,10 +76,23 @@ impl Ask {
         spawn(async move { self.check().await });
     }
 
-    /// The analysis can run: the question models are ready, or not used on
-    /// this computer (it then skips the questions step).
-    pub fn can_analyze(&self) -> bool {
-        matches!(*self.models.read(), Models::Ready | Models::Unsupported)
+    pub(crate) fn models(&self) -> Models {
+        self.models.read().clone()
+    }
+
+    /// leafmind reads the document as it is now (edits, OCR), unless it already has.
+    pub(crate) async fn prepare(mut self) -> Result<(), String> {
+        let bytes = pdit_core::save_document().map_err(|e| e.to_string())?;
+        let version = bytes.iter().fold(0xcbf2_9ce4_8422_2325_u64, |h, b| {
+            (h ^ u64::from(*b)).wrapping_mul(0x100_0000_01b3)
+        });
+        if *self.indexed.peek() != Some(version) {
+            desktop::invoke_raw("qa_index", &bytes, &[])
+                .await
+                .map_err(|e| format!("{e:?}"))?;
+            self.indexed.set(Some(version));
+        }
+        Ok(())
     }
 
     pub async fn refresh(self) {
@@ -198,27 +211,12 @@ impl Ask {
     }
 
     async fn answer(mut self, question: &str) -> Msg {
-        // The engine reads the document again whenever it has changed (edits, OCR).
-        let bytes = match pdit_core::save_document() {
-            Ok(bytes) => bytes,
-            Err(error) => return Msg::Failed(error.to_string()),
-        };
-        let version = bytes.iter().fold(0xcbf2_9ce4_8422_2325_u64, |h, b| {
-            (h ^ u64::from(*b)).wrapping_mul(0x100_0000_01b3)
-        });
-        if *self.indexed.peek() != Some(version) {
-            self.messages
-                .with_mut(|m| m.push(Msg::Wait("Reading the document…")));
-            if let Err(error) = desktop::invoke_raw("qa_index", &bytes, &[]).await {
-                return Msg::Failed(format!("{error:?}"));
-            }
-            self.indexed.set(Some(version));
-            self.messages.with_mut(|m| {
-                m.pop();
-            });
-        }
         self.messages
             .with_mut(|m| m.push(Msg::Wait("Looking through the document…")));
+        // Read again if the document changed since (edits, OCR).
+        if let Err(error) = self.prepare().await {
+            return Msg::Failed(error);
+        }
         let args = Object::new();
         let _ = Reflect::set(&args, &"question".into(), &question.into());
         let reply = match desktop::invoke("qa_ask", &args).await {
@@ -299,7 +297,7 @@ pub fn AskUi() -> Element {
             div { class: "pdit-ask-conv",
                 if let Models::Missing { progress, error } = models.clone() {
                     div { class: "ac-card",
-                        b { "pdit's AI needs its models first" }
+                        b { "One last step: the question models" }
                         span {
                             "About "
                             b { "760 MB" }
@@ -357,6 +355,12 @@ pub fn AskUi() -> Element {
                         }
                         if !analysis.summary.is_empty() {
                             div { class: "ac-sum", "{analysis.summary}" }
+                        }
+                        if let Some(pct) = analysis.percent() {
+                            div { class: "ac-row start",
+                                span { class: "ac-badge", if pct >= 100 { "Ready" } else { "{pct}%" } }
+                                span { class: "small", "{analysis.now()}" }
+                            }
                         }
                     }
                 }
@@ -473,6 +477,64 @@ pub fn AskUi() -> Element {
                     disabled: !can_send,
                     onclick: move |_| ask.ask(),
                     span { dangerous_inner_html: ICON_SEND, style: "display: contents" }
+                }
+            }
+        }
+    }
+}
+
+/// The first-launch prompt (D-066, approved mockup canva-ui `#first-run`): the
+/// question models, offered once per start until they are downloaded, in the
+/// update prompt's look (D-058, update.css). Hidden in AI mode (its card is there).
+#[component]
+pub fn ModelsPrompt() -> Element {
+    let ask = use_context::<Ask>();
+    let updates = use_context::<crate::update_ui::Updates>();
+    let frame = use_context::<crate::frame_ui::Frame>();
+    let mut closed = use_signal(|| false);
+    let mut open = use_signal(|| false);
+    use_hook(move || {
+        if desktop::available() {
+            spawn(async move {
+                ask.refresh().await;
+                crate::print_ui::pause(50).await;
+                open.set(true);
+            });
+        }
+    });
+    let Models::Missing { progress, error } = (ask.models)() else {
+        return rsx! {};
+    };
+    if closed() || frame.is_ai() || updates.on_screen() {
+        return rsx! {};
+    }
+    rsx! {
+        div { class: "pdit-toast-host pdit-update-host",
+            div {
+                class: if open() { "pdit-toast t-toast sa-root pdit-update is-open" } else { "pdit-toast t-toast sa-root pdit-update" },
+                role: "status",
+                "aria-live": "polite",
+                if let Some((done, total)) = progress {
+                    span {
+                        "Downloading the AI models… "
+                        span { class: "pdit-update-pct", "{done * 100 / total.max(1)}" }
+                        " %"
+                    }
+                } else {
+                    if let Some(error) = &error {
+                        span { "The download stopped: {error}" }
+                    } else {
+                        span {
+                            "pdit's AI needs its models: "
+                            b { "760 MB" }
+                            ", downloaded once "
+                            span { class: "pdit-update-dim", "· your PDFs never leave this computer" }
+                        }
+                    }
+                    button { class: "sa-control", r#type: "button", onclick: move |_| closed.set(true), "Not now" }
+                    button { class: "sa-primary", r#type: "button", onclick: move |_| ask.download(),
+                        if error.is_some() { "Try again" } else { "Download" }
+                    }
                 }
             }
         }

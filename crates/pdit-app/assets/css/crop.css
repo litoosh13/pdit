@@ -1,0 +1,40 @@
+/* Crop (D-070; approved mockup .claude/research/page-tools-ui/). The frame is the image-selection ring and
+   handles (image-select.css); this dims what will be hidden, lets the frame and handles take the pointer, and
+   adds the side handles' cursors. The window is doc.css's (as Print). */
+
+.pdit-crop-layer {
+  position: absolute;
+  z-index: 8;
+  cursor: default;
+}
+.pdit-crop-frame.pdit-img-ring {
+  pointer-events: auto;
+  cursor: move;
+  border-radius: 0;
+}
+.pdit-crop-clip {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+.pdit-crop-dim {
+  position: absolute;
+  box-shadow: 0 0 0 9999px rgba(15, 23, 42, 0.35);
+}
+.pdit-crop-handle.pdit-img-handle {
+  z-index: 9;
+}
+.pdit-crop-handle.t,
+.pdit-crop-handle.b {
+  cursor: ns-resize;
+}
+.pdit-crop-handle.l,
+.pdit-crop-handle.r {
+  cursor: ew-resize;
+}
+.crop-note {
+  padding: 0 2px;
+  font-size: 12px;
+  color: var(--ink-2);
+}

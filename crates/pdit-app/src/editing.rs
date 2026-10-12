@@ -158,14 +158,16 @@ impl Editing {
             .map_err(|e| e.to_string())?
             .get(usize::from(selection.page))
             .map_or(842.0, |s| s.1);
-        // A point just inside the paragraph's first line, from the page's top-left (MuPDF's page space).
-        // ponytail: ignores the page's rotation and a crop box not at the origin.
+        // A point just inside the paragraph's first line, from the visible area's top-left (MuPDF's page
+        // space; a cropped page starts elsewhere, D-070).
+        // ponytail: ignores the page's rotation.
+        let (ox, oy) = pdit_core::page_ops::page_origin(selection.page).unwrap_or((0.0, 0.0));
         let [left, _, _, top] = selection.bounds;
         let encode = |s: &str| String::from(js_sys::encode_uri_component(s));
         let headers = [
             ("x-page", selection.page.to_string()),
-            ("x-x", (left + 2.0).to_string()),
-            ("x-y", (height - top + 2.0).to_string()),
+            ("x-x", (left - ox + 2.0).to_string()),
+            ("x-y", (oy + height - top + 2.0).to_string()),
             ("x-expected", encode(&selection.text)),
             ("x-text", encode(text)),
         ];

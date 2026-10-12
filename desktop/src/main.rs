@@ -10,6 +10,7 @@
 
 mod cache;
 mod edit;
+mod files;
 mod qa;
 mod update;
 
@@ -76,6 +77,17 @@ fn language(code: &str) -> Option<OcrLanguage> {
 #[tauri::command]
 fn debug_log(message: String) {
     println!("{message}");
+}
+
+/// The web app's self-check has finished (debug builds). With PDIT_SELFCHECK_EXIT set (the CI run,
+/// .github/workflows/selfcheck.yml) the app quits, exit code 1 when a check failed.
+#[cfg(debug_assertions)]
+#[tauri::command]
+fn self_check_done(app: AppHandle, pass: u32, fail: u32) {
+    println!("pdit desktop self-check done: {pass} passed, {fail} failed");
+    if std::env::var_os("PDIT_SELFCHECK_EXIT").is_some() {
+        app.exit(i32::from(fail > 0 || pass == 0));
+    }
 }
 
 /// OCR works here: the macOS app bundles Tesseract (Windows and Linux builds
@@ -158,7 +170,13 @@ fn handlers() -> impl Fn(tauri::ipc::Invoke) -> bool {
         cache::analysis_get,
         cache::analysis_put,
         edit::edit_paragraph,
-        debug_log
+        edit::compress_pdf,
+        edit::set_page_labels,
+        edit::to_office,
+        files::pick_folder,
+        files::save_into_folder,
+        debug_log,
+        self_check_done
     ]
 }
 
@@ -181,7 +199,12 @@ fn handlers() -> impl Fn(tauri::ipc::Invoke) -> bool {
         ocr_available,
         cache::analysis_get,
         cache::analysis_put,
-        edit::edit_paragraph
+        edit::edit_paragraph,
+        edit::compress_pdf,
+        edit::set_page_labels,
+        edit::to_office,
+        files::pick_folder,
+        files::save_into_folder
     ]
 }
 
@@ -200,9 +223,14 @@ fn main() {
                             .file_name()
                             .map(|n| n.to_string_lossy().into_owned())
                             .unwrap_or_else(|| "document.pdf".into());
+                        // The file type from the name pdit gives (PDF, PNG, text, Word, …).
+                        let ext = std::path::Path::new(&name)
+                            .extension()
+                            .map(|e| e.to_string_lossy().to_lowercase())
+                            .unwrap_or_else(|| "pdf".into());
                         match rfd::FileDialog::new()
                             .set_file_name(&name)
-                            .add_filter("PDF", &["pdf"])
+                            .add_filter(ext.to_uppercase(), &[ext.as_str()])
                             .save_file()
                         {
                             Some(path) => {

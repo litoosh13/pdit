@@ -9,8 +9,8 @@ publish.workspace = true
 
 # Native only (the desktop app); on wasm32 the crate is empty.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-mupdf = { version = "0.8", default-features = false, features = ["html", "base14-fonts"] }
-mupdf-sys = { version = "0.8", default-features = false, features = ["html", "base14-fonts"] }
+mupdf = { version = "0.8", default-features = false, features = ["html", "base14-fonts", "docx-output"] }
+mupdf-sys = { version = "0.8", default-features = false, features = ["html", "base14-fonts", "docx-output"] }
 # Fallback fonts are embedded with only the glyphs the new text needs.
 allsorts.workspace = true
 
@@ -18,4 +18,4 @@ allsorts.workspace = true
 cc = "1"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
-mupdf = { version = "0.8", default-features = false, features = ["html", "base14-fonts"] }
+mupdf = { version = "0.8", default-features = false, features = ["html", "base14-fonts", "docx-output"] }
