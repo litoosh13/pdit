@@ -39,7 +39,6 @@ const ICONS = [
   [APP, 'Scissor'],
   [APP, 'Tag'],
   [APP, 'Export2'],
-  [APP, 'GalleryAdd2'],
   [APP, 'Link'],
   [APP, 'ArrowRightUp'],
   [APP, 'Stop'],

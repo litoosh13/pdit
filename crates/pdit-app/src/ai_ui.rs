@@ -53,7 +53,7 @@ impl Step {
 /// Each step's share of the percent (D-066): pages, OCR, fields, questions.
 const SPANS: [(f32, f32); 4] = [(0.0, 10.0), (10.0, 45.0), (45.0, 75.0), (75.0, 100.0)];
 /// Step 4 waiting for the question models.
-const NEEDS_MODELS: &str = "Needs the AI models (760 MB, downloaded once)";
+const NEEDS_MODELS: &str = "Needs the AI models (390 MB, downloaded once)";
 
 #[derive(Clone, PartialEq, Default)]
 pub(crate) struct Analysis {
@@ -93,7 +93,7 @@ impl Analysis {
     /// What it's doing now, for the AI tab's title.
     pub(crate) fn now(&self) -> String {
         if self.needs_models() {
-            return "Download the AI models (760 MB, once) to finish".into();
+            return "Download the AI models (390 MB, once) to finish".into();
         }
         match self.steps.iter().find(|s| s.state == State::Run) {
             Some(s) => format!("{}…", s.what),

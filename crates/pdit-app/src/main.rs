@@ -24,7 +24,6 @@ mod form_edit_ui;
 mod format_bar;
 mod forms_ui;
 mod frame_ui;
-mod images_ui;
 mod island;
 mod labels_ui;
 mod links_ui;
@@ -91,7 +90,6 @@ fn App() -> Element {
     split_ui::SplitFiles::provide();
     labels_ui::PageNumbers::provide();
     export_ui::Export::provide();
-    images_ui::FromImages::provide();
     find_fields_ui::FindFields::provide();
     ai_ui::Ai::provide();
     ask_ui::Ask::provide();
@@ -168,7 +166,6 @@ fn App() -> Element {
         split_ui::SplitUi {}
         labels_ui::LabelsUi {}
         export_ui::ExportUi {}
-        images_ui::FromImagesUi {}
         update_ui::UpdateUi {}
         ask_ui::ModelsPrompt {}
         find_fields_ui::FindFieldsBar {}
@@ -234,14 +231,6 @@ pub(crate) fn new_document() {
         bytes,
         "Untitled.pdf".into(),
     );
-}
-
-/// Opens `bytes` (a PDF pdit made, e.g. From images) as the document on screen, named `name`.
-pub(crate) fn open_bytes(bytes: Vec<u8>, name: String) {
-    if !*consume_context::<EngineReady>().0.peek() {
-        return log("pdit: the PDF engine is still starting; try again in a moment");
-    }
-    show_document(consume_context(), consume_context(), bytes, name);
 }
 
 /// Save (bottom bar).

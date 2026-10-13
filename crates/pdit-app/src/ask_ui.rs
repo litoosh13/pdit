@@ -300,7 +300,7 @@ pub fn AskUi() -> Element {
                         b { "One last step: the question models" }
                         span {
                             "About "
-                            b { "760 MB" }
+                            b { "390 MB" }
                             ", downloaded once to this computer. Only the models — your PDFs never leave your computer."
                         }
                         span { class: "small",
@@ -526,7 +526,7 @@ pub fn ModelsPrompt() -> Element {
                     } else {
                         span {
                             "pdit's AI needs its models: "
-                            b { "760 MB" }
+                            b { "390 MB" }
                             ", downloaded once "
                             span { class: "pdit-update-dim", "· your PDFs never leave this computer" }
                         }

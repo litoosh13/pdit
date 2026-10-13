@@ -14,35 +14,36 @@ use std::sync::{Mutex, OnceLock};
 use tauri::ipc::{InvokeBody, Request};
 use tauri::{AppHandle, Manager};
 
-/// (folder, file name, url, size, sha256).
+/// (folder, file name, url, size, sha256). The question models are leafmind v0.5.0's vocabulary-pruned gte models
+/// (English, German, Persian, Arabic; scripts/fetch-qa-models.sh there).
 const FILES: [(&str, &str, &str, u64, &str); 5] = [
     (
         "gte-embed",
         "model_int8.onnx",
-        "https://huggingface.co/onnx-community/gte-multilingual-base/resolve/2edbf5e672aab465f9ed4c154a8b61791c082c69/onnx/model_int8.onnx",
-        340_318_797,
-        "ab2bd164ebd8ca9003dc49a981b611e849b5d326f504c8873ba76e07fa6c0082",
+        "https://huggingface.co/litoo13/leafmind-gte-multilingual-4lang/resolve/466fd26d9e751de3a57adc3ae222115865ca8cc4/gte-embed/model_int8.onnx",
+        171_260_482,
+        "5668afdae8b748de54ef85b7a13a711005ccf2a7a08806159f78b30c5f722cbf",
     ),
     (
         "gte-embed",
         "tokenizer.json",
-        "https://huggingface.co/onnx-community/gte-multilingual-base/resolve/2edbf5e672aab465f9ed4c154a8b61791c082c69/tokenizer.json",
-        17_082_734,
-        "3a56def25aa40facc030ea8b0b87f3688e4b3c39eb8b45d5702b3a1300fe2a20",
+        "https://huggingface.co/litoo13/leafmind-gte-multilingual-4lang/resolve/466fd26d9e751de3a57adc3ae222115865ca8cc4/gte-embed/tokenizer.json",
+        2_788_722,
+        "c1bafc0e9c74e6cefcd032df267ce8603c7a288a771e517d9c8823e0a7de8a37",
     ),
     (
         "gte-reranker",
         "model_int8.onnx",
-        "https://huggingface.co/onnx-community/gte-multilingual-reranker-base/resolve/ee64367e35a2db0da46bb6497e13a18f8bd585cb/onnx/model_int8.onnx",
-        340_858_200,
-        "ccf51dba7f8aa9205753761cfaa68c55f741792501463a3bf25d7e5bcdac7c35",
+        "https://huggingface.co/litoo13/leafmind-gte-multilingual-4lang/resolve/466fd26d9e751de3a57adc3ae222115865ca8cc4/gte-reranker/model_int8.onnx",
+        171_799_885,
+        "4e58a5fd59990fd78afc8a509f27d4f799d8b8723ceea00e0a07fd6f316fb542",
     ),
     (
         "gte-reranker",
         "tokenizer.json",
-        "https://huggingface.co/onnx-community/gte-multilingual-reranker-base/resolve/ee64367e35a2db0da46bb6497e13a18f8bd585cb/tokenizer.json",
-        17_082_999,
-        "3ffb37461c391f096759f4a9bbbc329da0f36952f88bab061fcf84940c022e98",
+        "https://huggingface.co/litoo13/leafmind-gte-multilingual-4lang/resolve/466fd26d9e751de3a57adc3ae222115865ca8cc4/gte-reranker/tokenizer.json",
+        2_788_927,
+        "e26ac9905f59291e2540981b82ca2e1022e9699b2456324f66ddba4804272847",
     ),
     (
         "onnxruntime",
@@ -68,11 +69,15 @@ fn dir(app: &AppHandle) -> Result<PathBuf, String> {
         .join("qa"))
 }
 
+/// The models are there at their expected size (older models, e.g. before leafmind v0.5.0, differ in size and are
+/// downloaded again).
 fn ready(dir: &Path) -> bool {
     FILES
         .iter()
         .filter(|f| f.0 != "onnxruntime")
-        .all(|(folder, name, ..)| dir.join(folder).join(name).is_file())
+        .all(|(folder, name, _, size, _)| {
+            std::fs::metadata(dir.join(folder).join(name)).is_ok_and(|m| m.len() == *size)
+        })
         && dir.join(ORT_LIB).is_file()
 }
 
@@ -219,7 +224,6 @@ fn engine(app: &AppHandle) -> Result<&'static QaEngine, String> {
                     onnxruntime: dir.join(ORT_LIB),
                     embedder: dir.join("gte-embed"),
                     reranker: dir.join("gte-reranker"),
-                    accurate_reranker: None,
                 },
                 QaOptions::default(),
             )

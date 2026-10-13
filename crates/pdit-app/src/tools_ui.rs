@@ -257,15 +257,6 @@ pub fn ToolRail(has_document: bool) -> Element {
                     span { dangerous_inner_html: ICON_NEW, style: "display: contents" }
                     span { "New" }
                 }
-                // From images (D-071): pictures into a new PDF.
-                button {
-                    class: "sb-item",
-                    r#type: "button",
-                    title: "Make a PDF from pictures",
-                    onclick: move |_| consume_context::<crate::images_ui::FromImages>().pick(),
-                    span { dangerous_inner_html: crate::images_ui::ICON_FROM_IMAGES, style: "display: contents" }
-                    span { "From images" }
-                }
                 if has_document {
                     button {
                         class: "sb-item",

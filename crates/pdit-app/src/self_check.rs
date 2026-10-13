@@ -1369,23 +1369,6 @@ fn export_session() {
             detail,
         );
     }
-    // From images (D-071): the PNG fixture and a JPEG of this page make a 2-page PDF.
-    let made = page_picture(0, 96.0, true)
-        .and_then(|jpeg| {
-            pdit_core::images_pdf::pdf_from_images(
-                &[IMAGE.to_vec(), jpeg],
-                pdit_core::images_pdf::PageSize::A4,
-            )
-        })
-        .and_then(pdit_core::open_document);
-    check(
-        "from images: two pictures, two A4 pages",
-        matches!(&made, Ok(sizes) if sizes.len() == 2 && sizes.iter().all(|(w, h)| (w.min(*h) - 595.0).abs() < 1.0)),
-        format!("{made:?}"),
-    );
-    if let Err(error) = pdit_core::open_document(RENTAL.to_vec()) {
-        return check("reopen", false, error.to_string());
-    }
     let text = pages_text(0, 0);
     check(
         "the page's text",

@@ -26,8 +26,6 @@ pub mod fields;
 pub mod form_edit;
 #[cfg(target_arch = "wasm32")]
 mod forms;
-/// From images (D-071).
-pub mod images_pdf;
 /// Page numbers (D-070).
 pub mod labels;
 /// The image crate pdit-core encodes with, for the app's self-check (D-071).
