@@ -32,13 +32,14 @@ pub mod images_pdf;
 pub mod labels;
 /// The image crate pdit-core encodes with, for the app's self-check (D-071).
 pub use image;
+/// Clean scan (D-068).
+pub mod affine;
 #[cfg(target_arch = "wasm32")]
 pub mod links;
 #[cfg(target_arch = "wasm32")]
 pub mod page_ops;
 #[cfg(target_arch = "wasm32")]
 mod render;
-/// Clean scan (D-068).
 pub mod scan_clean;
 pub mod search;
 /// Split into files (D-070).

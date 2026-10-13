@@ -34,6 +34,7 @@ const ICONS = [
   [APP, 'Broom'],
   [APP, 'Box'],
   [APP, 'Crop2'],
+  [APP, 'Crop'],
   [APP, 'Scissor'],
   [APP, 'Tag'],
   [APP, 'Export2'],

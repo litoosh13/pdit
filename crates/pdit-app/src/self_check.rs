@@ -90,6 +90,7 @@ pub async fn run(font_url: &str) {
     print_session();
     clean_scan_session();
     crop_session();
+    image_crop_session();
     split_session();
     export_session();
     save_names();
@@ -1087,6 +1088,98 @@ fn crop_session() {
         matches!(saved, Ok(Ok((x, _))) if (x - 100.0).abs() < 0.5),
         format!("{saved:?}"),
     );
+}
+
+/// Crop image (D-073): a picture red on the left, blue on the right, cropped to its right half, keeps only blue,
+/// in the same spot; a turned picture lands in its frame too; a transparent one keeps its transparency.
+fn image_crop_session() {
+    use pdit_core::page_ops as pages;
+    let check = |name: &str, ok: bool, detail: String| {
+        log(&format!(
+            "pdit self-check {}: crop image: {name}: {detail}",
+            if ok { "PASS" } else { "FAIL" }
+        ))
+    };
+    let picture = pdit_core::image::RgbImage::from_fn(200, 100, |x, _| {
+        if x < 100 {
+            pdit_core::image::Rgb([220, 30, 30])
+        } else {
+            pdit_core::image::Rgb([30, 30, 220])
+        }
+    });
+    let mut png = std::io::Cursor::new(Vec::new());
+    if pdit_core::image::DynamicImage::ImageRgb8(picture)
+        .write_to(&mut png, pdit_core::image::ImageFormat::Png)
+        .is_err()
+        || pdit_core::open_document(pages::blank_document()).is_err()
+    {
+        return check("open", false, "blank + PNG".into());
+    }
+    let near = |a: [f32; 4], b: [f32; 4]| a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1.0);
+    let added = pages::add_image(0, png.into_inner(), 100.0, 700.0, 200.0);
+    let hit = pages::image_at(0, 150.0, 650.0);
+    let index = hit
+        .as_ref()
+        .ok()
+        .and_then(|h| h.as_ref())
+        .map(|h| h.object_index);
+    let cropped = index.map(|i| pages::crop_image(0, i, [200.0, 600.0, 300.0, 700.0]));
+    check(
+        "the kept part stays in place",
+        added.is_ok() && matches!(cropped, Some(Ok(b)) if near(b, [200.0, 600.0, 300.0, 700.0])),
+        format!("{added:?}; {hit:?}; {cropped:?}"),
+    );
+    let width_pt = pages::page_sizes()
+        .ok()
+        .and_then(|s| s.first().map(|s| s.0))
+        .unwrap_or(612.0);
+    let colour = pdit_core::render_page(0, width_pt.round() as u32).map(|img| {
+        let (w, h) = (img.width() as usize, img.height() as usize);
+        let px = |x: usize, y_from_bottom: usize| {
+            let i = ((h - y_from_bottom) * w + x) * 4;
+            img.data()[i..i + 3].to_vec()
+        };
+        (px(250, 650), px(150, 650))
+    });
+    check(
+        "only the blue half is left",
+        matches!(&colour, Ok((kept, gone)) if kept[2] > 180 && kept[0] < 80 && gone.iter().all(|&c| c > 240)),
+        format!("{colour:?}"),
+    );
+    let turned = index.and_then(|i| {
+        // Turned about the page's corner: wherever it lands, the frame is its upper half.
+        let [l, b, r, t] = pages::rotate_image(0, i, 90.0).ok()?;
+        let frame = [l, b + (t - b) / 2.0, r, t];
+        Some((frame, pages::crop_image(0, i, frame)))
+    });
+    check(
+        "a turned picture lands in its frame",
+        matches!(&turned, Some((f, Ok(b))) if near(*b, *f)),
+        format!("{turned:?}"),
+    );
+    pdit_core::close_document();
+    let Some(sig) = crate::signature_ui::sample_png() else {
+        return check("transparent", false, "no PNG".into());
+    };
+    let kept_mask = pdit_core::open_document(pages::blank_document())
+        .map_err(|e| e.to_string())
+        .and_then(|_| pages::add_image(0, sig, 100.0, 700.0, 120.0).map_err(|e| e.to_string()))
+        .and_then(|()| {
+            let hit = pages::image_at(0, 160.0, 690.0)
+                .map_err(|e| e.to_string())?
+                .ok_or("no image")?;
+            let [l, b, r, t] = hit.bounds;
+            pages::crop_image(0, hit.object_index, [l, b, (l + r) / 2.0, t])
+                .map_err(|e| e.to_string())?;
+            pdit_core::save_document().map_err(|e| e.to_string())
+        })
+        .map(|saved| saved.windows(6).any(|w| w == b"/SMask"));
+    check(
+        "a transparent picture stays transparent",
+        matches!(kept_mask, Ok(true)),
+        format!("{kept_mask:?}"),
+    );
+    pdit_core::close_document();
 }
 
 /// Split into files (D-070) on the 2-page scan fixture: each group becomes a PDF

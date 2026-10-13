@@ -15,6 +15,10 @@ const ICON_COPY: &str = include_str!("../assets/icons/devigner/Copy.svg");
 const ICON_IMPORT: &str = include_str!("../assets/icons/devigner/Import.svg");
 const ICON_ROTATE: &str = include_str!("../assets/icons/devigner/RotateLeft.svg");
 const ICON_TRASH: &str = include_str!("../assets/icons/devigner/TrashBinMinimalistic.svg");
+/// Crop image (D-073): Devigner Crop, picked by the user.
+const ICON_CROP: &str = include_str!("../assets/icons/devigner/Crop.svg");
+/// The smallest crop frame side (PDF points).
+const MIN_CROP_PT: f32 = 4.0;
 const ICON_UNDO: &str = include_str!("../assets/icons/devigner/UndoLeft.svg");
 const ICON_MOVE: &str = include_str!("../assets/icons/devigner/SortVertical.svg");
 const ICON_IMAGE: &str = include_str!("../assets/icons/devigner/GalleryAdd.svg");
@@ -95,6 +99,8 @@ pub struct PageTools {
     image_at: Signal<Option<(u16, f32, f32)>>,
     /// The selected placed image (D-023a), if any.
     image_selection: Signal<Option<ImageSelection>>,
+    /// Cropping the selected image (D-073): the frame [left, bottom, right, top] in PDF points.
+    image_crop: Signal<Option<[f32; 4]>>,
     /// The document snapshot taken when an image drag (move or resize) begins,
     /// so the whole drag is a single Undo (D-023a). The drag itself edits the
     /// document live and redraws the page; the toast + Undo land on release.
@@ -113,6 +119,7 @@ impl PageTools {
             insert_after: Signal::new(None),
             image_at: Signal::new(None),
             image_selection: Signal::new(None),
+            image_crop: Signal::new(None),
             drag_undo: Signal::new(None),
             table: Signal::new(None),
             table_before: Signal::new(None),
@@ -179,6 +186,21 @@ impl PageTools {
 
     /// "Add image" (D-023): opens the image picker; the picked image lands with
     /// its top-left at (`x_pt`, `top_pt`) on `page`.
+    /// The rail's Add image: the picture window right away; the picture goes near the top of `page`, centred
+    /// (it can be moved after).
+    pub fn pick_image(self, page: u16) {
+        let (w, h) = page_ops::page_sizes()
+            .ok()
+            .and_then(|sizes| sizes.get(page as usize).copied())
+            .unwrap_or((0.0, 0.0));
+        let (ox, oy) = page_ops::page_origin(page).unwrap_or((0.0, 0.0));
+        self.pick_image_at(
+            page,
+            ox + w * (1.0 - ADD_IMAGE_WIDTH_FRACTION) / 2.0,
+            oy + h * 0.85,
+        );
+    }
+
     pub fn pick_image_at(mut self, page: u16, x_pt: f32, top_pt: f32) {
         self.image_at.set(Some((page, x_pt, top_pt)));
         click_input(ADD_IMAGE_INPUT_ID);
@@ -533,6 +555,7 @@ impl PageTools {
     /// on `page`, so the ring and actions bar appear. Closes any text edit.
     pub fn select_image(mut self, page: u16, x: f32, y: f32) {
         consume_context::<Editing>().cancel();
+        self.image_crop.set(None);
         match page_ops::image_at(page, x, y) {
             Ok(Some(hit)) => self.image_selection.set(Some(ImageSelection {
                 page,
@@ -584,6 +607,72 @@ impl PageTools {
                 self.show("Image rotated".to_owned(), ICON_ROTATE, Some(undo));
             }
             Err(error) => crate::log(&format!("pdit: could not rotate the image: {error}")),
+        }
+    }
+
+    /// Crop (D-073): the crop frame over the whole selected image.
+    pub fn start_image_crop(mut self) {
+        if let Some(sel) = self.image_selection.peek().clone() {
+            self.image_crop.set(Some(sel.bounds));
+        }
+    }
+
+    pub fn image_crop(&self) -> Option<[f32; 4]> {
+        *self.image_crop.read()
+    }
+
+    pub fn cancel_image_crop(mut self) {
+        self.image_crop.set(None);
+    }
+
+    /// Moves the crop frame's `part` (a handle: "tl", "t", …, or "move") by (`dx`, `dy`) PDF points, inside the
+    /// image.
+    pub fn drag_image_crop(mut self, part: &str, dx: f32, dy: f32) {
+        let (Some(sel), Some([mut l, mut b, mut r, mut t])) =
+            (self.image_selection.peek().clone(), *self.image_crop.peek())
+        else {
+            return;
+        };
+        let [il, ib, ir, it] = sel.bounds;
+        if part == "move" {
+            let mx = dx.clamp(il - l, ir - r);
+            let my = dy.clamp(ib - b, it - t);
+            (l, r, b, t) = (l + mx, r + mx, b + my, t + my);
+        }
+        if part.contains('l') {
+            l = (l + dx).clamp(il, r - MIN_CROP_PT);
+        }
+        if part.contains('r') {
+            r = (r + dx).clamp(l + MIN_CROP_PT, ir);
+        }
+        if part.contains('b') {
+            b = (b + dy).clamp(ib, t - MIN_CROP_PT);
+        }
+        if part.starts_with('t') {
+            t = (t + dy).clamp(b + MIN_CROP_PT, it);
+        }
+        self.image_crop.set(Some([l, b, r, t]));
+    }
+
+    /// Crop: cuts the selected image to the frame; the rest stays in place. Undo toast.
+    pub fn apply_image_crop(mut self) {
+        let (Some(sel), Some(frame)) =
+            (self.image_selection.peek().clone(), *self.image_crop.peek())
+        else {
+            return;
+        };
+        self.image_crop.set(None);
+        let bounds = std::rc::Rc::new(std::cell::Cell::new(sel.bounds));
+        let out = bounds.clone();
+        match self.change(move || {
+            out.set(page_ops::crop_image(sel.page, sel.object_index, frame)?);
+            Ok(())
+        }) {
+            Ok(undo) => {
+                self.set_selection_bounds(bounds.get());
+                self.show("Image cropped".to_owned(), ICON_CROP, Some(undo));
+            }
+            Err(error) => crate::log(&format!("pdit: could not crop the image: {error}")),
         }
     }
 
@@ -907,6 +996,8 @@ struct ResizeDrag {
 pub fn ImageOverlay(page: u16, page_height_pt: f32, scale: f32) -> Element {
     let tools = use_context::<PageTools>();
     let mut resize = use_signal(|| None::<ResizeDrag>);
+    // Cropping (D-073): the dragged part ("tl", "t", …, "move") and the pointer's last spot.
+    let mut crop_drag = use_signal(|| None::<(&'static str, f64, f64)>);
     let Some(sel) = tools.image_selection().filter(|s| s.page == page) else {
         return rsx! {};
     };
@@ -919,6 +1010,112 @@ pub fn ImageOverlay(page: u16, page_height_pt: f32, scale: f32) -> Element {
     let height = (top - bottom) * scale + 2.0 * pad;
     let bar_x = (left + (right - left) / 2.0) * scale;
     let bar_y = (page_height_pt - bottom) * scale + 10.0;
+    if let Some([fl, fb, fr, ft]) = tools.image_crop() {
+        // The page Crop's frame (D-070) over the picture only; the part to cut away is dimmed.
+        let (ix, iy) = (left * scale, (page_height_pt - top) * scale);
+        let (iw, ih) = ((right - left) * scale, (top - bottom) * scale);
+        let (fx, fy) = ((fl - left) * scale, (top - ft) * scale);
+        let (fw, fh) = ((fr - fl) * scale, (ft - fb) * scale);
+        let handles = [
+            ("tl", 0.0, 0.0),
+            ("t", 0.5, 0.0),
+            ("tr", 1.0, 0.0),
+            ("r", 1.0, 0.5),
+            ("br", 1.0, 1.0),
+            ("b", 0.5, 1.0),
+            ("bl", 0.0, 1.0),
+            ("l", 0.0, 0.5),
+        ];
+        let mut press = move |part: &'static str, event: Event<PointerData>| {
+            event.stop_propagation();
+            let p = event.client_coordinates();
+            crop_drag.set(Some((part, p.x, p.y)));
+            if let Some(el) = event
+                .data()
+                .downcast::<web_sys::PointerEvent>()
+                .and_then(|e| e.target())
+                .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
+                && let Some(pe) = event.data().downcast::<web_sys::PointerEvent>()
+            {
+                let _ = el.set_pointer_capture(pe.pointer_id());
+            }
+        };
+        return rsx! {
+            div {
+                class: "sa-root pdit-crop-layer",
+                style: "inset: 0;",
+                tabindex: "-1",
+                onmounted: move |e| async move {
+                    let _ = e.set_focus(true).await;
+                },
+                onkeydown: move |e| match e.key() {
+                    Key::Enter => tools.apply_image_crop(),
+                    Key::Escape => tools.cancel_image_crop(),
+                    _ => {}
+                },
+                onpointerdown: move |e| e.stop_propagation(),
+                onclick: move |e| e.stop_propagation(),
+                onpointermove: move |event| {
+                    let Some((part, x0, y0)) = crop_drag() else { return };
+                    let p = event.client_coordinates();
+                    tools.drag_image_crop(
+                        part,
+                        ((p.x - x0) / f64::from(scale)) as f32,
+                        -((p.y - y0) / f64::from(scale)) as f32,
+                    );
+                    crop_drag.set(Some((part, p.x, p.y)));
+                },
+                onpointerup: move |_| crop_drag.set(None),
+                onpointercancel: move |_| crop_drag.set(None),
+                div {
+                    class: "pdit-crop-clip",
+                    style: "inset: auto; left: {ix}px; top: {iy}px; width: {iw}px; height: {ih}px;",
+                    div {
+                        class: "pdit-crop-dim",
+                        style: "left: {fx}px; top: {fy}px; width: {fw}px; height: {fh}px;",
+                    }
+                }
+                div {
+                    class: "pdit-img-ring pdit-crop-frame",
+                    style: "left: {ix + fx}px; top: {iy + fy}px; width: {fw}px; height: {fh}px;",
+                    onpointerdown: move |e| press("move", e),
+                }
+                for (part, hx, hy) in handles {
+                    span {
+                        key: "{part}",
+                        class: "pdit-img-handle pdit-crop-handle {part}",
+                        style: "left: {ix + fx + hx * fw}px; top: {iy + fy + hy * fh}px;",
+                        onpointerdown: move |e| press(part, e),
+                    }
+                }
+                div {
+                    class: "sa-anchor",
+                    style: "left: {bar_x}px; top: {bar_y}px; transform: translateX(-50%);",
+                    div { class: "sa-bar",
+                        button {
+                            r#type: "button",
+                            class: "sa-control",
+                            onclick: move |e| {
+                                e.stop_propagation();
+                                tools.cancel_image_crop();
+                            },
+                            "Cancel"
+                        }
+                        button {
+                            r#type: "button",
+                            class: "sa-primary",
+                            onclick: move |e| {
+                                e.stop_propagation();
+                                tools.apply_image_crop();
+                            },
+                            span { dangerous_inner_html: ICON_CROP, style: "display: contents" }
+                            "Crop"
+                        }
+                    }
+                }
+            }
+        };
+    }
     // (css class, corner x px, corner y px, fixed_left, fixed_top, anchor pt).
     // The fixed corner is the one diagonally opposite the dragged handle.
     let corners = [
@@ -1003,6 +1200,17 @@ pub fn ImageOverlay(page: u16, page_height_pt: f32, scale: f32) -> Element {
                             tools.rotate_image_selection(true);
                         },
                         span { dangerous_inner_html: ICON_ROTATE, style: "display: contents" }
+                    }
+                    button {
+                        r#type: "button",
+                        class: "sa-control",
+                        "aria-label": "Crop",
+                        title: "Crop",
+                        onclick: move |event| {
+                            event.stop_propagation();
+                            tools.start_image_crop();
+                        },
+                        span { dangerous_inner_html: ICON_CROP, style: "display: contents" }
                     }
                     button {
                         r#type: "button",

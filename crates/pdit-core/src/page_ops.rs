@@ -566,6 +566,68 @@ pub fn delete_image(page: u16, object_index: usize) -> Result<(), Error> {
     })
 }
 
+/// Crops the image object at `object_index` on `page` (D-073) to `frame` [left, bottom, right, top] in PDF points
+/// (the crop frame over its bounds). The pixels outside are cut away and the rest stays where it was on the page
+/// (turned pictures included). Returns the new bounds [left, bottom, right, top].
+pub fn crop_image(page: u16, object_index: usize, frame: [f32; 4]) -> Result<[f32; 4], Error> {
+    discard_edit()?;
+    with_open(|document| {
+        let mut pdf_page = document.pages().get(page.into())?;
+        let mut object = pdf_page.objects_mut().get(object_index)?;
+        let m = object.matrix()?;
+        let m = [m.a(), m.b(), m.c(), m.d(), m.e(), m.f()];
+        // The frame in the picture's own unit square (y up), then as the picture is seen (top-left origin).
+        let back = crate::affine::invert(m);
+        let corners = [
+            (frame[0], frame[1]),
+            (frame[2], frame[3]),
+            (frame[0], frame[3]),
+            (frame[2], frame[1]),
+        ]
+        .map(|(x, y)| crate::affine::at(back, x, y));
+        let span = |pick: fn(&(f32, f32)) -> f32| {
+            let lo = corners.iter().map(pick).fold(f32::MAX, f32::min);
+            let hi = corners.iter().map(pick).fold(f32::MIN, f32::max);
+            (lo.clamp(0.0, 1.0), hi.clamp(0.0, 1.0))
+        };
+        let ((l, r), (v0, v1)) = (span(|p| p.0), span(|p| p.1));
+        let (t, b) = (1.0 - v1, 1.0 - v0);
+        if r - l <= 0.0 || b - t <= 0.0 {
+            return Err(Error::Pdfium("nothing left to keep".into()));
+        }
+        let image = object
+            .as_image_object_mut()
+            .ok_or_else(|| Error::Pdfium("not an image".into()))?;
+        // Upright pictures keep their transparency (the processed image applies the soft mask); a turned one would
+        // come back turned, so it takes the raw pixels.
+        let upright = m[1].abs() < 1e-4 && m[2].abs() < 1e-4 && m[0] > 0.0 && m[3] > 0.0;
+        let pixels = upright
+            .then(|| image.get_processed_image(document).ok())
+            .flatten()
+            .map_or_else(|| image.get_raw_image(), Ok)?;
+        let (w, h) = (pixels.width(), pixels.height());
+        let x0 = ((l * w as f32).round() as u32).min(w - 1);
+        let y0 = ((t * h as f32).round() as u32).min(h - 1);
+        let x1 = ((r * w as f32).round() as u32).clamp(x0 + 1, w);
+        let y1 = ((b * h as f32).round() as u32).clamp(y0 + 1, h);
+        let cut = pixels.crop_imm(x0, y0, x1 - x0, y1 - y0);
+        reserve_for_pdfium_copy((cut.width() * cut.height() * 4) as usize);
+        image.set_image(&cut)?;
+        // The kept part of the unit square, in the picture's own space (y up), then placed as before.
+        let (fl, ft, fr, fb) = (
+            x0 as f32 / w as f32,
+            y0 as f32 / h as f32,
+            x1 as f32 / w as f32,
+            y1 as f32 / h as f32,
+        );
+        let keep_part = [fr - fl, 0.0, 0.0, fb - ft, fl, 1.0 - fb];
+        let [a, b, c, d, e, f] =
+            crate::affine::then(crate::affine::then(crate::affine::invert(m), keep_part), m);
+        object.apply_matrix(PdfMatrix::new(a, b, c, d, e, f))?;
+        Ok(crate::inspect::rect(object.bounds()?))
+    })
+}
+
 /// Page `index` as a picture (Export as, D-071): drawn as for print (comments and form fields shown) at `dpi`, as
 /// JPEG (quality 90) or PNG.
 pub fn page_picture(index: u16, dpi: f32, jpeg: bool) -> Result<Vec<u8>, Error> {

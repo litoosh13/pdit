@@ -1,7 +1,7 @@
 //! The tools rail (D-050, redesign D-062): a strip of sections on the left
 //! edge; clicking one opens its tools in a panel docked beside it, which pushes
 //! the pages over (the Canva editor's layout). Rows are Beautiful UI "Sidebar
-//! nav" rows with its sliding hover highlight. Tools that need a spot (Add text, Add image, Add note, …) arm
+//! nav" rows with its sliding hover highlight. Tools that need a spot (Add text, Add note, …) arm
 //! first; the next click on a page places them (pages.rs).
 //! Look: assets/css/tools.css.
 
@@ -102,11 +102,7 @@ fn rows(i: usize, stamps: bool) -> Vec<Action> {
 fn places(action: Action) -> bool {
     matches!(
         action,
-        Action::AddText
-            | Action::AddImage
-            | Action::AddSignature
-            | Action::AddNote
-            | Action::Stamp(_)
+        Action::AddText | Action::AddSignature | Action::AddNote | Action::Stamp(_)
     )
 }
 
@@ -182,6 +178,11 @@ impl Tools {
         }
         self.placing.set(None);
         self.close();
+        if action == Action::AddImage {
+            // The picture window right away, not "click on the page" first (user, 2026-10-13).
+            consume_context::<crate::page_tools::PageTools>().pick_image(current_page());
+            return;
+        }
         run(action, current_page(), 0.0, 0.0);
     }
 }
