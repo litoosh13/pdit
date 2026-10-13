@@ -175,6 +175,11 @@ fn handlers() -> impl Fn(tauri::ipc::Invoke) -> bool {
         edit::to_office,
         files::pick_folder,
         files::save_into_folder,
+        files::take_dropped,
+        files::read_opened,
+        files::open_pdf,
+        files::forget_opened,
+        files::save_opened,
         debug_log,
         self_check_done
     ]
@@ -204,7 +209,12 @@ fn handlers() -> impl Fn(tauri::ipc::Invoke) -> bool {
         edit::set_page_labels,
         edit::to_office,
         files::pick_folder,
-        files::save_into_folder
+        files::save_into_folder,
+        files::take_dropped,
+        files::read_opened,
+        files::open_pdf,
+        files::forget_opened,
+        files::save_opened
     ]
 }
 
@@ -243,6 +253,17 @@ fn main() {
                     _ => true,
                 })
                 .build()?;
+            // A PDF dropped onto the window opens (P-050 #1): the app takes it with take_dropped / read_opened.
+            if let Some(window) = app.get_webview_window("main") {
+                let target = window.clone();
+                window.on_window_event(move |event| {
+                    if let tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) = event
+                        && paths.iter().any(|p| files::dropped(p))
+                    {
+                        let _ = target.eval("window.__pditDropped && window.__pditDropped()");
+                    }
+                });
+            }
             Ok(())
         })
         .run(tauri::generate_context!())

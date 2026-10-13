@@ -23,6 +23,8 @@ const ICON_IMPORT: &str = include_str!("../assets/icons/devigner/Import.svg");
 const ICON_TRASH: &str = include_str!("../assets/icons/devigner/TrashBinMinimalistic.svg");
 const ICON_ADD_IMAGE: &str = include_str!("../assets/icons/devigner/GalleryAdd.svg");
 const ICON_SELECT_IMAGE: &str = include_str!("../assets/icons/devigner/Cursor.svg");
+const ICON_CROP: &str = include_str!("../assets/icons/devigner/Crop.svg");
+const ICON_REMOVE_BACKGROUND: &str = include_str!("../assets/icons/devigner/GridEraser.svg");
 const ICON_RECT: &str = include_str!("../assets/icons/devigner/Stop.svg");
 const ICON_ELLIPSE: &str = include_str!("../assets/icons/devigner/Stop2.svg");
 const ICON_LINE: &str = include_str!("../assets/icons/devigner/Minus.svg");
@@ -58,6 +60,8 @@ pub enum Action {
     DeleteMark(usize),
     /// The image under the pointer: rotate (true = right) or delete.
     RotateImage(bool),
+    CropImage,
+    RemoveBackground,
     DeleteImage,
     EditText,
     AddText,
@@ -115,6 +119,8 @@ impl Action {
             Action::DeleteMark(_) => "Delete",
             Action::RotateImage(false) => "Rotate left",
             Action::RotateImage(true) => "Rotate right",
+            Action::CropImage => "Crop",
+            Action::RemoveBackground => "Remove background",
             Action::DeleteImage => "Delete image",
             Action::EditText => "Edit text",
             Action::AddText => "Add text",
@@ -164,6 +170,8 @@ impl Action {
             Action::FieldSettings(_) => ICON_SETTINGS,
             Action::OpenNote(_) => crate::annotations_ui::ICON_NOTE,
             Action::RotateImage(_) => ICON_ROTATE,
+            Action::CropImage => ICON_CROP,
+            Action::RemoveBackground => ICON_REMOVE_BACKGROUND,
             Action::RemoveLink(_)
             | Action::DeleteField(_)
             | Action::DeleteNote(_)
@@ -461,6 +469,8 @@ pub(crate) fn item_sections(page: u16, (x, y): (f32, f32)) -> Vec<(&'static str,
                 Action::SelectImage,
                 Action::RotateImage(false),
                 Action::RotateImage(true),
+                Action::CropImage,
+                Action::RemoveBackground,
                 Action::DeleteImage,
             ],
         )];
@@ -518,6 +528,14 @@ pub(crate) fn run(action: Action, page: u16, x: f32, y: f32) {
         Action::RotateImage(clockwise) => {
             tools.select_image(page, x, y);
             tools.rotate_image_selection(clockwise);
+        }
+        Action::CropImage => {
+            tools.select_image(page, x, y);
+            tools.start_image_crop();
+        }
+        Action::RemoveBackground => {
+            tools.select_image(page, x, y);
+            tools.remove_background_selection();
         }
         Action::DeleteImage => {
             tools.select_image(page, x, y);

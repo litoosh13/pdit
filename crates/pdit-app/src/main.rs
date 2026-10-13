@@ -57,6 +57,8 @@ const PDFIUM_JS: Asset = asset!("/assets/pdfium/pdfium.js");
 const PDFIUM_WASM: Asset = asset!("/assets/pdfium/pdfium.wasm");
 pub(crate) const FALLBACK_FONT: Asset = asset!("/assets/fonts/NotoSans-Regular.ttf");
 
+/// The "Saved" toast's icon: Devigner Download, as on the Save button.
+const ICON_SAVED: &str = include_str!("../assets/icons/devigner/Download.svg");
 /// The hidden native file input that "Open" clicks.
 const FILE_INPUT_ID: &str = "pdit-open-pdf";
 
@@ -98,6 +100,7 @@ fn App() -> Element {
     doc_ui::DocTools::provide();
     use_close_on_outside(editing);
     use_hook(install_offline);
+    use_hook(move || listen_for_drops(editing, document, engine_ready));
     use_hook(|| {
         spawn(async move {
             match pdit_core::engine::start(&PDFIUM_JS.to_string(), &PDFIUM_WASM.to_string()).await {
@@ -215,8 +218,33 @@ fn show_document(
 struct EngineReady(Signal<bool>);
 
 /// Open (rail): the system's file picker.
+/// Open. Desktop: the system's open window, so pdit knows the file and Save writes back to it (P-050 #10).
 pub(crate) fn open_file() {
-    click_file_input();
+    if !ai_ui::desktop::available() {
+        return click_file_input();
+    }
+    let (editing, document, ready) = (
+        consume_context::<Editing>(),
+        consume_context::<Signal<Option<OpenDocument>>>(),
+        consume_context::<EngineReady>().0,
+    );
+    spawn(async move {
+        let name = ai_ui::desktop::invoke("open_pdf", &js_sys::Object::new())
+            .await
+            .ok()
+            .and_then(|v| v.as_string());
+        let Some(name) = name else { return };
+        match ai_ui::desktop::invoke("read_opened", &js_sys::Object::new()).await {
+            Ok(buffer) if *ready.peek() => show_document(
+                editing,
+                document,
+                js_sys::Uint8Array::new(&buffer).to_vec(),
+                name,
+            ),
+            Ok(_) => log("pdit: the PDF engine is still starting; try again in a moment"),
+            Err(error) => log(&format!("pdit: could not read the file: {error:?}")),
+        }
+    });
 }
 
 /// New (rail): a blank A4 document.
@@ -225,6 +253,12 @@ pub(crate) fn new_document() {
         return log("pdit: the PDF engine is still starting; try again in a moment");
     }
     let bytes = pdit_core::page_ops::blank_document();
+    // A new document has no file yet: its first Save asks where (desktop).
+    if ai_ui::desktop::available() {
+        spawn(async {
+            let _ = ai_ui::desktop::invoke("forget_opened", &js_sys::Object::new()).await;
+        });
+    }
     show_document(
         consume_context(),
         consume_context(),
@@ -250,6 +284,29 @@ fn save_open_document(editing: Editing, document: Signal<Option<OpenDocument>>) 
         Err(error) => return log(&format!("pdit: could not save the PDF: {error}")),
     };
     ai_ui::saved_file(&bytes);
+    if ai_ui::desktop::available() {
+        // Desktop: into the open file itself (P-050 #10); a new document asks where once.
+        let tools = consume_context::<page_tools::PageTools>();
+        let base = document
+            .peek()
+            .as_ref()
+            .map(|d| d.name.clone())
+            .unwrap_or_default();
+        spawn(async move {
+            let header = [("x-name", String::from(js_sys::encode_uri_component(&base)))];
+            match ai_ui::desktop::invoke_raw("save_opened", &bytes, &header).await {
+                Ok(saved) => match saved.as_string() {
+                    Some(file) => {
+                        log(&format!("pdit: saved a PDF of {} bytes", bytes.len()));
+                        tools.show(format!("Saved to {file}"), ICON_SAVED, None);
+                    }
+                    None => log("pdit: saving was cancelled"),
+                },
+                Err(error) => log(&format!("pdit: could not save the PDF: {error:?}")),
+            }
+        });
+        return;
+    }
     spawn(async move {
         // Only the size is logged: document contents stay out of the console.
         match save::save_file(&bytes, &name).await {
@@ -279,6 +336,80 @@ fn click_file_input() {
         input.set_value(""); // so choosing the same file again still fires `change`
         input.click();
     }
+}
+
+/// A PDF dragged onto pdit opens (P-050 #1). Online: the browser's drop event. Desktop: the window catches the
+/// drop (and keeps the file's path) and calls `window.__pditDropped`, which fetches the file.
+fn listen_for_drops(
+    editing: Editing,
+    document: Signal<Option<OpenDocument>>,
+    engine_ready: Signal<bool>,
+) {
+    use js_sys::{Promise, Reflect};
+    use wasm_bindgen::closure::Closure;
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let open = move |bytes: Vec<u8>, name: String| {
+        if engine_ready() {
+            show_document(editing, document, bytes, name);
+        } else {
+            log("pdit: the PDF engine is still starting; try again in a moment");
+        }
+    };
+    if ai_ui::desktop::available() {
+        let dropped = Closure::<dyn FnMut()>::new(move || {
+            wasm_bindgen_futures::spawn_local(async move {
+                let name = ai_ui::desktop::invoke("take_dropped", &js_sys::Object::new())
+                    .await
+                    .ok()
+                    .and_then(|v| v.as_string());
+                let Some(name) = name else { return };
+                match ai_ui::desktop::invoke("read_opened", &js_sys::Object::new()).await {
+                    Ok(buffer) => open(js_sys::Uint8Array::new(&buffer).to_vec(), name),
+                    Err(error) => log(&format!("pdit: could not read the dropped file: {error:?}")),
+                }
+            });
+        });
+        let _ = Reflect::set(&window, &"__pditDropped".into(), dropped.as_ref());
+        dropped.forget();
+        return;
+    }
+    // Online: allow dropping anywhere, then open the first PDF dropped.
+    let over =
+        Closure::<dyn FnMut(web_sys::Event)>::new(|event: web_sys::Event| event.prevent_default());
+    let drop = Closure::<dyn FnMut(web_sys::Event)>::new(move |event: web_sys::Event| {
+        event.prevent_default();
+        let file = Reflect::get(&event, &"dataTransfer".into())
+            .and_then(|t| Reflect::get(&t, &"files".into()))
+            .and_then(|f| Reflect::get(&f, &0.into()))
+            .ok()
+            .filter(|f| !f.is_undefined());
+        let Some(file) = file else { return };
+        let name = Reflect::get(&file, &"name".into())
+            .ok()
+            .and_then(|n| n.as_string())
+            .unwrap_or_default();
+        if !name.to_lowercase().ends_with(".pdf") {
+            return;
+        }
+        let read = Reflect::get(&file, &"arrayBuffer".into())
+            .ok()
+            .and_then(|f| f.dyn_into::<js_sys::Function>().ok())
+            .and_then(|f| f.call0(&file).ok())
+            .and_then(|p| p.dyn_into::<Promise>().ok());
+        let Some(read) = read else { return };
+        wasm_bindgen_futures::spawn_local(async move {
+            match wasm_bindgen_futures::JsFuture::from(read).await {
+                Ok(buffer) => open(js_sys::Uint8Array::new(&buffer).to_vec(), name),
+                Err(error) => log(&format!("pdit: could not read the dropped file: {error:?}")),
+            }
+        });
+    });
+    let _ = window.add_event_listener_with_callback("dragover", over.as_ref().unchecked_ref());
+    let _ = window.add_event_listener_with_callback("drop", drop.as_ref().unchecked_ref());
+    over.forget();
+    drop.forget();
 }
 
 /// The online version keeps its files for offline use (public/sw.js, M-007). Not in the desktop app (its files are
