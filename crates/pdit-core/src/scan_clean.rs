@@ -81,16 +81,7 @@ fn largest_image(page: &PdfPage) -> Result<Option<usize>, Error> {
 
 /// Divides out the paper's light, per channel (coloured ink keeps its colour), then levels.
 fn clean(img: &mut RgbImage) {
-    let (w, h) = img.dimensions();
-    // The paper's light: shrink, take the brightest nearby pixel (text disappears), blur, grow back.
-    let small = imageops::resize(
-        img,
-        (w / 4).max(1),
-        (h / 4).max(1),
-        imageops::FilterType::Triangle,
-    );
-    let small = imageops::blur(&max_filter(&small, 4), 6.0);
-    let light = imageops::resize(&small, w, h, imageops::FilterType::Triangle);
+    let light = paper_light(img, 4);
     for (p, l) in img.pixels_mut().zip(light.pixels()) {
         for c in 0..3 {
             let ratio = (f32::from(p[c]) / f32::from(l[c]).max(1.0)).min(1.0);
@@ -101,6 +92,64 @@ fn clean(img: &mut RgbImage) {
         }
     }
 }
+
+/// The paper's light at each pixel: shrink, take the brightest pixel within `r` (small) pixels so ink disappears,
+/// blur, grow back.
+fn paper_light(img: &RgbImage, r: u32) -> RgbImage {
+    let (w, h) = img.dimensions();
+    let small = imageops::resize(
+        img,
+        (w / 4).max(1),
+        (h / 4).max(1),
+        imageops::FilterType::Triangle,
+    );
+    let small = imageops::blur(&max_filter(&small, r), 6.0);
+    imageops::resize(&small, w, h, imageops::FilterType::Triangle)
+}
+
+/// Remove background (D-074): only the ink of a signature, stamp, logo or handwriting photographed on paper stays;
+/// paper, shadows and light printed lines (squared or lined paper) become transparent. The paper's light is divided
+/// out as in Clean scan; a pixel is ink when it is dark enough or clearly coloured (blue ink), so pale grey grid
+/// lines go. Pixels that were already transparent stay so.
+pub fn ink_only(img: &image::RgbaImage) -> image::RgbaImage {
+    let (w, h) = img.dimensions();
+    // On white where already transparent, so a transparent border isn't taken for ink.
+    let rgb = RgbImage::from_fn(w, h, |x, y| {
+        let p = img.get_pixel(x, y);
+        let a = u16::from(p[3]);
+        image::Rgb([0, 1, 2].map(|c| ((u16::from(p[c]) * a + 255 * (255 - a)) / 255) as u8))
+    });
+    // ponytail: a filled shape wider than about 1/6 of the picture brightens the light estimate's blind spot and
+    // fades; a flat-background check (border colour) would cover big solid logos if that shows up.
+    let light = paper_light(&rgb, (w.min(h) / 4 / 12).max(4));
+    image::RgbaImage::from_fn(w, h, |x, y| {
+        let (p, l) = (rgb.get_pixel(x, y), light.get_pixel(x, y));
+        let n = [0, 1, 2].map(|c| (f32::from(p[c]) / f32::from(l[c]).max(1.0)).min(1.0));
+        let dark = 1.0 - (n[0] + n[1] + n[2]) / 3.0;
+        let colour =
+            n.iter().fold(0.0_f32, |m, &v| m.max(v)) - n.iter().fold(1.0_f32, |m, &v| m.min(v));
+        let score = dark.max(colour * INK_COLOUR_WEIGHT);
+        let t = ((score - INK_FROM) / (INK_FULL - INK_FROM)).clamp(0.0, 1.0);
+        let a = t * t * (3.0 - 2.0 * t);
+        // The ink's own colour, without the paper showing through at its soft edges.
+        let ink = n.map(|v| {
+            if a > 0.0 {
+                ((v - (1.0 - a)) / a).clamp(0.0, 1.0)
+            } else {
+                v
+            }
+        });
+        let alpha = a * f32::from(img.get_pixel(x, y)[3]);
+        let [r, g, b] = ink.map(|v| (v * 255.0).round() as u8);
+        image::Rgba([r, g, b, alpha.round() as u8])
+    })
+}
+
+/// Ink scores (after dividing out the paper): below `INK_FROM` is paper (light grey grid lines score about 0.2),
+/// from `INK_FULL` fully ink; colour counts this much more than darkness (faint blue ink is coloured, not dark).
+const INK_FROM: f32 = 0.28;
+const INK_FULL: f32 = 0.45;
+const INK_COLOUR_WEIGHT: f32 = 1.6;
 
 /// The brightest value within `r` pixels (a square), per channel: rows, then columns.
 fn max_filter(img: &RgbImage, r: u32) -> RgbImage {
@@ -291,6 +340,51 @@ fn homography(from: [(f32, f32); 4], to: [(f32, f32); 4]) -> [f32; 8] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A made-up signature photographed on squared paper: shadowed paper, light grey grid lines, a firm blue stroke
+    /// and a faint one. Only the ink stays, blue; paper and grid lines go.
+    #[test]
+    fn only_the_ink_stays() {
+        let photo = image::RgbaImage::from_fn(600, 450, |x, y| {
+            let light = 232.0 - (x + y) as f32 / 30.0; // a soft shadow to the lower right
+            let paper = [light, light - 2.0, light - 8.0];
+            let on_line = x % 40 < 2 || y % 40 < 2;
+            let firm = (y as i32 - 200 - ((x as f32 / 25.0).sin() * 40.0) as i32).abs() < 3
+                && (100..500).contains(&x);
+            let faint = (x as i32 - 300).abs() < 2 && (260..380).contains(&y);
+            let c = if firm {
+                [55.0, 65.0, 150.0]
+            } else if faint {
+                [140.0, 150.0, 205.0]
+            } else if on_line {
+                paper.map(|v| v * 0.78)
+            } else {
+                paper
+            };
+            image::Rgba([c[0] as u8, c[1] as u8, c[2] as u8, 255])
+        });
+        let ink = ink_only(&photo);
+        let alpha = |x, y| ink.get_pixel(x, y)[3];
+        assert_eq!(alpha(20, 20), 0, "paper");
+        assert_eq!(alpha(560, 420), 0, "shadowed paper");
+        assert_eq!(alpha(80, 20), 0, "a grid line");
+        assert_eq!(alpha(20, 120), 0, "a grid line across");
+        let y = (200 + ((300.0_f32 / 25.0).sin() * 40.0) as i32) as u32;
+        let stroke = ink.get_pixel(300, y);
+        assert!(
+            stroke[3] > 240 && stroke[2] > stroke[0] + 60,
+            "the firm stroke stays blue: {stroke:?}"
+        );
+        assert!(
+            alpha(300, 320) > 200,
+            "the faint stroke stays: {}",
+            alpha(300, 320)
+        );
+        // Already transparent stays transparent.
+        let mut clear = photo.clone();
+        clear.put_pixel(300, y, image::Rgba([55, 65, 150, 0]));
+        assert_eq!(ink_only(&clear).get_pixel(300, y)[3], 0);
+    }
 
     /// Grey, shadowed paper with dark "text" comes out white paper with dark text.
     #[test]

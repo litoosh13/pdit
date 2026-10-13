@@ -17,6 +17,8 @@ const ICON_ROTATE: &str = include_str!("../assets/icons/devigner/RotateLeft.svg"
 const ICON_TRASH: &str = include_str!("../assets/icons/devigner/TrashBinMinimalistic.svg");
 /// Crop image (D-073): Devigner Crop, picked by the user.
 const ICON_CROP: &str = include_str!("../assets/icons/devigner/Crop.svg");
+/// Remove background (D-074): Devigner Grid eraser.
+const ICON_REMOVE_BACKGROUND: &str = include_str!("../assets/icons/devigner/GridEraser.svg");
 /// The smallest crop frame side (PDF points).
 const MIN_CROP_PT: f32 = 4.0;
 const ICON_UNDO: &str = include_str!("../assets/icons/devigner/UndoLeft.svg");
@@ -676,6 +678,22 @@ impl PageTools {
         }
     }
 
+    /// Remove background (D-074): only the ink of the selected picture stays (signature, stamp, handwriting on
+    /// paper); Undo toast.
+    pub fn remove_background_selection(self) {
+        let Some(sel) = self.image_selection.peek().clone() else {
+            return;
+        };
+        match self.change(|| page_ops::remove_image_background(sel.page, sel.object_index)) {
+            Ok(undo) => self.show(
+                "Background removed".to_owned(),
+                ICON_REMOVE_BACKGROUND,
+                Some(undo),
+            ),
+            Err(error) => crate::log(&format!("pdit: could not remove the background: {error}")),
+        }
+    }
+
     /// Deletes the selected image (D-023a), clears the selection, and shows the
     /// Undo toast.
     pub fn delete_image_selection(mut self) {
@@ -1211,6 +1229,17 @@ pub fn ImageOverlay(page: u16, page_height_pt: f32, scale: f32) -> Element {
                             tools.start_image_crop();
                         },
                         span { dangerous_inner_html: ICON_CROP, style: "display: contents" }
+                    }
+                    button {
+                        r#type: "button",
+                        class: "sa-control",
+                        "aria-label": "Remove background",
+                        title: "Remove background (keep only the ink)",
+                        onclick: move |event| {
+                            event.stop_propagation();
+                            tools.remove_background_selection();
+                        },
+                        span { dangerous_inner_html: ICON_REMOVE_BACKGROUND, style: "display: contents" }
                     }
                     button {
                         r#type: "button",

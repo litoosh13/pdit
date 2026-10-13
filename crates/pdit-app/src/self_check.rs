@@ -91,6 +91,7 @@ pub async fn run(font_url: &str) {
     clean_scan_session();
     crop_session();
     image_crop_session();
+    remove_background_session();
     split_session();
     export_session();
     save_names();
@@ -1178,6 +1179,117 @@ fn image_crop_session() {
         "a transparent picture stays transparent",
         matches!(kept_mask, Ok(true)),
         format!("{kept_mask:?}"),
+    );
+    pdit_core::close_document();
+}
+
+/// Remove background (D-074): a made-up photo of a blue signature on squared, grey-lit paper placed on a page →
+/// the page shows through where the paper and grid lines were, the stroke stays blue, the PDF saves a soft mask.
+fn remove_background_session() {
+    use pdit_core::page_ops as pages;
+    let check = |name: &str, ok: bool, detail: String| {
+        log(&format!(
+            "pdit self-check {}: remove background: {name}: {detail}",
+            if ok { "PASS" } else { "FAIL" }
+        ))
+    };
+    // 400 × 200 px: paper (200, 198, 190), grid lines every 40 px, a blue band across the middle (the "ink").
+    let photo = pdit_core::image::RgbImage::from_fn(400, 200, |x, y| {
+        let ink = (95..105).contains(&y) && (40..360).contains(&x);
+        if ink {
+            pdit_core::image::Rgb([55, 65, 150])
+        } else if x % 40 < 2 || y % 40 < 2 {
+            pdit_core::image::Rgb([156, 154, 148])
+        } else {
+            pdit_core::image::Rgb([200, 198, 190])
+        }
+    });
+    let mut png = std::io::Cursor::new(Vec::new());
+    if pdit_core::image::DynamicImage::ImageRgb8(photo)
+        .write_to(&mut png, pdit_core::image::ImageFormat::Png)
+        .is_err()
+        || pdit_core::open_document(pages::blank_document()).is_err()
+    {
+        return check("open", false, "blank + PNG".into());
+    }
+    // Placed 1 pt per pixel: x 100..500, y 500..700 (PDF points from the bottom).
+    let png = png.into_inner();
+    let done = pages::add_image(0, png, 100.0, 700.0, 400.0).and_then(|()| {
+        let hit = pages::image_at(0, 300.0, 600.0)?
+            .ok_or_else(|| pdit_core::Error::Pdfium("no image".into()))?;
+        pages::remove_image_background(0, hit.object_index)
+    });
+    let width_pt = pages::page_sizes()
+        .ok()
+        .and_then(|s| s.first().map(|s| s.0))
+        .unwrap_or(612.0);
+    let colours = pdit_core::render_page(0, width_pt.round() as u32).map(|img| {
+        let (w, h) = (img.width() as usize, img.height() as usize);
+        let px = |x: usize, y_from_bottom: usize| {
+            let i = ((h - y_from_bottom) * w + x) * 4;
+            img.data()[i..i + 3].to_vec()
+        };
+        // paper, a grid line (x = 100 + 80), the ink band (y = 700 - 100)
+        (px(120, 520), px(181, 650), px(300, 600))
+    });
+    check(
+        "paper and grid lines go, the ink stays",
+        done.is_ok()
+            && matches!(&colours, Ok((paper, grid, ink)) if paper.iter().all(|&c| c > 245)
+                && grid.iter().all(|&c| c > 245) && ink[2] > ink[0] + 60),
+        format!("{done:?}; paper, grid, ink: {colours:?}"),
+    );
+    let saved = pdit_core::save_document().unwrap_or_default();
+    check(
+        "saved with transparency",
+        saved.windows(6).any(|w| w == b"/SMask"),
+        format!("{} bytes", saved.len()),
+    );
+    pdit_core::close_document();
+    // A bigger photo shown smaller (900 × 600 px, 245 pt wide): PDFium's processed copy comes back a pixel short
+    // and pdfium-render rescales the picture to read it; the ink must still show on every later drawing.
+    let big = pdit_core::image::RgbImage::from_fn(900, 600, |x, y| {
+        if (290..310).contains(&y) && (90..810).contains(&x) {
+            pdit_core::image::Rgb([55, 65, 150])
+        } else if x % 60 < 3 || y % 60 < 3 {
+            pdit_core::image::Rgb([170, 170, 165])
+        } else {
+            pdit_core::image::Rgb([215, 214, 207])
+        }
+    });
+    let mut png = std::io::Cursor::new(Vec::new());
+    let opened = pdit_core::image::DynamicImage::ImageRgb8(big)
+        .write_to(&mut png, pdit_core::image::ImageFormat::Png)
+        .is_ok()
+        && pdit_core::open_document(pages::blank_document()).is_ok();
+    let done = pages::add_image(0, png.into_inner(), 200.0, 700.0, 245.0).and_then(|()| {
+        let hit = pages::image_at(0, 320.0, 650.0)?
+            .ok_or_else(|| pdit_core::Error::Pdfium("no image".into()))?;
+        pages::remove_image_background(0, hit.object_index)
+    });
+    let page_w = pages::page_sizes()
+        .ok()
+        .and_then(|s| s.first().map(|s| s.0))
+        .unwrap_or(595.0);
+    // The ink band: rows 290..310 of 600 at 245/900 pt a pixel → about 82 pt below the picture's top (700).
+    let inks: Vec<_> = [page_w.round() as u32, 900, page_w.round() as u32]
+        .into_iter()
+        .filter_map(|width| {
+            let img = pdit_core::render_page(0, width).ok()?;
+            let (w, h, k) = (
+                img.width() as usize,
+                img.height() as usize,
+                width as f32 / page_w,
+            );
+            let (x, y) = ((322.0 * k) as usize, ((700.0 - 81.7) * k) as usize);
+            let i = ((h - y) * w + x) * 4;
+            Some(img.data()[i..i + 3].to_vec())
+        })
+        .collect();
+    check(
+        "a bigger photo keeps its ink when drawn again",
+        opened && done.is_ok() && inks.len() == 3 && inks.iter().all(|c| c[2] > c[0] + 60),
+        format!("{done:?}; ink at three drawings: {inks:?}"),
     );
     pdit_core::close_document();
 }

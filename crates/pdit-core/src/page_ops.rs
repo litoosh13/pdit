@@ -598,13 +598,7 @@ pub fn crop_image(page: u16, object_index: usize, frame: [f32; 4]) -> Result<[f3
         let image = object
             .as_image_object_mut()
             .ok_or_else(|| Error::Pdfium("not an image".into()))?;
-        // Upright pictures keep their transparency (the processed image applies the soft mask); a turned one would
-        // come back turned, so it takes the raw pixels.
-        let upright = m[1].abs() < 1e-4 && m[2].abs() < 1e-4 && m[0] > 0.0 && m[3] > 0.0;
-        let pixels = upright
-            .then(|| image.get_processed_image(document).ok())
-            .flatten()
-            .map_or_else(|| image.get_raw_image(), Ok)?;
+        let pixels = image_pixels(image, document, m)?;
         let (w, h) = (pixels.width(), pixels.height());
         let x0 = ((l * w as f32).round() as u32).min(w - 1);
         let y0 = ((t * h as f32).round() as u32).min(h - 1);
@@ -625,6 +619,44 @@ pub fn crop_image(page: u16, object_index: usize, frame: [f32; 4]) -> Result<[f3
             crate::affine::then(crate::affine::then(crate::affine::invert(m), keep_part), m);
         object.apply_matrix(PdfMatrix::new(a, b, c, d, e, f))?;
         Ok(crate::inspect::rect(object.bounds()?))
+    })
+}
+
+/// A placed picture's pixels as seen. Upright pictures keep their transparency (the processed image applies the
+/// soft mask); a turned one would come back turned, so it takes the raw pixels.
+fn image_pixels(
+    image: &PdfPageImageObject,
+    document: &PdfDocument,
+    m: [f32; 6],
+) -> Result<image::DynamicImage, Error> {
+    let upright = m[1].abs() < 1e-4 && m[2].abs() < 1e-4 && m[0] > 0.0 && m[3] > 0.0;
+    Ok(upright
+        .then(|| image.get_processed_image(document).ok())
+        .flatten()
+        .map_or_else(|| image.get_raw_image(), Ok)?)
+}
+
+/// Remove background (D-074) of the image object at `object_index` on `page`: only the ink stays (a signature,
+/// stamp or handwriting photographed on paper); paper and light printed lines become transparent
+/// ([`crate::scan_clean::ink_only`]). Place and size don't change.
+pub fn remove_image_background(page: u16, object_index: usize) -> Result<(), Error> {
+    discard_edit()?;
+    with_open(|document| {
+        let mut pdf_page = document.pages().get(page.into())?;
+        let mut object = pdf_page.objects_mut().get(object_index)?;
+        let m = object.matrix()?;
+        let m = [m.a(), m.b(), m.c(), m.d(), m.e(), m.f()];
+        let image = object
+            .as_image_object_mut()
+            .ok_or_else(|| Error::Pdfium("not an image".into()))?;
+        let ink = crate::scan_clean::ink_only(&image_pixels(image, document, m)?.to_rgba8());
+        reserve_for_pdfium_copy((ink.width() * ink.height() * 4) as usize);
+        image.set_image(&image::DynamicImage::ImageRgba8(ink))?;
+        // Rewrite the page's content: without it a picture read through get_processed_image() (which rescales
+        // and restores it when PDFium's copy is off by a pixel) drew without its ink afterwards (found 2026-10-13).
+        drop(object);
+        pdf_page.regenerate_content()?;
+        Ok(())
     })
 }
 
