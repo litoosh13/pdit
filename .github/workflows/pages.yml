@@ -1,10 +1,14 @@
 # Publishes the online version of pdit on GitHub Pages (https://litoosh13.github.io/pdit/): installable, and works
-# offline after the first visit (public/sw.js). Runs only when started from the Actions tab ("Online version" → Run
-# workflow), so nothing goes online without the user (M-007). One-time setup: the repository's Settings → Pages →
-# Source: "GitHub Actions". The page is static: PDFs are opened and edited in the visitor's browser, never uploaded.
+# offline after the first visit (public/sw.js). Runs on every pushed version tag (the user's release step, so they
+# decide what goes online; user 2026-10-13) or from the Actions tab. One-time setup: Settings → Pages → Source
+# "GitHub Actions", and Settings → Environments → github-pages lets tags "v*" deploy (by default only main may).
+# The page is static: PDFs are opened and edited in the visitor's browser, never uploaded.
 name: Online version
 
 on:
+  # Every release tag (as release.yml), so the website matches the newest version; or by hand from the Actions tab.
+  push:
+    tags: ["v*"]
   workflow_dispatch:
 
 permissions:
