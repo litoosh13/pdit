@@ -301,7 +301,14 @@ fn open_page(page: &'static str) {
 pub fn AboutPanel() -> Element {
     let ui = use_context::<Updates>();
     let on_desktop = desktop::available();
-    let mut version = use_signal(|| env!("CARGO_PKG_VERSION").to_owned());
+    // The online build gets its release tag from the deploy (PDIT_VERSION, pages.yml); the desktop app asks below.
+    let mut version = use_signal(|| {
+        option_env!("PDIT_VERSION")
+            .filter(|v| !v.is_empty())
+            .unwrap_or(env!("CARGO_PKG_VERSION"))
+            .trim_start_matches('v')
+            .to_owned()
+    });
     use_hook(move || {
         if on_desktop {
             spawn(async move {

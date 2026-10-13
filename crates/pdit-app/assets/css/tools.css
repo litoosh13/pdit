@@ -22,8 +22,9 @@
   -webkit-font-smoothing: antialiased;
 }
 
-/* Without a document there is no bottom bar: the rail goes down to the bottom. */
-.pdit-rail[data-bare='true'] {
+/* Without a document there is no bottom bar: the rail and its panel go down to the bottom. */
+.pdit-rail[data-bare='true'],
+.pdit-dock[data-bare='true'] {
   bottom: 0;
 }
 

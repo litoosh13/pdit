@@ -21,6 +21,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The tags, for the version About shows.
+          fetch-depth: 0
 
       - name: Rust toolchain
         run: rustup toolchain install
@@ -45,6 +48,9 @@ jobs:
         working-directory: crates/pdit-app
         run: |
           cargo binstall dioxus-cli@0.7.10 --no-confirm
+          # About shows the newest release tag (e.g. 0.1.0-beta.5), not the crate's 0.1.0.
+          export PDIT_VERSION="$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || true)"
+          echo "version: ${PDIT_VERSION:-crate version}"
           dx build --release --platform web --base-path pdit
 
       # Offline use (public/sw.js): every file to keep, and a cache name new to this deployment.

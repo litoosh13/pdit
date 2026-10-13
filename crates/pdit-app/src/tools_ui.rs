@@ -344,6 +344,7 @@ pub fn ToolRail(has_document: bool) -> Element {
         aside {
             class: "pdit-dock",
             "data-open": if shown { "true" } else { "false" },
+            "data-bare": !has_document,
             "aria-label": "{title} tools",
             div { class: "pdit-dock-inner",
             div { class: "pdit-dock-head",
