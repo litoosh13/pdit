@@ -268,6 +268,8 @@ pub fn UpdateUi() -> Element {
 }
 
 pub const PROJECT: &str = "https://github.com/litoosh13/pdit";
+/// The online version (GitHub Pages, D-072).
+pub const ONLINE: &str = "https://litoosh13.github.io/pdit/";
 // A copy of the app icon (desktop/icons/app-icon.svg, D-048).
 const APP_ICON: Asset = asset!("/assets/app-icon.svg");
 
@@ -287,6 +289,7 @@ fn open_page(page: &'static str) {
     let url = match page {
         "licence" => format!("{PROJECT}/blob/main/LICENSE"),
         "notices" => format!("{PROJECT}/blob/main/THIRD_PARTY_NOTICES.md"),
+        "online" => ONLINE.to_owned(),
         _ => PROJECT.to_owned(),
     };
     if let Some(window) = web_sys::window() {
@@ -402,6 +405,7 @@ pub fn AboutPanel() -> Element {
         div { class: "about-note", "A private PDF editor. Your PDFs stay on this computer." }
         div { class: "about-update sa-root", {update_row} }
         div { class: "sb-nav about-links",
+            {link("online", "Online version", "litoosh13.github.io ↗")}
             {link("source", "Source code", "GitHub ↗")}
             {link("licence", "Licence", "AGPL-3.0")}
             {link("notices", "Third-party notices", "")}

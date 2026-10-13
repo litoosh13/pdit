@@ -96,6 +96,7 @@ pub fn open_project_page(page: String) -> Result<(), String> {
         "source" => "https://github.com/litoosh13/pdit",
         "licence" => "https://github.com/litoosh13/pdit/blob/main/LICENSE",
         "notices" => "https://github.com/litoosh13/pdit/blob/main/THIRD_PARTY_NOTICES.md",
+        "online" => "https://litoosh13.github.io/pdit/",
         _ => return Err("unknown page".into()),
     };
     #[cfg(target_os = "macos")]
