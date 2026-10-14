@@ -253,6 +253,10 @@ fn main() {
                     _ => true,
                 })
                 .build()?;
+            // Opened with pdit on Windows / Linux: the PDF's path comes as an argument; the app takes it once ready.
+            if let Some(path) = std::env::args_os().skip(1).map(std::path::PathBuf::from).find(|p| p.is_file()) {
+                files::dropped(&path);
+            }
             // A PDF dropped onto the window opens (P-050 #1): the app takes it with take_dropped / read_opened.
             if let Some(window) = app.get_webview_window("main") {
                 let target = window.clone();
@@ -266,6 +270,19 @@ fn main() {
             }
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("pdit could not start");
+        .build(tauri::generate_context!())
+        .expect("pdit could not start")
+        .run(|_app, _event| {
+            // Opened with pdit on macOS (Finder, Dock): the PDF comes as an event, also while pdit runs. Before the
+            // page is ready the app takes it once its PDF engine has started.
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Opened { urls } = &_event {
+                let paths = urls.iter().filter_map(|u| u.to_file_path().ok());
+                if paths.into_iter().any(|p| files::dropped(&p))
+                    && let Some(window) = _app.get_webview_window("main")
+                {
+                    let _ = window.eval("window.__pditDropped && window.__pditDropped()");
+                }
+            }
+        });
 }

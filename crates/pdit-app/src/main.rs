@@ -107,6 +107,13 @@ fn App() -> Element {
                 Ok(()) => {
                     engine_ready.set(true);
                     log("pdit: PDF engine ready");
+                    // Desktop: a PDF pdit was opened with (or dropped while starting) opens now.
+                    if let Some(open) = web_sys::window()
+                        .and_then(|w| js_sys::Reflect::get(&w, &"__pditDropped".into()).ok())
+                        .and_then(|f| f.dyn_into::<js_sys::Function>().ok())
+                    {
+                        let _ = open.call0(&wasm_bindgen::JsValue::NULL);
+                    }
                     match fetch_bytes(&FALLBACK_FONT.to_string()).await {
                         Ok(font) => editing.fallback_font.set(Some(Rc::new(font))),
                         Err(error) => log(&format!(

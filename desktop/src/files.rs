@@ -107,6 +107,10 @@ fn write_over(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
 pub fn read_opened() -> Result<tauri::ipc::Response, String> {
     let path = OPENED.lock().map_err(|_| "busy")?.clone().ok_or("no file")?;
     std::fs::read(&path)
+        .inspect(|_bytes| {
+            #[cfg(debug_assertions)]
+            eprintln!("pdit desktop: read {} bytes for the app", _bytes.len());
+        })
         .map(tauri::ipc::Response::new)
         .map_err(|e| e.to_string())
 }
