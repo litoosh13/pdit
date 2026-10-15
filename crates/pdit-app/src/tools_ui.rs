@@ -160,6 +160,13 @@ impl Tools {
         self.shown.set(false);
     }
 
+    /// A press outside closes the docked panel (P-050 #8); an armed placing tool stays armed.
+    pub fn close_panel(self) {
+        if *self.shown.peek() {
+            self.close();
+        }
+    }
+
     /// Escape: closes the flyout and disarms a placing tool.
     pub fn escape(mut self) {
         self.placing.set(None);

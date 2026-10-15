@@ -99,6 +99,7 @@ fn App() -> Element {
     update_ui::Updates::provide();
     doc_ui::DocTools::provide();
     use_close_on_outside(editing);
+    use_close_popups();
     use_hook(install_offline);
     use_hook(move || listen_for_drops(editing, document, engine_ready));
     use_hook(|| {
@@ -343,6 +344,59 @@ fn click_file_input() {
         input.set_value(""); // so choosing the same file again still fires `change`
         input.click();
     }
+}
+
+/// A press anywhere outside a pop-up closes it (P-050 #7, #8): the Find card, the rail's docked panel, the
+/// Comments and Bookmarks panels, and the toast. The rail (whose buttons toggle them) and the right-click menu
+/// (whose items may open one) don't count as outside. Windows with Cancel (Print, Crop, …) keep it and Escape.
+fn use_close_popups() {
+    let close = use_callback(move |outside: [bool; 4]| {
+        let [find, dock, panels, toast] = outside;
+        if find {
+            consume_context::<search_ui::Find>().close_card();
+        }
+        if dock {
+            consume_context::<tools_ui::Tools>().close_panel();
+        }
+        if panels {
+            consume_context::<annotations_ui::Annotate>().close_panel();
+            consume_context::<bookmarks_ui::BookmarksUi>().close_panel();
+        }
+        if toast {
+            consume_context::<PageTools>().hide_toast();
+        }
+    });
+    use_hook(move || {
+        let Some(window) = web_sys::window() else {
+            return;
+        };
+        let on_press = wasm_bindgen::closure::Closure::<dyn FnMut(web_sys::Event)>::new(
+            move |event: web_sys::Event| {
+                let Some(el) = event
+                    .target()
+                    .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
+                else {
+                    return;
+                };
+                let inside = |selector: &str| el.closest(selector).ok().flatten().is_some();
+                if inside(".cm-menu") {
+                    return;
+                }
+                close.call([
+                    !inside(".pdit-find, .pdit-rail"),
+                    !inside(".pdit-dock, .pdit-rail"),
+                    !inside(".pdit-comments, .pdit-bookmarks, .pdit-rail"),
+                    !inside(".pdit-toast"),
+                ]);
+            },
+        );
+        let _ = window.add_event_listener_with_callback_and_bool(
+            "pointerdown",
+            on_press.as_ref().unchecked_ref(),
+            true,
+        );
+        on_press.forget();
+    });
 }
 
 /// A PDF dragged onto pdit opens (P-050 #1). Online: the browser's drop event. Desktop: the window catches the

@@ -41,6 +41,13 @@ impl BookmarksUi {
         self.renaming.set(None);
     }
 
+    /// A press outside closes the panel (P-050 #8).
+    pub fn close_panel(self) {
+        if *self.open.peek() {
+            self.close();
+        }
+    }
+
     /// Writes `list` as the document's bookmarks, with Undo.
     fn write(self, message: &str, list: Vec<Bookmark>) {
         consume_context::<PageTools>()

@@ -64,6 +64,13 @@ impl Find {
         });
     }
 
+    /// A press outside closes the card (P-050 #8); an answer's marks without a card stay.
+    pub fn close_card(self) {
+        if *self.open.peek() {
+            self.close();
+        }
+    }
+
     /// Esc: plays the pop-out, then removes the card and the highlights.
     pub fn close(mut self) {
         if !*self.open.peek() {

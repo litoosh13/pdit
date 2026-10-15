@@ -180,6 +180,16 @@ impl Ai {
         if self.analysis.peek().running {
             return;
         }
+        // Nothing AI until the models are downloaded (P-050 #3); ask_ui starts this again once they are.
+        use crate::ask_ui::Models;
+        if desktop::available()
+            && matches!(
+                consume_context::<crate::ask_ui::Ask>().models(),
+                Models::Missing { .. } | Models::Unknown
+            )
+        {
+            return;
+        }
         if self.analyzed.peek().is_none() || *self.changed.peek() {
             return self.analyze();
         }

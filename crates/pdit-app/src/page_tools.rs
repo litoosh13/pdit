@@ -856,6 +856,14 @@ impl PageTools {
         set_timeout(TOAST_MS, move || self.hide(id));
     }
 
+    /// A press outside the toast hides it now (P-050 #7/#8), not only after its 6 s.
+    pub fn hide_toast(self) {
+        let open = self.toast.peek().as_ref().filter(|t| t.open).map(|t| t.id);
+        if let Some(id) = open {
+            self.hide(id);
+        }
+    }
+
     fn hide(mut self, id: u64) {
         self.toast.with_mut(|t| {
             if let Some(t) = t.as_mut().filter(|t| t.id == id) {

@@ -142,6 +142,10 @@ impl Ask {
             Box::pin(self.check()).await;
         } else if *self.models.peek() == Models::Ready {
             next_focus();
+            // The analysis waited for the models (P-050 #3): it starts now, in AI mode.
+            if consume_context::<crate::frame_ui::Frame>().is_ai() {
+                consume_context::<crate::ai_ui::Ai>().analyze_if_needed();
+            }
         }
     }
 
@@ -287,7 +291,8 @@ pub fn AskUi() -> Element {
     let models = (ask.models)();
     let messages = (ask.messages)();
     let draft = (ask.draft)();
-    let can_send = !draft.trim().is_empty() && !(ask.busy)();
+    let waiting_for_models = matches!(models, Models::Missing { .. } | Models::Unknown);
+    let can_send = !draft.trim().is_empty() && !(ask.busy)() && !waiting_for_models;
     rsx! {
         document::Stylesheet { href: ASK_CSS }
         aside {
@@ -457,8 +462,13 @@ pub fn AskUi() -> Element {
                 input {
                     id: INPUT_ID,
                     "aria-label": "Question",
+                    // Nothing AI until the models are there (P-050 #3); where none can be downloaded (online),
+                    // edits in words still work.
+                    disabled: waiting_for_models,
                     placeholder: if models == Models::Ready {
                         "Ask about this document, or: change all \"old\" to \"new\""
+                    } else if waiting_for_models {
+                        "Download the AI models above to start"
                     } else {
                         "Edit in words: change all \"old\" to \"new\""
                     },

@@ -227,6 +227,13 @@ impl Annotate {
     }
 
     /// Closes the note box, saving a new non-empty note or a changed text.
+    /// A press outside closes the Comments panel (P-050 #8).
+    pub fn close_panel(mut self) {
+        if *self.panel.peek() {
+            self.panel.set(false);
+        }
+    }
+
     pub fn close_note(mut self) {
         let Some(n) = self.note.peek().clone().filter(|n| !n.closing) else {
             return;
