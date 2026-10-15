@@ -892,7 +892,7 @@ fn reflow(
 /// and vertically centred on `y`. If that font cannot show the text, or the
 /// page has no text, `fonts` are used (black, 12 pt, when there is
 /// nothing to copy). If no font can show the text, nothing is added and
-/// [`Error::UnsupportedCharacters`] is returned.
+/// [`Error::UnsupportedCharacters`] is returned. Each line of `text` is a line.
 pub fn preview_add(
     page: u16,
     x: f32,
@@ -901,44 +901,113 @@ pub fn preview_add(
     style: Option<&TextStyle>,
     fonts: &Fonts<'_>,
 ) -> Result<AddPreview, Error> {
+    preview_add_wrapped(page, x, y, text, style, fonts, f32::INFINITY)
+}
+
+/// [`preview_add`] in a box `width` points wide (P-050, a text box): each paragraph (line of `text`) wraps into
+/// lines no wider than that, one line-height (1.2 × size) apart, as the new text's objects.
+pub fn preview_add_wrapped(
+    page: u16,
+    x: f32,
+    y: f32,
+    text: &str,
+    style: Option<&TextStyle>,
+    fonts: &Fonts<'_>,
+    width: f32,
+) -> Result<AddPreview, Error> {
     discard_edit()?;
     with_open(|document| {
         let mut pdf_page = document.pages().get(page.into())?;
         let mut base = nearest_base(&pdf_page, x, y)?;
         // The baseline sits about a third of the text height below the point.
         let height = style.map_or(base.size.value * base.scale(), |s| s.size);
-        base.matrix.set_e(x);
-        base.matrix.set_f(y - height * 0.35);
-
-        let index = pdf_page.objects().len();
-        match insert_text(document, &mut pdf_page, index, text, &base, style, fonts)? {
-            Ok(Placed {
-                method,
-                bounds,
-                added,
-            }) => {
-                PENDING.with_borrow_mut(|pending| {
-                    *pending = Some(Pending {
-                        page,
-                        index,
-                        removed: Vec::new(),
-                        added,
-                    })
-                });
-                Ok(AddPreview {
-                    object_index: index,
-                    preview: EditPreview {
-                        method,
-                        text: text.to_owned(),
-                        bounds,
-                    },
-                })
+        let first_baseline = y - height * 0.35;
+        let line_style = style.copied().unwrap_or(base.style());
+        let mut lines = Vec::new();
+        for paragraph in text.split('\n') {
+            if !width.is_finite() || paragraph.trim().is_empty() {
+                lines.push(paragraph.trim_end_matches('\r').to_owned());
+                continue;
             }
-            Err(read_back) => Err(Error::UnsupportedCharacters {
+            let wrapped = wrap_lines(
+                document,
+                &mut pdf_page,
+                &base,
+                &line_style,
+                fonts,
+                paragraph,
+                width,
+            )?
+            .ok_or_else(|| Error::UnsupportedCharacters {
                 intended: text.to_owned(),
-                reads_back_as: read_back,
-            }),
+                reads_back_as: String::new(),
+            })?;
+            lines.extend(wrapped);
         }
+        let index = pdf_page.objects().len();
+        let mut added = 0usize;
+        let mut method = EditMethod::Native;
+        let (mut l, mut b, mut r, mut t) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+        for (i, line) in lines.iter().enumerate() {
+            base.matrix.set_e(x);
+            base.matrix.set_f(first_baseline - i as f32 * height * 1.2);
+            // An empty line is only space between paragraphs.
+            if line.trim().is_empty() {
+                continue;
+            }
+            match insert_text(
+                document,
+                &mut pdf_page,
+                index + added,
+                line,
+                &base,
+                style,
+                fonts,
+            )? {
+                Ok(Placed {
+                    method: m,
+                    bounds,
+                    added: a,
+                }) => {
+                    if method == EditMethod::Native {
+                        method = m;
+                    }
+                    added += a;
+                    l = l.min(bounds[0]);
+                    b = b.min(bounds[1]);
+                    r = r.max(bounds[2]);
+                    t = t.max(bounds[3]);
+                }
+                Err(read_back) => {
+                    for _ in 0..added {
+                        pdf_page.objects_mut().remove_object_at_index(index)?;
+                    }
+                    return Err(Error::UnsupportedCharacters {
+                        intended: text.to_owned(),
+                        reads_back_as: read_back,
+                    });
+                }
+            }
+        }
+        if added == 0 {
+            return Err(Error::Pdfium("nothing to add".into()));
+        }
+        PENDING.with_borrow_mut(|pending| {
+            *pending = Some(Pending {
+                page,
+                index,
+                removed: Vec::new(),
+                added,
+            })
+        });
+        Ok(AddPreview {
+            object_index: index,
+            preview: EditPreview {
+                method,
+                text: text.to_owned(),
+                bounds: [l, b, r, t],
+            },
+        })
     })
 }
 

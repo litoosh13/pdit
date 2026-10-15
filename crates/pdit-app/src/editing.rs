@@ -98,6 +98,8 @@ pub struct Editing {
     pub style: Signal<Option<pdit_core::TextStyle>>,
     /// Typing in the inline box over the selected text.
     pub typing: Signal<bool>,
+    /// New text's box width in points, once dragged (P-050: a pasted paragraph wraps in it).
+    pub add_width: Signal<Option<f32>>,
 }
 
 impl Editing {
@@ -108,6 +110,7 @@ impl Editing {
             fallback_font: Signal::new(None),
             style: Signal::new(None),
             typing: Signal::new(false),
+            add_width: Signal::new(None),
         })
     }
 
@@ -226,6 +229,7 @@ impl Editing {
         self.cancel();
         self.typing.set(true);
         self.style.set(pdit_core::style_near(page, x, y).ok());
+        self.add_width.set(None);
         self.state.set(EditState {
             draft: String::new(),
             mode: BarMode::Editing,
@@ -362,13 +366,16 @@ impl Editing {
                 .map(|preview| (None, preview))
             } else {
                 match (selection.adding, style) {
-                    (Some((x, y)), style) => pdit_core::preview_add(
+                    (Some((x, y)), style) => pdit_core::preview_add_wrapped(
                         selection.page,
                         x,
                         y,
                         &state.draft,
                         style.as_ref(),
                         &fonts,
+                        self.add_width
+                            .peek()
+                            .unwrap_or_else(|| default_add_width(selection.page, x)),
                     )
                     .map(|added| (Some(added.object_index), added.preview)),
                     (None, Some(style)) => pdit_core::preview_styled(
@@ -473,6 +480,8 @@ pub fn EditingStyles() -> Element {
 #[component]
 pub fn SelectionOverlay(page: u16, page_width_pt: f32, page_height_pt: f32, scale: f32) -> Element {
     let mut editing = use_context::<Editing>();
+    // Dragging new text's width handle: the pointer's start x and the width then (points).
+    let mut width_drag = use_signal(|| None::<(f64, f32)>);
     let state = editing.state.read().clone();
     let typing = *editing.typing.read();
     let Some(selection) = state.selection.filter(|s| s.page == page) else {
@@ -487,16 +496,18 @@ pub fn SelectionOverlay(page: u16, page_width_pt: f32, page_height_pt: f32, scal
     let height = (top - bottom) * scale + 2.0 * pad;
 
     let size = editing.style.read().map_or(12.0, |s| s.size) * scale;
-    // New text has no width yet: up to the page's right margin.
-    let width = if selection.adding.is_some() {
-        ((page_width_pt - left) * scale - 24.0).max(120.0)
-    } else {
-        width
-    };
+    // New text: a box up to the page's right margin, or as wide as its handle was dragged; the text wraps in it.
+    let add_width_pt = selection.adding.map(|_| {
+        editing
+            .add_width
+            .read()
+            .unwrap_or((page_width_pt - left - ADD_MARGIN_PT).max(MIN_ADD_WIDTH_PT))
+    });
+    let width = add_width_pt.map_or(width, |w| w * scale + 2.0 * pad);
     let line = size * 1.2;
     let draft = state.draft.clone();
-    // One line stays one line in the PDF: the box grows sideways, no wrapping.
-    let one_line = selection.object_indices.len() <= 1;
+    // One line stays one line in the PDF: the box grows sideways, no wrapping. New text wraps in its box.
+    let one_line = selection.object_indices.len() <= 1 && selection.adding.is_none();
 
     rsx! {
         div { class: "sa-root",
@@ -546,10 +557,54 @@ pub fn SelectionOverlay(page: u16, page_width_pt: f32, page_height_pt: f32, scal
                         },
                     }
                     p { class: "t-error-msg sa-error-msg", role: "alert", "{UNSUPPORTED}" }
+                    // New text's width: the image handle's look on the box's right edge; the text re-wraps live.
+                    if let Some(width_pt) = add_width_pt {
+                        span {
+                            class: "pdit-img-handle pdit-text-width",
+                            style: "left: 100%; top: 50%; cursor: ew-resize; pointer-events: auto;",
+                            title: "Drag to make the box narrower or wider",
+                            onclick: move |event| event.stop_propagation(),
+                            onpointerdown: move |event| {
+                                event.stop_propagation();
+                                width_drag.set(Some((event.client_coordinates().x, width_pt)));
+                                if let Some(pe) = event.data().downcast::<web_sys::PointerEvent>()
+                                    && let Some(el) = pe.target().and_then(|t| t.dyn_into::<web_sys::Element>().ok())
+                                {
+                                    let _ = el.set_pointer_capture(pe.pointer_id());
+                                }
+                            },
+                            onpointermove: move |event| {
+                                let Some((x0, w0)) = width_drag() else { return };
+                                let dx = ((event.client_coordinates().x - x0) / f64::from(scale)) as f32;
+                                editing.add_width.set(Some((w0 + dx).max(MIN_ADD_WIDTH_PT)));
+                                if let Some(el) = web_sys::window()
+                                    .and_then(|w| w.document())
+                                    .and_then(|d| d.query_selector(".pdit-inline-edit").ok().flatten())
+                                {
+                                    fit_height(&el);
+                                }
+                            },
+                            onpointerup: move |_| width_drag.set(None),
+                            onpointercancel: move |_| width_drag.set(None),
+                        }
+                    }
                 }
             }
         }
     }
+}
+
+/// New text's box: this far from the page's right edge, and never narrower than `MIN_ADD_WIDTH_PT` (points).
+const ADD_MARGIN_PT: f32 = 36.0;
+const MIN_ADD_WIDTH_PT: f32 = 48.0;
+
+/// New text's default box width at `x` on `page`: up to the right margin.
+fn default_add_width(page: u16, x: f32) -> f32 {
+    let page_width = pdit_core::page_ops::page_sizes()
+        .ok()
+        .and_then(|s| s.get(usize::from(page)).map(|s| s.0))
+        .unwrap_or(612.0);
+    (page_width - x - ADD_MARGIN_PT).max(MIN_ADD_WIDTH_PT)
 }
 
 /// Grows the inline box to its text, so nothing scrolls inside it (sideways
