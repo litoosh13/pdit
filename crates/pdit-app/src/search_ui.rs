@@ -17,8 +17,13 @@ const ICON_CLEAR: &str = include_str!("../assets/icons/devigner/Close.svg");
 const ICON_UP: &str = include_str!("../assets/icons/devigner/ChevronUp.svg");
 const ICON_DOWN: &str = include_str!("../assets/icons/devigner/ChevronDown.svg");
 const INPUT_ID: &str = "pdit-find-q";
+/// Typing pause before Find searches (ms).
+const SEARCH_PAUSE_MS: i32 = 150;
 /// The card's pop-out time (ms).
 const CLOSE_MS: i32 = 120;
+
+/// Each page's text objects: (object index, text).
+type DocLines = Vec<Vec<(usize, String)>>;
 
 /// Shared find state.
 #[derive(Clone, Copy)]
@@ -31,6 +36,10 @@ pub struct Find {
     options: Signal<FindOptions>,
     results: Signal<Vec<Match>>,
     cur: Signal<usize>,
+    /// Every page's text objects, read once while the card is open (P-050 #9); `None`: read on the next search.
+    lines: Signal<Option<std::rc::Rc<DocLines>>>,
+    /// Typing: the latest keystroke's number, so only the last one searches.
+    typed: Signal<u32>,
 }
 
 impl Find {
@@ -44,6 +53,8 @@ impl Find {
             options: Signal::new(FindOptions::default()),
             results: Signal::new(Vec::new()),
             cur: Signal::new(0),
+            lines: Signal::new(None),
+            typed: Signal::new(0),
         })
     }
 
@@ -51,6 +62,8 @@ impl Find {
     pub fn open(mut self) {
         self.closing.set(false);
         self.open.set(true);
+        // The document may have changed since the card was last open.
+        self.lines.set(None);
         self.search();
         next_frame(|| {
             let input = web_sys::window()
@@ -120,9 +133,24 @@ impl Find {
         let options = *self.options.peek();
         let mut found = Vec::new();
         if !query.is_empty() {
-            let pages = pdit_core::page_ops::page_sizes().map_or(0, |s| s.len());
-            for page in 0..pages {
-                found.extend(search::find(page as u16, &query, options).unwrap_or_default());
+            let cached = self.lines.peek().clone();
+            let lines = match cached {
+                Some(lines) => lines,
+                None => {
+                    let pages = pdit_core::page_ops::page_sizes().map_or(0, |s| s.len());
+                    let read: Vec<_> = (0..pages)
+                        .map(|page| search::page_lines(page as u16).unwrap_or_default())
+                        .collect();
+                    let read = std::rc::Rc::new(read);
+                    self.lines.set(Some(read.clone()));
+                    read
+                }
+            };
+            for (page, page_lines) in lines.iter().enumerate() {
+                found.extend(
+                    search::find_in_lines(page as u16, page_lines, &query, options)
+                        .unwrap_or_default(),
+                );
             }
         }
         let last = found.len().saturating_sub(1);
@@ -130,6 +158,18 @@ impl Find {
             self.cur.set(last);
         }
         self.results.set(found);
+    }
+
+    /// While typing: searches once the typing pauses (P-050 #9), so fast typing doesn't queue searches.
+    fn search_soon(mut self) {
+        let n = *self.typed.peek() + 1;
+        self.typed.set(n);
+        set_timeout(SEARCH_PAUSE_MS, move || {
+            if *self.typed.peek() == n {
+                self.search();
+                scroll_to_current();
+            }
+        });
     }
 
     fn step(mut self, forward: bool) {
@@ -152,7 +192,7 @@ impl Find {
     }
 
     /// Replace (one match) or Replace all, with Undo.
-    fn replace(self, all: bool) {
+    fn replace(mut self, all: bool) {
         let results = self.results.peek().clone();
         let Some(current) = results.get(*self.cur.peek()).cloned() else {
             return;
@@ -182,6 +222,7 @@ impl Find {
             );
             replace_lines(vec![line], &query, &with, options, 1, &noto);
         }
+        self.lines.set(None);
         self.search();
     }
 }
@@ -333,6 +374,7 @@ pub fn FindCard() -> Element {
     use_effect(use_reactive!(|doc_id| {
         let _ = doc_id;
         if *find.open.peek() {
+            find.lines.set(None);
             find.search();
         }
     }));
@@ -381,8 +423,7 @@ pub fn FindCard() -> Element {
                         oninput: move |event| {
                             find.query.set(event.value());
                             find.cur.set(0);
-                            find.search();
-                            scroll_to_current();
+                            find.search_soon();
                         },
                         onkeydown: move |event| {
                             if event.key() == Key::Enter {

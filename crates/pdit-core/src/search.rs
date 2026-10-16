@@ -82,50 +82,89 @@ pub struct Match {
 /// Every match of `query` on `page`, in object order.
 #[cfg(target_arch = "wasm32")]
 pub fn find(page: u16, query: &str, options: FindOptions) -> Result<Vec<Match>, crate::Error> {
-    use crate::annotations::{rect, union};
+    find_in_lines(page, &page_lines(page)?, query, options)
+}
+
+/// The text of each text object on `page` (object index, text), read once so Find can search as the user types
+/// without asking PDFium for every line again (P-050 #9).
+#[cfg(target_arch = "wasm32")]
+pub fn page_lines(page: u16) -> Result<Vec<(usize, String)>, crate::Error> {
     use pdfium_render::prelude::*;
     crate::render::with_open(|document| {
         let pdf_page = document.pages().get(page.into())?;
+        // One text page for all objects (a text object's own text() builds one per call).
         let text_page = pdf_page.text()?;
+        Ok(pdf_page
+            .objects()
+            .iter()
+            .enumerate()
+            .filter_map(|(i, object)| {
+                object
+                    .as_text_object()
+                    .map(|t| (i, text_page.for_object(t)))
+            })
+            .collect())
+    })
+}
+
+/// Every match of `query` in `lines` (from [`page_lines`] of `page`), in object order. Only a match's own
+/// characters are measured (their boxes), not whole lines.
+#[cfg(target_arch = "wasm32")]
+pub fn find_in_lines(
+    page: u16,
+    lines: &[(usize, String)],
+    query: &str,
+    options: FindOptions,
+) -> Result<Vec<Match>, crate::Error> {
+    use crate::annotations::{rect, union};
+    use pdfium_render::prelude::*;
+    let hits: Vec<_> = lines
+        .iter()
+        .map(|(i, line)| (*i, line, find_in(line, query, options)))
+        .filter(|(_, _, spans)| !spans.is_empty())
+        .collect();
+    if hits.is_empty() {
+        return Ok(Vec::new());
+    }
+    crate::render::with_open(|document| {
+        let pdf_page = document.pages().get(page.into())?;
+        let text_page = pdf_page.text()?;
+        // The matching objects' characters, in one pass over the page (chars_for_objects).
+        let objects: Vec<_> = hits
+            .iter()
+            .map(|(object_index, _, _)| pdf_page.objects().get(*object_index))
+            .collect::<Result<_, _>>()?;
+        let text_objects: Vec<&PdfPageTextObject> =
+            objects.iter().filter_map(|o| o.as_text_object()).collect();
+        let all_text = text_objects.len() == objects.len();
+        let mut chars_of = if all_text {
+            text_page
+                .chars_for_objects(&text_objects)
+                .into_iter()
+                .map(Some)
+                .collect()
+        } else {
+            Vec::new()
+        };
+        chars_of.resize_with(objects.len(), || None);
         let mut found = Vec::new();
-        for (object_index, object) in pdf_page.objects().iter().enumerate() {
-            let Some(text_object) = object.as_text_object() else {
-                continue;
-            };
-            let line = text_object.text();
-            let spans = find_in(&line, query, options);
-            if spans.is_empty() {
-                continue;
-            }
+        for (((object_index, line, spans), object), chars) in
+            hits.into_iter().zip(&objects).zip(chars_of)
+        {
             let whole = crate::inspect::rect(object.bounds()?);
-            // Per-char boxes when PDFium's chars line up with the object's
-            // text; otherwise the whole line's box.
-            let boxes: Vec<Option<[f32; 4]>> = text_page
-                .chars_for_object(text_object)
-                .map(|chars| {
-                    chars
-                        .iter()
-                        .map(|c| {
-                            let blank = c.unicode_char().is_none_or(char::is_whitespace);
-                            (!blank)
-                                .then(|| c.loose_bounds().ok().map(|r| rect(&r)))
-                                .flatten()
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
-            let aligned = boxes.len() == line.chars().count();
+            // Per-char boxes when PDFium's chars line up with the object's text; otherwise the whole line's box.
+            let chars = chars.filter(|chars| chars.len() == line.chars().count());
             for (nth, (start, len)) in spans.into_iter().enumerate() {
-                let rect = if aligned {
-                    boxes[start..start + len]
-                        .iter()
-                        .flatten()
-                        .copied()
-                        .reduce(union)
-                        .unwrap_or(whole)
-                } else {
-                    whole
-                };
+                let rect = chars
+                    .as_ref()
+                    .and_then(|chars| {
+                        (start..start + len)
+                            .filter_map(|k| chars.get(k).ok())
+                            .filter(|c| c.unicode_char().is_some_and(|ch| !ch.is_whitespace()))
+                            .filter_map(|c| c.loose_bounds().ok().map(|r| rect(&r)))
+                            .reduce(union)
+                    })
+                    .unwrap_or(whole);
                 found.push(Match {
                     page,
                     object_index,

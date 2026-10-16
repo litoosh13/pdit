@@ -140,6 +140,19 @@ impl Editing {
         // declines, the PDFium edit below.
         let restyled = *self.style.peek()
             != pdit_core::text_style(selection.page, selection.object_index).ok();
+        // Desktop: new text in a script PDFium can't shape (Persian, Arabic…) is laid out by MuPDF (P-050 #16).
+        if crate::ai_ui::desktop::available()
+            && selection.adding.is_some()
+            && needs_shaping(&state.draft)
+        {
+            spawn(async move {
+                if let Err(error) = self.add_with_mupdf(&selection, &state.draft).await {
+                    crate::log(&format!("pdit: MuPDF text not added: {error}"));
+                    self.preview_and_keep();
+                }
+            });
+            return;
+        }
         if crate::ai_ui::desktop::available() && selection.adding.is_none() && !restyled {
             spawn(async move {
                 if let Err(error) = self.edit_with_mupdf(&selection, &state.draft).await {
@@ -182,6 +195,53 @@ impl Editing {
             return Err("no document came back".into());
         }
         tools.apply_since(before, "Text changed", ICON_TEXT_CHANGED, move || {
+            pdit_core::page_ops::restore(bytes).map(|_| ())
+        });
+        Ok(())
+    }
+
+    /// Adds the new text box's `text` through the desktop app's MuPDF (P-050 #16): Persian/Arabic paragraphs are
+    /// shaped and run right to left; the box is the one on screen (its left, top and width). One Undo.
+    async fn add_with_mupdf(mut self, selection: &Selection, text: &str) -> Result<(), String> {
+        let Some((x, y)) = selection.adding else {
+            return Err("not new text".into());
+        };
+        let tools = consume_context::<crate::page_tools::PageTools>();
+        let before = tools.snapshot().ok_or("no snapshot")?;
+        let height = pdit_core::page_ops::page_sizes()
+            .map_err(|e| e.to_string())?
+            .get(usize::from(selection.page))
+            .map_or(842.0, |s| s.1);
+        let (ox, oy) = pdit_core::page_ops::page_origin(selection.page).unwrap_or((0.0, 0.0));
+        let style = *self.style.peek();
+        let size = style.map_or(12.0, |s| s.size);
+        let [r, g, b] = style.map_or([0, 0, 0], |s| s.color);
+        let width = self
+            .add_width
+            .peek()
+            .unwrap_or_else(|| default_add_width(selection.page, x));
+        // The box's top: the clicked point is the first line's middle (as for PDFium's new text).
+        // ponytail: ignores the page's rotation, as edit_with_mupdf.
+        let top = oy + height - (y + size * 0.6);
+        let headers = [
+            ("x-page", selection.page.to_string()),
+            ("x-x", (x - ox).to_string()),
+            ("x-top", top.to_string()),
+            ("x-width", width.to_string()),
+            ("x-size", size.to_string()),
+            ("x-color", format!("{r},{g},{b}")),
+            ("x-text", String::from(js_sys::encode_uri_component(text))),
+        ];
+        let added = crate::ai_ui::desktop::invoke_raw("add_text", &before, &headers)
+            .await
+            .map_err(|e| e.as_string().unwrap_or_else(|| format!("{e:?}")))?;
+        let bytes = js_sys::Uint8Array::new(&added).to_vec();
+        if bytes.is_empty() {
+            return Err("no document came back".into());
+        }
+        self.typing.set(false);
+        self.state.set(EditState::default());
+        tools.apply_since(before, "Text added", ICON_TEXT_CHANGED, move || {
             pdit_core::page_ops::restore(bytes).map(|_| ())
         });
         Ok(())
@@ -597,6 +657,14 @@ pub fn SelectionOverlay(page: u16, page_width_pt: f32, page_height_pt: f32, scal
 /// New text's box: this far from the page's right edge, and never narrower than `MIN_ADD_WIDTH_PT` (points).
 const ADD_MARGIN_PT: f32 = 36.0;
 const MIN_ADD_WIDTH_PT: f32 = 48.0;
+
+/// Text with letters PDFium's text objects can't shape or run right to left (Arabic, Persian, Hebrew, Indic,
+/// Thai…), as pdit-mupdf's `has_complex_script`.
+fn needs_shaping(text: &str) -> bool {
+    text.chars().any(|c| {
+        matches!(c as u32, 0x0590..=0x0DFF | 0x0E00..=0x0FFF | 0x1000..=0x109F | 0xFB1D..=0xFEFF)
+    })
+}
 
 /// New text's default box width at `x` on `page`: up to the right margin.
 fn default_add_width(page: u16, x: f32) -> f32 {

@@ -1765,6 +1765,45 @@ async fn mupdf_session() {
             .is_some_and(|e| e.contains("different paragraph")),
         format!("{declined:?}"),
     );
+    // A Persian text box (P-050 #16): MuPDF lays it out; the PDF comes back with the letters on the page.
+    let headers = [
+        ("x-page", "0".to_owned()),
+        ("x-x", "72".to_owned()),
+        ("x-top", "500".to_owned()),
+        ("x-width", "200".to_owned()),
+        ("x-size", "12".to_owned()),
+        ("x-color", "0,0,0".to_owned()),
+        ("x-text", encode("روزانه و ۴ساعته نزولی است.")),
+    ];
+    let added = desktop::invoke_raw("add_text", WRAPPED, &headers).await;
+    let letters = added.as_ref().ok().map(|value| {
+        let bytes = js_sys::Uint8Array::new(value).to_vec();
+        let opened = pdit_core::open_document(bytes).is_ok();
+        let text: String = pdit_core::text_lines(0)
+            .map(|lines| {
+                lines
+                    .iter()
+                    .map(|l| l.text.clone())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            })
+            .unwrap_or_default();
+        pdit_core::close_document();
+        (
+            opened,
+            text.chars()
+                .filter(|c| matches!(*c as u32, 0x0600..=0x06FF | 0xFB50..=0xFEFF))
+                .count(),
+        )
+    });
+    check(
+        "a Persian text box is added",
+        matches!(letters, Some((true, n)) if n >= 15),
+        format!(
+            "{:?}; opened and Persian letters: {letters:?}",
+            added.as_ref().err()
+        ),
+    );
 }
 
 async fn ask_session() {

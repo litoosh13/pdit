@@ -58,6 +58,52 @@ pub async fn edit_paragraph(request: Request<'_>) -> Result<Response, String> {
     Ok(Response::new(editor.save().map_err(|e| e.to_string())?))
 }
 
+/// A new text box with text the PDF's fonts can't shape (Persian, Arabic…; P-050 #16): body the PDF; headers
+/// x-page, x-x, x-top (the box's top-left in MuPDF's page space), x-width, x-size (points), x-color ("r,g,b") and
+/// x-text (percent-encoded). Returns the PDF with the text laid out by MuPDF in Noto Sans / Vazirmatn.
+#[tauri::command]
+pub async fn add_text(request: Request<'_>) -> Result<Response, String> {
+    let InvokeBody::Raw(pdf) = request.body() else {
+        return Err("expected the PDF as raw bytes".into());
+    };
+    let header = |name: &str| {
+        request
+            .headers()
+            .get(name)
+            .and_then(|v| v.to_str().ok())
+            .ok_or(format!("missing {name}"))
+    };
+    let number = |name: &str| -> Result<f32, String> {
+        header(name)?.parse().map_err(|_| format!("bad {name}"))
+    };
+    let text = percent_decode_str(header("x-text")?)
+        .decode_utf8()
+        .map_err(|_| "bad x-text")?
+        .into_owned();
+    let color: Vec<u8> = header("x-color")?
+        .split(',')
+        .filter_map(|c| c.trim().parse().ok())
+        .collect();
+    let color = [0, 1, 2].map(|i| color.get(i).copied().unwrap_or(0));
+    let mut editor = pdit_mupdf::Editor::open(pdf).map_err(|e| e.to_string())?;
+    editor
+        .add_text(
+            number("x-page")? as i32,
+            number("x-x")?,
+            number("x-top")?,
+            number("x-width")?,
+            &text,
+            number("x-size")?,
+            color,
+            &[
+                pdit_mupdf::FallbackFont { data: NOTO_SANS },
+                pdit_mupdf::FallbackFont { data: VAZIRMATN },
+            ],
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(Response::new(editor.save().map_err(|e| e.to_string())?))
+}
+
 /// The same letters and digits in the same order (spacing, punctuation and lost hyphens aside).
 fn same_letters(a: &str, b: &str) -> bool {
     let key = |s: &str| {

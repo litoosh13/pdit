@@ -64,6 +64,13 @@ pub struct Paragraph {
     pub color: [u8; 3],
 }
 
+/// The size, line spacing (points) and colour of text laid out by the Story.
+struct TextLook {
+    size: f32,
+    line_pitch: f32,
+    color: [u8; 3],
+}
+
 /// A font the new text may use when the PDF's own font lacks a glyph.
 pub struct FallbackFont<'a> {
     pub data: &'a [u8],
@@ -211,10 +218,81 @@ impl Editor {
             text: PdfRedactTextMethod::Remove,
         })?;
 
+        // The paragraph's box, as wide as before (a little slack so the last word of a full line still fits),
+        // free to grow down to the page's bottom margin.
+        let [x0, y0, x1, _] = p.bounds;
+        let place = fz_rect {
+            x0,
+            y0: y0 - 1.0,
+            x1: x1 + 2.0,
+            y1: page_bounds.y1 - 18.0,
+        };
+        let text = TextLook {
+            size: p.size,
+            line_pitch: p.line_pitch,
+            color: p.color,
+        };
+        self.place_story(
+            &mut page,
+            own.as_deref(),
+            place,
+            &[new_text],
+            &text,
+            fallbacks,
+        )
+    }
+
+    /// Adds `text` (paragraphs by line) on `page` in a box `width` points wide whose top-left is (`x`, `top`) in
+    /// MuPDF's page space (from the visible area's top-left, y down), at `size` points in `color` (P-050 #16): the
+    /// text is laid out by MuPDF's HTML (shaping, right-to-left paragraphs for Persian/Arabic) in the fallback
+    /// fonts, each run in the first that has its letters.
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_text(
+        &mut self,
+        page: i32,
+        x: f32,
+        top: f32,
+        width: f32,
+        text: &str,
+        size: f32,
+        color: [u8; 3],
+        fallbacks: &[FallbackFont<'_>],
+    ) -> Result<(), Error> {
+        let mut page = PdfPage::try_from(self.doc.load_page(page)?)?;
+        let page_bounds = page.bounds()?;
+        page.wrap_contents(&mut self.doc)?;
+        let place = fz_rect {
+            x0: x,
+            y0: top,
+            x1: x + width,
+            y1: page_bounds.y1 - 18.0,
+        };
+        let look = TextLook {
+            size,
+            line_pitch: size * 1.2,
+            color,
+        };
+        let paragraphs: Vec<&str> = text.lines().collect();
+        self.place_story(&mut page, None, place, &paragraphs, &look, fallbacks)
+    }
+
+    /// Lays `paragraphs` out in `place` on `page` with MuPDF's Story: the PDF's `own` font when it has every
+    /// glyph, else the fallbacks, run by run; a right-to-left paragraph runs right-to-left.
+    fn place_story(
+        &mut self,
+        page: &mut PdfPage,
+        own: Option<&[u8]>,
+        place: fz_rect,
+        paragraphs: &[&str],
+        look: &TextLook,
+        fallbacks: &[FallbackFont<'_>],
+    ) -> Result<(), Error> {
+        let new_text = paragraphs.join("\n");
+        let new_text = new_text.as_str();
         // The fonts the text may use, in order: the PDF's own, then the fallbacks. Each run of text gets the first
         // font that has its letters (MuPDF's HTML doesn't fall back along the CSS list).
         let mut fonts: Vec<(CString, &[u8])> = Vec::new();
-        if let Some(data) = own.as_deref() {
+        if let Some(data) = own {
             fonts.push((CString::new("own.ttf").unwrap(), data));
         }
         // Fallback fonts are whole font files; for simple scripts embed only the glyphs the text uses.
@@ -247,29 +325,26 @@ impl Editor {
                 "@font-face {{font-family: {f}; src: url({f}.ttf);}}"
             ));
         }
-        let [r, g, b] = p.color;
+        let [r, g, b] = look.color;
         css.push_str(&format!(
             "p {{font-family: {}; font-size: {}pt; line-height: {}pt; margin: 0; color: #{r:02x}{g:02x}{b:02x};}}",
             families.join(", "),
-            p.size,
-            p.line_pitch
+            look.size,
+            look.line_pitch
         ));
-        let dir = if starts_rtl(new_text) {
-            " dir=\"rtl\""
-        } else {
-            ""
-        };
-        let html = format!("<p{dir}>{}</p>", font_runs(new_text, &families, &loaded));
+        // One HTML paragraph per paragraph, each in its own direction; an empty one keeps its line.
+        let html: String = paragraphs
+            .iter()
+            .map(|para| {
+                let dir = if starts_rtl(para) { " dir=\"rtl\"" } else { "" };
+                if para.trim().is_empty() {
+                    "<p>&#160;</p>".to_owned()
+                } else {
+                    format!("<p{dir}>{}</p>", font_runs(para, &families, &loaded))
+                }
+            })
+            .collect();
 
-        // The paragraph's box, as wide as before (a little slack so the last word of a full line still fits),
-        // free to grow down to the page's bottom margin.
-        let [x0, y0, x1, _] = p.bounds;
-        let place = fz_rect {
-            x0,
-            y0: y0 - 1.0,
-            x1: x1 + 2.0,
-            y1: page_bounds.y1 - 18.0,
-        };
         let html = CString::new(html).map_err(|e| Error::Story(e.to_string()))?;
         let css = CString::new(css).map_err(|e| Error::Story(e.to_string()))?;
         let names: Vec<*const c_char> = fonts.iter().map(|(n, _)| n.as_ptr()).collect();
@@ -314,7 +389,7 @@ impl Editor {
         let new_fonts = unsafe { std::ffi::CStr::from_ptr(xname.as_ptr()) }
             .to_string_lossy()
             .into_owned();
-        fix_story_unicode(&page, new_fonts.split_whitespace())?;
+        fix_story_unicode(page, new_fonts.split_whitespace())?;
         Ok(())
     }
 
@@ -904,6 +979,42 @@ mod tests {
             others(&after),
             others(&before),
             "only the paragraph changed"
+        );
+    }
+
+    /// A text box (P-050 #16): English and Persian paragraphs added on a blank part of the page. The English
+    /// reads back as written; the Persian is there (MuPDF's shaped fonts read back as Arabic presentation forms).
+    #[test]
+    fn adds_text_in_two_scripts() {
+        const VAZIRMATN: &[u8] =
+            include_bytes!("../../../desktop/fonts/vazirmatn/Vazirmatn-Regular.ttf");
+        let mut ed = Editor::open(WRAPPED).unwrap();
+        let fonts = [
+            FallbackFont { data: NOTO },
+            FallbackFont { data: VAZIRMATN },
+        ];
+        let text = "A new note in English that wraps inside its box.\n\nروزانه و ۴ساعته نزولی است.";
+        ed.add_text(0, 72.0, 500.0, 200.0, text, 12.0, [0, 0, 0], &fonts)
+            .unwrap();
+        let saved = ed.save().unwrap();
+        if let Some(out) = std::env::var_os("PDIT_DEBUG_OUT") {
+            std::fs::write(out, &saved).unwrap();
+        }
+        let after = Editor::open(&saved).unwrap().page_text(0).unwrap();
+        let flat = normalize(&after);
+        assert!(
+            flat.contains("A new note in English that wraps inside its box."),
+            "{after}"
+        );
+        let arabic = after
+            .chars()
+            .filter(|c| matches!(*c as u32, 0x0600..=0x06FF | 0xFB50..=0xFEFF))
+            .count();
+        assert!(arabic >= 15, "the Persian letters are on the page: {after}");
+        // The original text is still there.
+        assert!(
+            flat.contains("A separate short note stands alone."),
+            "{after}"
         );
     }
 }

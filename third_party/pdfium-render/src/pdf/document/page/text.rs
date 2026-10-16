@@ -147,6 +147,33 @@ impl<'a> PdfPageText<'a> {
         ))
     }
 
+    /// PDIT PATCH (see PDIT_PATCH.md): the characters of each of `objects`, found in one pass over the page's
+    /// characters. [Self::chars_for_object] scans every character of the page for each object, which made pdit's
+    /// Find take minutes on long documents.
+    pub fn chars_for_objects(&self, objects: &[&PdfPageTextObject]) -> Vec<PdfPageTextChars<'_>> {
+        let mut by_object: std::collections::HashMap<usize, Vec<i32>> = std::collections::HashMap::new();
+        for index in 0..self.len() {
+            let owner = unsafe {
+                self.bindings()
+                    .FPDFText_GetTextObject(self.text_page_handle(), index)
+            };
+            by_object.entry(owner as usize).or_default().push(index);
+        }
+        objects
+            .iter()
+            .map(|object| {
+                PdfPageTextChars::new(
+                    self.page.document_handle(),
+                    self.page.page_handle(),
+                    self.text_page_handle(),
+                    by_object
+                        .remove(&(object.object_handle() as usize))
+                        .unwrap_or_default(),
+                )
+            })
+            .collect()
+    }
+
     /// Returns a collection of all the `PdfPageTextChar` characters in the given [PdfPageAnnotation].
     ///
     /// The return result will be empty if the given [PdfPageAnnotation] is not attached to the

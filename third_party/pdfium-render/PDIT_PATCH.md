@@ -38,6 +38,11 @@ fresh appearance and are visible in every viewer. pdfium-render's bindings imple
   annotation's first appearance object (`FPDFAnnot_GetObject(annot, 0)`), or null when it has none (PDFium then
   returns false: no colour). New helper `first_object_or_null` on `PdfPageAnnotationPrivate`.
 
+- `src/pdf/document/page/text.rs`, new `chars_for_objects` (2026-10-16, Find speed, P-050 #9): the characters of
+  several text objects in one pass over the page's characters. Upstream's `chars_for_object` calls
+  `FPDFText_GetTextObject` for every character of the page per object, so Find on an 80-page document with matches
+  in most lines took 37 s.
+
 ## Removed from the copy (not needed to build pdit)
 
 - `src/bindgen/pdfium_*.rs` except `pdfium_7881.rs` (pdit uses the `pdfium_latest` feature = 7881; the
