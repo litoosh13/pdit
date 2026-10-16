@@ -8,7 +8,6 @@
 
 use crate::ai_ui::desktop;
 use js_sys::{Object, Reflect};
-use pdit_core::fields::{FoundField, FoundKind};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -36,6 +35,7 @@ pub struct Record {
     /// Per page: "text", "scan" or "blank".
     pub kinds: Vec<String>,
     pub language: Option<String>,
+    /// Form-field suggestions of older analyses (fields are now found only on request, P-050 #17); unused.
     pub suggestions: Vec<Suggestion>,
     pub ocr: Vec<OcrPage>,
 }
@@ -46,46 +46,6 @@ impl Record {
             v: VERSION,
             ..Default::default()
         }
-    }
-
-    pub fn suggestions_of(found: &[(u16, FoundField)]) -> Vec<Suggestion> {
-        found
-            .iter()
-            .map(|(page, f)| Suggestion {
-                page: *page,
-                kind: match f.kind {
-                    FoundKind::Text => "text",
-                    FoundKind::Checkbox => "checkbox",
-                    FoundKind::Signature => "signature",
-                }
-                .into(),
-                rect: f.rect,
-                name: f.name.clone(),
-                filled: f.filled,
-            })
-            .collect()
-    }
-
-    pub fn found(&self) -> Vec<(u16, FoundField)> {
-        self.suggestions
-            .iter()
-            .map(|s| {
-                let kind = match s.kind.as_str() {
-                    "checkbox" => FoundKind::Checkbox,
-                    "signature" => FoundKind::Signature,
-                    _ => FoundKind::Text,
-                };
-                (
-                    s.page,
-                    FoundField {
-                        kind,
-                        rect: s.rect,
-                        filled: s.filled,
-                        name: s.name.clone(),
-                    },
-                )
-            })
-            .collect()
     }
 }
 

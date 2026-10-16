@@ -19,9 +19,6 @@ thread_local! {
     static FINDER: RefCell<Option<Rc<FieldFinder>>> = const { RefCell::new(None) };
 }
 
-/// Suggestions with their pages.
-type Found = Rc<Vec<(u16, FoundField)>>;
-
 #[derive(Clone, PartialEq)]
 enum Stage {
     Idle,
@@ -47,16 +44,12 @@ enum Stage {
 #[derive(Clone, Copy)]
 pub struct FindFields {
     stage: Signal<Stage>,
-    /// Suggestions the AI analysis already found (D-055), for the AI menu's
-    /// "Find form fields".
-    prepared: Signal<Option<Found>>,
 }
 
 impl FindFields {
     pub fn provide() -> Self {
         use_context_provider(|| FindFields {
             stage: Signal::new(Stage::Idle),
-            prepared: Signal::new(None),
         })
     }
 
@@ -124,34 +117,6 @@ impl FindFields {
                 });
             }
         });
-    }
-
-    /// The analysis's suggestions (D-055), kept for the AI menu.
-    pub fn set_prepared(mut self, found: Option<Vec<(u16, FoundField)>>) {
-        self.prepared.set(found.map(Rc::new));
-    }
-
-    /// After the analysis (D-060): its suggestions open for review, if any.
-    pub fn review_prepared_quietly(self) {
-        if self.prepared.peek().is_some() {
-            self.review_prepared();
-        }
-    }
-
-    /// The analysis's suggestions to review.
-    pub fn review_prepared(mut self) {
-        let Some(found) = self.prepared.peek().clone() else {
-            return consume_context::<PageTools>().show(
-                "No new form fields to suggest".into(),
-                crate::form_edit_ui::ICON_FORM,
-                None,
-            );
-        };
-        if !matches!(*self.stage.peek(), Stage::Idle | Stage::Review { .. }) {
-            return;
-        }
-        let off = vec![false; found.len()];
-        self.stage.set(Stage::Review { found, off });
     }
 
     pub fn cancel(mut self) {

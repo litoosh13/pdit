@@ -51,7 +51,9 @@ impl Step {
 }
 
 /// Each step's share of the percent (D-066): pages, OCR, fields, questions.
-const SPANS: [(f32, f32); 4] = [(0.0, 10.0), (10.0, 45.0), (45.0, 75.0), (75.0, 100.0)];
+const SPANS: [(f32, f32); 3] = [(0.0, 15.0), (15.0, 70.0), (70.0, 100.0)];
+/// The analysis's last step: getting the document ready for questions.
+const QUESTIONS: usize = 2;
 /// Step 4 waiting for the question models.
 const NEEDS_MODELS: &str = "Needs the AI models (390 MB, downloaded once)";
 
@@ -87,7 +89,11 @@ impl Analysis {
 
     /// Everything else is done; the question models aren't downloaded.
     pub(crate) fn needs_models(&self) -> bool {
-        !self.running && self.steps.get(3).is_some_and(|s| s.state == State::Wait)
+        !self.running
+            && self
+                .steps
+                .get(QUESTIONS)
+                .is_some_and(|s| s.state == State::Wait)
     }
 
     /// What it's doing now, for the AI tab's title.
@@ -200,7 +206,7 @@ impl Ai {
                 ..Analysis::default()
             });
         }
-        if self.analysis.peek().steps[3].state == State::Wait {
+        if self.analysis.peek().steps[QUESTIONS].state == State::Wait {
             self.analysis.with_mut(|a| a.running = true);
             spawn(async move {
                 self.prepare_questions().await;
@@ -217,7 +223,7 @@ impl Ai {
         const WHAT: &str = "Reading the document for questions";
         let step = match ask.models() {
             Models::Ready => {
-                self.set_step(3, Step::new(WHAT, State::Run, ""));
+                self.set_step(QUESTIONS, Step::new(WHAT, State::Run, ""));
                 match ask.prepare().await {
                     Ok(()) => Step::new("Ready for questions", State::Done, ""),
                     Err(error) => Step::new("Questions can't be asked", State::Skip, error),
@@ -231,7 +237,7 @@ impl Ai {
             Models::Unsupported => Step::new("Questions need the desktop app", State::Skip, ""),
             _ => Step::new(WHAT, State::Wait, NEEDS_MODELS),
         };
-        self.set_step(3, step);
+        self.set_step(QUESTIONS, step);
     }
 
     /// Opening a file analysed before (D-060): its record comes back — the
@@ -275,10 +281,6 @@ impl Ai {
                 }
             }
         }
-        let found = record.found();
-        if !found.is_empty() {
-            consume_context::<crate::find_fields_ui::FindFields>().set_prepared(Some(found));
-        }
         self.analyzed.set(document_id());
         self.record.set(Some(Rc::new(record)));
         crate::log("pdit: analysis remembered for this file");
@@ -295,7 +297,6 @@ impl Ai {
         self.analyzed.set(None);
         self.changed.set(false);
         self.record.set(None);
-        consume_context::<crate::find_fields_ui::FindFields>().set_prepared(None);
     }
 
     fn set_step(mut self, i: usize, step: Step) {
@@ -315,7 +316,6 @@ impl Ai {
             steps: vec![
                 Step::new("Checking the pages", State::Run, ""),
                 Step::new("Reading scanned pages (OCR)", State::Wait, ""),
-                Step::new("Looking for form fields", State::Wait, ""),
                 Step::new("Reading the document for questions", State::Wait, ""),
             ],
             running: true,
@@ -465,47 +465,7 @@ impl Ai {
                 }
             }
 
-            // 3. Form fields: those the PDF has, and the finder's suggestions.
-            self.set_step(2, Step::new("Looking for form fields", State::Run, ""));
-            crate::print_ui::pause(30).await;
-            let existing: usize = (0..pages.len() as u16)
-                .map(|p| pdit_core::form_fields(p).map_or(0, |f| f.len()))
-                .sum();
-            let mut suggestions = Vec::new();
-            if let Some(finder) = crate::find_fields_ui::finder().await {
-                for page in 0..pages.len() as u16 {
-                    self.set_step(
-                        2,
-                        Step::part("Looking for form fields", usize::from(page), pages.len()),
-                    );
-                    crate::print_ui::pause(30).await;
-                    let have = pdit_core::form_fields(page).unwrap_or_default();
-                    for f in pdit_core::fields::find_fields(&finder, page).unwrap_or_default() {
-                        let taken = have.iter().any(|e| {
-                            crate::find_fields_ui::covers(
-                                [e.rect.0, e.rect.1, e.rect.2, e.rect.3],
-                                f.rect,
-                            )
-                        });
-                        if !taken {
-                            suggestions.push((page, f));
-                        }
-                    }
-                }
-            }
-            let n = suggestions.len();
-            let detail = match (existing, n) {
-                (0, 0) => "No fields".to_owned(),
-                (0, n) => format!("None fillable yet · {n} possible fields found"),
-                (e, 0) => format!("{e} fillable fields already in the PDF"),
-                (e, n) => format!("{e} fillable fields already in the PDF · {n} more possible"),
-            };
-            record.suggestions = crate::analysis_cache::Record::suggestions_of(&suggestions);
-            consume_context::<crate::find_fields_ui::FindFields>()
-                .set_prepared((n > 0).then_some(suggestions));
-            self.set_step(2, Step::new("Form fields", State::Done, detail));
-
-            // 4. Questions.
+            // 3. Questions. (Form fields are found only when asked: Form → Find fields, P-050 #17.)
             self.prepare_questions().await;
             let before = self.analysis.peek().before.clone();
             self.analysis.with_mut(|a| {
@@ -533,19 +493,17 @@ impl Ai {
                     Some(before),
                 );
             }
-            consume_context::<crate::find_fields_ui::FindFields>().review_prepared_quietly();
         });
     }
 }
 
 /// The steps of an analysis remembered for this file (D-060); questions still to do.
 fn remembered_steps(record: Option<&crate::analysis_cache::Record>) -> Vec<Step> {
-    let (pages, scans, ocr, fields, language) = record.map_or((0, 0, 0, 0, None), |r| {
+    let (pages, scans, ocr, language) = record.map_or((0, 0, 0, None), |r| {
         (
             r.kinds.len(),
             r.kinds.iter().filter(|k| *k == "scan").count(),
             r.ocr.len(),
-            r.suggestions.len(),
             r.language.as_deref(),
         )
     });
@@ -567,15 +525,6 @@ fn remembered_steps(record: Option<&crate::analysis_cache::Record>) -> Vec<Step>
                 format!("{ocr} of {scans} scanned pages searchable"),
             )
         },
-        Step::new(
-            "Form fields",
-            State::Done,
-            if fields == 0 {
-                "No possible fields".to_owned()
-            } else {
-                format!("{fields} possible fields")
-            },
-        ),
         Step::new("Reading the document for questions", State::Wait, ""),
     ]
 }
