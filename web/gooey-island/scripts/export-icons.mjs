@@ -37,6 +37,7 @@ const ICONS = [
   [APP, 'Crop'],
   [APP, 'GridEraser'],
   [APP, 'Download'],
+  [APP, 'Documents'],
   [APP, 'Scissor'],
   [APP, 'Tag'],
   [APP, 'Export2'],

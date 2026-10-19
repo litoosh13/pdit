@@ -71,6 +71,23 @@ impl FormFill {
         self.refresh(page);
     }
 
+    /// Edit form mode (D-075): a double-click on the selected field types into a text field, or ticks a box.
+    pub fn fill_selected(self, page: u16, annotation: usize) {
+        match pdit_core::form_fields(page)
+            .unwrap_or_default()
+            .into_iter()
+            .find(|f| f.annotation == annotation)
+        {
+            Some(f) if f.read_only => {}
+            Some(f) if matches!(f.kind, FieldKind::Checkbox | FieldKind::Radio) => {
+                self.toggle(page, annotation)
+            }
+            Some(f) if matches!(f.kind, FieldKind::ComboBox | FieldKind::ListBox) => {}
+            Some(_) => self.start_edit(page, annotation),
+            None => {}
+        }
+    }
+
     /// Starts editing a text field inline (closes any open dropdown).
     fn start_edit(mut self, page: u16, annotation: usize) {
         self.combo.set(None);
@@ -123,18 +140,23 @@ impl FormFill {
 pub fn FormOverlay(page: u16, page_height_pt: f32, scale: f32) -> Element {
     let form = use_context::<FormFill>();
     let _ = form.version.read(); // re-read the fields after any change
-    // While the form is being edited (D-047), clicks place/select fields.
-    if *use_context::<crate::form_edit_ui::FormEdit>()
+    let active = *form.active.read();
+    // While the form is being edited (D-047), clicks place/select fields; only a field opened for typing by a
+    // double-click (D-075) shows its input.
+    let editing_form = *use_context::<crate::form_edit_ui::FormEdit>()
         .on_signal()
-        .read()
-    {
+        .read();
+    if editing_form && active.is_none_or(|(p, _)| p != page) {
         return rsx! {};
     }
-    let fields = pdit_core::form_fields(page).unwrap_or_default();
+    let fields: Vec<_> = pdit_core::form_fields(page)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|f| !editing_form || active == Some((page, f.annotation)))
+        .collect();
     if fields.is_empty() {
         return rsx! {};
     }
-    let active = *form.active.read();
     rsx! {
         for field in fields {
             {
@@ -183,6 +205,8 @@ pub fn FormOverlay(page: u16, page_height_pt: f32, scale: f32) -> Element {
                                 let value = field.value.clone().unwrap_or_default();
                                 rsx! {
                                     div { key: "{annotation}", class: "pdit-form-field is-active", style,
+                                        // Typing in Edit form mode: a press in the box doesn't move the field.
+                                        onpointerdown: move |e| e.stop_propagation(),
                                         input {
                                             class: "ffinput", value: "{value}", autofocus: true,
                                             onmounted: move |e| async move { let _ = e.data().set_focus(true).await; },

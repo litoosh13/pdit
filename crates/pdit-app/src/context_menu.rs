@@ -98,6 +98,7 @@ pub enum Action {
     Page(PageAction),
     ExtractPage,
     InsertPdf,
+    MergePdf,
     /// The print window (D-052).
     Print,
     /// leafmind's field finder (D-053).
@@ -157,6 +158,7 @@ impl Action {
             Action::Page(PageAction::Delete) => "Delete page",
             Action::ExtractPage => "Extract page as PDF",
             Action::InsertPdf => "Insert pages from PDF…",
+            Action::MergePdf => "Merge PDF…",
             Action::Print => "Print…",
             Action::FindFields => "Find fields",
         }
@@ -209,6 +211,7 @@ impl Action {
             Action::Page(PageAction::Delete) => ICON_TRASH,
             Action::ExtractPage => ICON_EXTRACT,
             Action::InsertPdf => ICON_IMPORT,
+            Action::MergePdf => crate::page_tools::ICON_MERGE,
             Action::Print => crate::tools_ui::ICON_PRINT,
             // ponytail: no icon until the user picks a Devigner one.
             Action::FindFields => "",
@@ -589,6 +592,7 @@ pub(crate) fn run(action: Action, page: u16, x: f32, y: f32) {
         Action::Page(page_action) => tools.run(page_action, page),
         Action::ExtractPage => tools.extract(page),
         Action::InsertPdf => tools.pick_pdf_to_insert(page),
+        Action::MergePdf => tools.pick_pdf_to_merge(),
         Action::Print => consume_context::<crate::print_ui::Print>().open(),
         Action::FindFields => consume_context::<crate::find_fields_ui::FindFields>().start(),
     }

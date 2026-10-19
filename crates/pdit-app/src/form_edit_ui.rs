@@ -192,6 +192,11 @@ impl FormEdit {
 
     /// A press on `page` at (x, y) points while editing; `per_pt` is CSS px per
     /// point (for the handles' grab size).
+    /// The selected field (page, annotation), if any.
+    pub fn selected(&self) -> Option<(u16, usize)> {
+        *self.selected.peek()
+    }
+
     pub fn press(mut self, page: u16, x: f32, y: f32, per_pt: f32) {
         self.settings.set(None);
         if self.tool.peek().is_some() {

@@ -15,6 +15,8 @@ const ICON_COPY: &str = include_str!("../assets/icons/devigner/Copy.svg");
 const ICON_IMPORT: &str = include_str!("../assets/icons/devigner/Import.svg");
 const ICON_ROTATE: &str = include_str!("../assets/icons/devigner/RotateLeft.svg");
 const ICON_TRASH: &str = include_str!("../assets/icons/devigner/TrashBinMinimalistic.svg");
+/// Merge PDF (D-075): Devigner Documents, picked by the user.
+pub const ICON_MERGE: &str = include_str!("../assets/icons/devigner/Documents.svg");
 /// Crop image (D-073): Devigner Crop, picked by the user.
 const ICON_CROP: &str = include_str!("../assets/icons/devigner/Crop.svg");
 /// Remove background (D-074): Devigner Grid eraser.
@@ -97,6 +99,8 @@ pub struct PageTools {
     toast: Signal<Option<Toast>>,
     /// The page "Insert pages from PDF" inserts after, while the picker is open.
     insert_after: Signal<Option<u16>>,
+    /// The picker is Merge PDF's (D-075): the pages go at the end.
+    merging: Signal<bool>,
     /// Where "Add image" will place the picked image: (page, x_pt, top_pt).
     image_at: Signal<Option<(u16, f32, f32)>>,
     /// The selected placed image (D-023a), if any.
@@ -119,6 +123,7 @@ impl PageTools {
         use_context_provider(|| PageTools {
             toast: Signal::new(None),
             insert_after: Signal::new(None),
+            merging: Signal::new(false),
             image_at: Signal::new(None),
             image_selection: Signal::new(None),
             image_crop: Signal::new(None),
@@ -183,6 +188,18 @@ impl PageTools {
     /// page `page`.
     pub fn pick_pdf_to_insert(mut self, page: u16) {
         self.insert_after.set(Some(page));
+        self.merging.set(false);
+        click_input(INSERT_INPUT_ID);
+    }
+
+    /// Merge PDF… (D-075): opens the file picker; the picked PDF's pages go after the last page.
+    pub fn pick_pdf_to_merge(mut self) {
+        let pages = page_ops::page_sizes().map_or(0, |s| s.len());
+        if pages == 0 {
+            return;
+        }
+        self.insert_after.set(Some((pages - 1) as u16));
+        self.merging.set(true);
         click_input(INSERT_INPUT_ID);
     }
 
@@ -801,6 +818,16 @@ impl PageTools {
             Ok(())
         });
         match result {
+            Ok(undo) if *self.merging.peek() => {
+                let message = match count {
+                    1 => "1 page added at the end".to_owned(),
+                    n => format!("{n} pages added at the end"),
+                };
+                self.show(message, ICON_MERGE, Some(undo));
+                // The first added page comes into view.
+                let first = page + 1;
+                next_frame(move || crate::thumbnails::scroll_to_page(first));
+            }
             Ok(undo) => {
                 let message = match count {
                     1 => "1 page inserted".to_owned(),

@@ -89,6 +89,7 @@ fn rows(i: usize, stamps: bool) -> Vec<Action> {
                     Action::Watermark,
                     Action::LinkWebAddresses,
                     Action::Bookmarks,
+                    Action::MergePdf,
                     Action::InsertPdf,
                     Action::Print,
                 ])

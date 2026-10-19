@@ -253,7 +253,17 @@ fn PageView(index: u16, count: usize, width_pt: f32, height_pt: f32) -> Element 
             // A double-click on text opens the edit box (D-062); the first
             // click selected the line.
             ondoubleclick: move |_| {
-                if !locks.peek().contains(&index) && editing.state.peek().selection.is_some() {
+                if locks.peek().contains(&index) {
+                    return;
+                }
+                // Edit form mode (D-075): the first click selected a field; the double-click fills it.
+                if forms.editing() {
+                    if let Some((page, annotation)) = forms.selected().filter(|(p, _)| *p == index) {
+                        consume_context::<crate::forms_ui::FormFill>().fill_selected(page, annotation);
+                    }
+                    return;
+                }
+                if editing.state.peek().selection.is_some() {
                     editing.open_edit();
                 }
             },
