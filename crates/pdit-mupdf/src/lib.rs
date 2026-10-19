@@ -55,6 +55,8 @@ pub struct Paragraph {
     pub bounds: [f32; 4],
     /// Each line's box, page space.
     pub lines: Vec<[f32; 4]>,
+    /// Each line's text as MuPDF reads it (an older Persian PDF: in display order, see pdit-core `rtl`).
+    pub line_texts: Vec<String>,
     /// The font name of the paragraph's first character, as MuPDF reports it (subset tag removed).
     pub font: String,
     /// Font size in points.
@@ -142,6 +144,7 @@ impl Editor {
             }
             let mut text = String::new();
             let mut lines = Vec::new();
+            let mut line_texts = Vec::new();
             let mut baselines = Vec::new();
             let (mut font, mut size, mut color) = (String::new(), 0.0, [0, 0, 0]);
             for line in block.lines() {
@@ -154,6 +157,7 @@ impl Editor {
                     text.push(' ');
                 }
                 text.push_str(s);
+                line_texts.push(s.to_owned());
                 let r = line.bounds();
                 lines.push([r.x0, r.y0, r.x1, r.y1]);
                 if let Some(c) = line.chars().next() {
@@ -182,6 +186,7 @@ impl Editor {
                 text,
                 bounds: [b.x0, b.y0, b.x1, b.y1],
                 lines,
+                line_texts,
                 font,
                 size,
                 line_pitch,
@@ -228,7 +233,7 @@ impl Editor {
             y1: page_bounds.y1 - 18.0,
         };
         let text = TextLook {
-            size: p.size,
+            size: fitted_size(p, new_text, own.as_deref(), fallbacks),
             line_pitch: p.line_pitch,
             color: p.color,
         };
@@ -398,6 +403,53 @@ impl Editor {
         self.doc.write_to(&mut out)?;
         Ok(out)
     }
+}
+
+/// The size for `new_text` replacing `p` (P-050 #18). When the PDF's own font can't show a script that needs shaping
+/// (an older Persian PDF's font has only letter shapes), a fallback draws it, and the paragraph's size would make it
+/// look far bigger: the size is scaled so a letter is as wide, on average, as the old text's letters were.
+fn fitted_size(
+    p: &Paragraph,
+    new_text: &str,
+    own: Option<&[u8]>,
+    fallbacks: &[FallbackFont<'_>],
+) -> f32 {
+    let has = |font: &mupdf::Font, c: char| font.encode_character(c as i32).is_ok_and(|g| g > 0);
+    let shows = |font: &mupdf::Font| {
+        new_text
+            .chars()
+            .filter(|c| !c.is_whitespace())
+            .all(|c| has(font, c))
+    };
+    let own_shows = own
+        .and_then(|data| mupdf::Font::from_bytes("own", data).ok())
+        .is_some_and(|f| shows(&f));
+    if !has_complex_script(new_text) || own_shows {
+        return p.size;
+    }
+    let Some(font) = fallbacks
+        .iter()
+        .filter_map(|f| mupdf::Font::from_bytes("fallback", f.data).ok())
+        .find(|f| shows(f))
+    else {
+        return p.size;
+    };
+    // Per letter: the old lines' width over their letters, against the new text's width per letter in the
+    // fallback (the old text's letter shapes may not be in the fallback font at all).
+    let letters = |t: &str| t.chars().filter(|c| !c.is_whitespace()).count() as f32;
+    let em: f32 = new_text
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .filter_map(|c| font.encode_character(c as i32).ok().filter(|g| *g > 0))
+        .filter_map(|g| font.advance_glyph(g).ok())
+        .sum();
+    let old_width: f32 = p.lines.iter().map(|l| l[2] - l[0]).sum();
+    let (old_letters, new_letters) = (letters(&p.text), letters(new_text));
+    if em <= 0.0 || old_width <= 0.0 || old_letters == 0.0 || new_letters == 0.0 {
+        return p.size;
+    }
+    let size = (old_width / old_letters) / (em / new_letters);
+    size.clamp(0.4 * p.size, p.size)
 }
 
 /// "ABCDEF+Arial" → "Arial".

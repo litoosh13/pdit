@@ -35,6 +35,11 @@ pub struct Selection {
     pub bounds: [f32; 4],
     /// Adding new text (D-026): the point it goes at, until it is kept.
     pub adding: Option<(f32, f32)>,
+    /// The text as the edit box shows it: `text` in reading order with plain letters when the PDF stores it in
+    /// display order (older Persian/Arabic PDFs, P-050 #18), else `text`.
+    pub shown: String,
+    /// The paragraph's text as the desktop app's MuPDF reads it, for its edit (P-050 #18).
+    pub expected: Option<String>,
 }
 
 /// The bar's state, following the source's modes (only its editing ones, D-019).
@@ -77,6 +82,17 @@ pub fn line_at(page: u16, x: f32, y: f32) -> Option<pdit_core::TextLine> {
 /// wrapped block when the point is on text, else none.
 fn paragraph_selection(page: u16, x: f32, y: f32) -> Option<Selection> {
     let p = pdit_core::paragraph_at(page, x, y).ok().flatten()?;
+    // Display-order text (older Persian PDFs): each line in reading order.
+    let shown = if pdit_core::rtl::in_display_order(&p.text) {
+        let lines = pdit_core::search::page_lines(page).unwrap_or_default();
+        pdit_core::rtl::logical_paragraph(
+            p.object_indices
+                .iter()
+                .filter_map(|i| lines.iter().find(|(k, _)| k == i).map(|(_, t)| t.as_str())),
+        )
+    } else {
+        p.text.clone()
+    };
     Some(Selection {
         page,
         object_index: *p.object_indices.first().unwrap_or(&0),
@@ -84,6 +100,8 @@ fn paragraph_selection(page: u16, x: f32, y: f32) -> Option<Selection> {
         text: p.text,
         bounds: p.bounds,
         adding: None,
+        shown,
+        expected: None,
     })
 }
 
@@ -116,8 +134,33 @@ impl Editing {
 
     /// Starts typing in the selected text (double-click, Edit, "Edit text").
     pub fn open_edit(mut self) {
-        if self.state.peek().selection.is_some() {
-            self.typing.set(true);
+        let Some(selection) = self.state.peek().selection.clone() else {
+            return;
+        };
+        self.typing.set(true);
+        // Desktop, an older Persian PDF (P-050 #18): MuPDF's lines keep the word spaces PDFium loses; put them in
+        // reading order, and remember MuPDF's text for the edit.
+        if crate::ai_ui::desktop::available()
+            && selection.adding.is_none()
+            && selection.expected.is_none()
+            && pdit_core::rtl::in_display_order(&selection.text)
+        {
+            spawn(async move {
+                let Some((text, lines)) = mupdf_lines(&selection).await else {
+                    return;
+                };
+                let shown = pdit_core::rtl::logical_paragraph(lines.iter().map(String::as_str));
+                self.state.with_mut(|s| {
+                    if let Some(sel) = s.selection.as_mut().filter(|sel| **sel == selection) {
+                        // Only while the box still shows the first guess (nothing typed yet).
+                        if s.draft == sel.shown {
+                            s.draft = shown.clone();
+                        }
+                        sel.shown = shown;
+                        sel.expected = Some(text);
+                    }
+                });
+            });
         }
     }
 
@@ -129,7 +172,7 @@ impl Editing {
             self.typing.set(false);
             return;
         };
-        if state.draft == selection.text {
+        if state.draft == selection.shown {
             self.typing.set(false);
             if selection.adding.is_some() {
                 self.cancel();
@@ -184,7 +227,10 @@ impl Editing {
             ("x-page", selection.page.to_string()),
             ("x-x", (left - ox + 2.0).to_string()),
             ("x-y", (oy + height - top + 2.0).to_string()),
-            ("x-expected", encode(&selection.text)),
+            (
+                "x-expected",
+                encode(selection.expected.as_deref().unwrap_or(&selection.text)),
+            ),
             ("x-text", encode(text)),
         ];
         let edited = crate::ai_ui::desktop::invoke_raw("edit_paragraph", &before, &headers)
@@ -254,7 +300,7 @@ impl Editing {
         let state = self.state.peek().clone();
         match state.selection {
             Some(sel) if sel.adding.is_some() => self.cancel(),
-            Some(sel) => self.state.with_mut(|s| s.draft = sel.text),
+            Some(sel) => self.state.with_mut(|s| s.draft = sel.shown),
             None => {}
         }
     }
@@ -277,7 +323,7 @@ impl Editing {
             self.style
                 .set(pdit_core::text_style(page, selection.object_index).ok());
             self.state.set(EditState {
-                draft: selection.text.clone(),
+                draft: selection.shown.clone(),
                 mode: BarMode::Editing,
                 selection: Some(selection),
             });
@@ -300,6 +346,8 @@ impl Editing {
                 text: String::new(),
                 bounds: [x, y, x, y],
                 adding: Some((x, y)),
+                shown: String::new(),
+                expected: None,
             }),
         });
     }
@@ -499,7 +547,7 @@ impl Editing {
                     .set(pdit_core::text_style(sel.page, fresh.object_index).ok());
                 self.state.with_mut(|s| {
                     s.mode = BarMode::Editing;
-                    s.draft = fresh.text.clone();
+                    s.draft = fresh.shown.clone();
                     s.selection = Some(fresh);
                 });
                 return;
@@ -509,6 +557,7 @@ impl Editing {
             s.mode = BarMode::Editing;
             if let Some(sel) = s.selection.as_mut() {
                 sel.text = s.draft.clone();
+                sel.shown = s.draft.clone();
                 sel.adding = None;
             }
         });
@@ -585,6 +634,8 @@ pub fn SelectionOverlay(page: u16, page_width_pt: f32, page_height_pt: f32, scal
                     ondoubleclick: move |event| event.stop_propagation(),
                     textarea {
                         class: "t-input pdit-inline-edit",
+                        // Persian / Arabic text runs right to left in the box.
+                        dir: "auto",
                         wrap: if one_line { "off" } else { "soft" },
                         style: "font-size: {size}px; line-height: {line}px; min-height: {height}px;",
                         value: "{draft}",
@@ -657,6 +708,32 @@ pub fn SelectionOverlay(page: u16, page_width_pt: f32, page_height_pt: f32, scal
 /// New text's box: this far from the page's right edge, and never narrower than `MIN_ADD_WIDTH_PT` (points).
 const ADD_MARGIN_PT: f32 = 36.0;
 const MIN_ADD_WIDTH_PT: f32 = 48.0;
+
+/// The selected paragraph as the desktop app's MuPDF reads it: its text and its lines' texts (P-050 #18).
+async fn mupdf_lines(selection: &Selection) -> Option<(String, Vec<String>)> {
+    use js_sys::Reflect;
+    let before = consume_context::<crate::page_tools::PageTools>().snapshot()?;
+    let height = pdit_core::page_ops::page_sizes()
+        .ok()?
+        .get(usize::from(selection.page))
+        .map_or(842.0, |s| s.1);
+    let (ox, oy) = pdit_core::page_ops::page_origin(selection.page).unwrap_or((0.0, 0.0));
+    let [left, _, _, top] = selection.bounds;
+    let headers = [
+        ("x-page", selection.page.to_string()),
+        ("x-x", (left - ox + 2.0).to_string()),
+        ("x-y", (oy + height - top + 2.0).to_string()),
+    ];
+    let found = crate::ai_ui::desktop::invoke_raw("paragraph_lines", &before, &headers)
+        .await
+        .ok()?;
+    let text = Reflect::get(&found, &"text".into()).ok()?.as_string()?;
+    let lines = js_sys::Array::from(&Reflect::get(&found, &"lines".into()).ok()?)
+        .iter()
+        .filter_map(|l| l.as_string())
+        .collect();
+    Some((text, lines))
+}
 
 /// Text with letters PDFium's text objects can't shape or run right to left (Arabic, Persian, Hebrew, Indic,
 /// Thai…), as pdit-mupdf's `has_complex_script`.

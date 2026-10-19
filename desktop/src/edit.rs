@@ -58,6 +58,39 @@ pub async fn edit_paragraph(request: Request<'_>) -> Result<Response, String> {
     Ok(Response::new(editor.save().map_err(|e| e.to_string())?))
 }
 
+/// The paragraph at a point as MuPDF reads it (P-050 #18): its text (what edit_paragraph expects) and each line's
+/// text, so the app can put an older Persian PDF's display-order lines into reading order. Body: the PDF; headers
+/// x-page, x-x, x-y (MuPDF's page space). None when there is no paragraph there.
+#[derive(serde::Serialize)]
+pub struct ParagraphLines {
+    text: String,
+    lines: Vec<String>,
+}
+
+#[tauri::command]
+pub async fn paragraph_lines(request: Request<'_>) -> Result<Option<ParagraphLines>, String> {
+    let InvokeBody::Raw(pdf) = request.body() else {
+        return Err("expected the PDF as raw bytes".into());
+    };
+    let number = |name: &str| -> Result<f32, String> {
+        request
+            .headers()
+            .get(name)
+            .and_then(|v| v.to_str().ok())
+            .ok_or(format!("missing {name}"))?
+            .parse()
+            .map_err(|_| format!("bad {name}"))
+    };
+    let editor = pdit_mupdf::Editor::open(pdf).map_err(|e| e.to_string())?;
+    Ok(editor
+        .paragraph_at(number("x-page")? as i32, number("x-x")?, number("x-y")?)
+        .map_err(|e| e.to_string())?
+        .map(|p| ParagraphLines {
+            text: p.text,
+            lines: p.line_texts,
+        }))
+}
+
 /// A new text box with text the PDF's fonts can't shape (Persian, Arabic…; P-050 #16): body the PDF; headers
 /// x-page, x-x, x-top (the box's top-left in MuPDF's page space), x-width, x-size (points), x-color ("r,g,b") and
 /// x-text (percent-encoded). Returns the PDF with the text laid out by MuPDF in Noto Sans / Vazirmatn.

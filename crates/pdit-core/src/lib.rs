@@ -38,6 +38,7 @@ pub mod links;
 pub mod page_ops;
 #[cfg(target_arch = "wasm32")]
 mod render;
+pub mod rtl;
 pub mod scan_clean;
 pub mod search;
 /// Split into files (D-070).
