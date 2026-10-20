@@ -236,16 +236,30 @@ fn engine(app: &AppHandle) -> Result<&'static QaEngine, String> {
 /// Reads the open document (its PDF bytes as the raw body) for questions.
 #[tauri::command]
 pub async fn qa_index(app: AppHandle, request: Request<'_>) -> Result<Option<String>, String> {
-    let InvokeBody::Raw(pdf) = request.body() else {
+    let InvokeBody::Raw(body) = request.body() else {
         return Err("expected the PDF as raw bytes".into());
     };
+    // With x-ocr (its length): the body starts with the OCR text of scanned pages as JSON [[page, text], …]
+    // (pages from 1), then the PDF. leafmind's PDF reader skips invisible text, so a scan's OCR layer isn't read.
+    let ocr_len = request
+        .headers()
+        .get("x-ocr")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(0)
+        .min(body.len());
+    let ocr: Vec<(u32, String)> = match ocr_len {
+        0 => Vec::new(),
+        n => serde_json::from_slice(&body[..n]).map_err(|e| e.to_string())?,
+    };
+    let pdf = &body[ocr_len..];
     let engine = engine(&app)?;
     // The index is kept per PDF (D-060, leafmind 0.3 save/load), so a PDF read
     // before isn't read again; a kept index from other models is refused and
     // the PDF read again.
     let kept = app.path().app_data_dir().ok().map(|d| d.join("qa-index"));
     let file = kept.as_ref().map(|d| {
-        let hash: String = Sha256::digest(pdf)
+        let hash: String = Sha256::digest(body)
             .iter()
             .map(|b| format!("{b:02x}"))
             .collect();
@@ -258,7 +272,18 @@ pub async fn qa_index(app: AppHandle, request: Request<'_>) -> Result<Option<Str
     let doc = match loaded {
         Some(doc) => doc,
         None => {
-            let doc = engine.index_pdf(pdf).map_err(|e| e.to_string())?;
+            let doc = match ocr.is_empty() {
+                true => engine.index_pdf(pdf),
+                false => {
+                    let mut pages = leafmind_qa::text::pdf_pages(pdf).map_err(|e| e.to_string())?;
+                    pages.retain(|(n, _)| !ocr.iter().any(|(o, _)| o == n));
+                    pages.extend(ocr);
+                    pages.sort_by_key(|(n, _)| *n);
+                    let pages: Vec<(u32, &str)> = pages.iter().map(|(n, t)| (*n, t.as_str())).collect();
+                    engine.index_pages(&pages)
+                }
+            }
+            .map_err(|e| e.to_string())?;
             if let (Some(dir), Some(file)) = (&kept, &file)
                 && std::fs::create_dir_all(dir).is_ok()
                 && std::fs::write(file, engine.save_document(&doc)).is_ok()

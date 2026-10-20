@@ -11,7 +11,7 @@ use js_sys::{Object, Reflect};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-const VERSION: u32 = 1;
+const VERSION: u32 = 2;
 const STORAGE_PREFIX: &str = "pdit-analysis:";
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -27,6 +27,8 @@ pub struct Suggestion {
 pub struct OcrPage {
     pub page: u16,
     pub words: Vec<(String, [f32; 4])>,
+    /// leafmind's text of the page, for questions.
+    pub text: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
@@ -126,6 +128,7 @@ mod tests {
         r.ocr = vec![OcrPage {
             page: 1,
             words: vec![("Rent".into(), [1.0, 2.0, 3.0, 4.0])],
+            text: "Rent".into(),
         }];
         let back: Record = serde_json::from_str(&serde_json::to_string(&r).unwrap()).unwrap();
         assert_eq!(back, r);

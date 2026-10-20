@@ -119,6 +119,8 @@ struct Word {
 #[derive(serde::Serialize)]
 struct Page {
     confidence: f32,
+    /// leafmind's text of the page (form rows read row by row), for questions.
+    text: String,
     words: Vec<Word>,
 }
 
@@ -137,6 +139,7 @@ async fn ocr_read(app: AppHandle, request: Request<'_>) -> Result<Page, String> 
         .map_err(|e| e.to_string())?;
     Ok(Page {
         confidence: page.confidence,
+        text: page.text,
         words: page
             .words
             .into_iter()

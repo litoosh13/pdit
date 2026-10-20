@@ -57,16 +57,15 @@ pub fn PageList() -> Element {
             locks.set(Default::default());
         }
     }));
-    // AI mode (D-062) shows only the page it opened on.
-    let frame = use_context::<crate::frame_ui::Frame>();
-    let only = frame.is_ai().then(|| (frame.ai_page)() as usize);
+    // AI mode (D-062): the pages on the left half, without "+ Add page".
+    let ai_mode = use_context::<crate::frame_ui::Frame>().is_ai();
     rsx! {
         // Loaded even with no PDF open: pages.css also sets the app background.
         document::Stylesheet { href: SKELETON_CSS }
         document::Stylesheet { href: PAGES_CSS }
         if let Some(open) = document() {
             div { class: "page-list",
-                for (index, (width, height)) in open.page_sizes.iter().copied().enumerate().filter(|(i, _)| only.is_none_or(|p| p == *i)) {
+                for (index, (width, height)) in open.page_sizes.iter().copied().enumerate() {
                     PageView {
                         key: "{open.id}-{index}",
                         index: index as u16,
@@ -76,7 +75,7 @@ pub fn PageList() -> Element {
                     }
                 }
                 // Canva's "+ Add page" (D-062): a blank page after the last one.
-                if only.is_none() {
+                if !ai_mode {
                     button {
                         class: "pdit-add-page",
                         r#type: "button",

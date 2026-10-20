@@ -7,8 +7,8 @@
  * with the island). Light only.
  */
 
-/* AI mode (frame_ui.rs): the current page alone on the left half, the chat on
-   the right half, from the top to the bottom bar. */
+/* AI mode (frame_ui.rs): the pages on the left half (scrolling through all of
+   them, P-050), the chat on the right half, from the top to the bottom bar. */
 body.pdit-ai-mode .page-list {
   padding-left: 24px;
   padding-right: calc(50% + 24px);

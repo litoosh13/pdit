@@ -82,12 +82,19 @@ impl Ask {
 
     /// leafmind reads the document as it is now (edits, OCR), unless it already has.
     pub(crate) async fn prepare(mut self) -> Result<(), String> {
-        let bytes = pdit_core::save_document().map_err(|e| e.to_string())?;
+        // A scan's OCR text goes first (x-ocr: its length): leafmind's PDF reader skips invisible text.
+        let ocr = consume_context::<crate::ai_ui::Ai>().ocr_text();
+        let mut bytes = match ocr.is_empty() {
+            true => Vec::new(),
+            false => serde_json::to_vec(&ocr).map_err(|e| e.to_string())?,
+        };
+        let ocr_len = bytes.len();
+        bytes.extend(pdit_core::save_document().map_err(|e| e.to_string())?);
         let version = bytes.iter().fold(0xcbf2_9ce4_8422_2325_u64, |h, b| {
             (h ^ u64::from(*b)).wrapping_mul(0x100_0000_01b3)
         });
         if *self.indexed.peek() != Some(version) {
-            desktop::invoke_raw("qa_index", &bytes, &[])
+            desktop::invoke_raw("qa_index", &bytes, &[("x-ocr", ocr_len.to_string())])
                 .await
                 .map_err(|e| format!("{e:?}"))?;
             self.indexed.set(Some(version));

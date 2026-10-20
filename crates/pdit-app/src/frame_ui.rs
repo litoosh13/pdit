@@ -29,15 +29,12 @@ pub enum Mode {
 #[derive(Clone, Copy)]
 pub struct Frame {
     pub mode: Signal<Mode>,
-    /// The page AI mode shows (the current page when it opened).
-    pub ai_page: Signal<u16>,
 }
 
 impl Frame {
     pub fn provide() -> Self {
         use_context_provider(|| Frame {
             mode: Signal::new(Mode::Edit),
-            ai_page: Signal::new(0),
         })
     }
 
@@ -55,9 +52,9 @@ impl Frame {
             return;
         }
         let ask = consume_context::<crate::ask_ui::Ask>();
+        let page = crate::bookmarks_ui::current_page();
         match mode {
             Mode::Ai => {
-                self.ai_page.set(crate::bookmarks_ui::current_page());
                 consume_context::<crate::tools_ui::Tools>().escape();
                 consume_context::<crate::search_ui::Find>().close();
                 consume_context::<crate::editing::Editing>().cancel();
@@ -67,9 +64,8 @@ impl Frame {
             Mode::Edit => ask.close(),
         }
         self.mode.set(mode);
-        if let Some(window) = web_sys::window() {
-            window.scroll_to_with_x_and_y(0.0, 0.0);
-        }
+        // The pages change width; stay on the page being read.
+        crate::page_tools::next_frame(move || crate::thumbnails::scroll_to_page(page));
     }
 }
 

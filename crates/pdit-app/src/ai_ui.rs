@@ -160,6 +160,16 @@ pub fn saved_file(bytes: &[u8]) {
 }
 
 impl Ai {
+    /// The OCR text of the scanned pages (pages from 1), for questions.
+    pub(crate) fn ocr_text(&self) -> Vec<(u32, String)> {
+        self.record.peek().as_ref().map_or_else(Vec::new, |r| {
+            r.ocr
+                .iter()
+                .map(|p| (u32::from(p.page) + 1, p.text.clone()))
+                .collect()
+        })
+    }
+
     pub fn provide() -> Self {
         use_context_provider(|| Ai {
             analysis: Signal::new(Analysis::default()),
@@ -420,10 +430,11 @@ impl Ai {
                     self.set_step(1, Step::part("Reading scanned pages (OCR)", k, scans.len()));
                     crate::print_ui::pause(30).await;
                     match desktop::read(page, lang).await {
-                        Ok(words) => {
+                        Ok((words, text)) => {
                             record.ocr.push(crate::analysis_cache::OcrPage {
                                 page,
                                 words: words.iter().map(|w| (w.text.clone(), w.rect)).collect(),
+                                text,
                             });
                             let total = words.len();
                             let noto = consume_context::<crate::editing::Editing>()
@@ -653,8 +664,11 @@ pub(crate) mod desktop {
             .find(|c| *c == code)
     }
 
-    /// The words of page `page`, in PDF points.
-    pub(crate) async fn read(page: u16, lang: &str) -> Result<Vec<pdit_core::LayerWord>, String> {
+    /// The words of page `page`, in PDF points, and leafmind's text of the page.
+    pub(crate) async fn read(
+        page: u16,
+        lang: &str,
+    ) -> Result<(Vec<pdit_core::LayerWord>, String), String> {
         let (value, width, _) = call("ocr_read", page, Some(lang))
             .await
             .map_err(|e| format!("{e:?}"))?;
@@ -666,26 +680,34 @@ pub(crate) mod desktop {
         let k = width_pt / width as f32;
         // The picture is the visible area; a cropped page starts elsewhere (D-070).
         let (ox, oy) = pdit_core::page_ops::page_origin(page).unwrap_or((0.0, 0.0));
+        let text = Reflect::get(&value, &"text".into())
+            .ok()
+            .and_then(|t| t.as_string())
+            .unwrap_or_default();
         let words = Reflect::get(&value, &"words".into()).map_err(|e| format!("{e:?}"))?;
         let words: js_sys::Array = words.dyn_into().map_err(|_| "no words")?;
-        Ok(words
-            .iter()
-            .filter_map(|w| {
-                let text = Reflect::get(&w, &"text".into()).ok()?.as_string()?;
-                let b: js_sys::Array = Reflect::get(&w, &"bounds".into()).ok()?.dyn_into().ok()?;
-                let n = |i: u32| b.get(i).as_f64().map(|v| v as f32);
-                let (l, t, r, bottom) = (n(0)?, n(1)?, n(2)?, n(3)?);
-                Some(pdit_core::LayerWord {
-                    text,
-                    rect: [
-                        ox + l * k,
-                        oy + height_pt - bottom * k,
-                        ox + r * k,
-                        oy + height_pt - t * k,
-                    ],
+        Ok((
+            words
+                .iter()
+                .filter_map(|w| {
+                    let text = Reflect::get(&w, &"text".into()).ok()?.as_string()?;
+                    let b: js_sys::Array =
+                        Reflect::get(&w, &"bounds".into()).ok()?.dyn_into().ok()?;
+                    let n = |i: u32| b.get(i).as_f64().map(|v| v as f32);
+                    let (l, t, r, bottom) = (n(0)?, n(1)?, n(2)?, n(3)?);
+                    Some(pdit_core::LayerWord {
+                        text,
+                        rect: [
+                            ox + l * k,
+                            oy + height_pt - bottom * k,
+                            ox + r * k,
+                            oy + height_pt - t * k,
+                        ],
+                    })
                 })
-            })
-            .collect())
+                .collect(),
+            text,
+        ))
     }
 }
 

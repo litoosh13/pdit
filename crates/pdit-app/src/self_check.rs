@@ -1577,7 +1577,7 @@ async fn scan_session() {
         .unwrap_or_default();
     let layered = words
         .as_ref()
-        .map(|w| pdit_core::add_text_layer(0, w, &font));
+        .map(|(w, _)| pdit_core::add_text_layer(0, w, &font));
     let hit = pdit_core::search::find(0, "deposit", pdit_core::search::FindOptions::default())
         .unwrap_or_default()
         .into_iter()
@@ -1593,7 +1593,7 @@ async fn scan_session() {
         near && page_kind(0).is_ok_and(|k| k == PageKind::Text),
         format!(
             "language {language:?}; {} words; layer {layered:?}; original {:?}, found {:?}",
-            words.as_ref().map_or(0, |w| w.len()),
+            words.as_ref().map_or(0, |(w, _)| w.len()),
             original.map(|o| o.bounds),
             hit.map(|h| h.rect)
         ),
@@ -1951,6 +1951,44 @@ async fn ask_session() {
             question,
             ok,
             format!("{text} in {:.0} ms", js_sys::Date::now() - started),
+        );
+    }
+    // A scan: the rental page as a picture, read by OCR (its text layer is invisible, which leafmind's PDF reader
+    // skips), so its OCR text goes along (x-ocr).
+    if pdit_core::open_document(RENTAL.to_vec()).is_ok()
+        && pdit_core::page_ops::rasterize_page(0, 1240).is_ok()
+        && let Ok((words, text)) = desktop::read(0, "eng").await
+    {
+        let font = crate::fetch_bytes(&crate::FALLBACK_FONT.to_string())
+            .await
+            .unwrap_or_default();
+        let _ = pdit_core::add_text_layer(0, &words, &font);
+        let mut body = serde_json::to_vec(&[(1u32, &text)]).unwrap_or_default();
+        let ocr_len = body.len();
+        body.extend(pdit_core::save_document().unwrap_or_default());
+        let indexed =
+            desktop::invoke_raw("qa_index", &body, &[("x-ocr", ocr_len.to_string())]).await;
+        let args = Object::new();
+        let _ = Reflect::set(
+            &args,
+            &"question".into(),
+            &"When does the lease begin?".into(),
+        );
+        let reply = desktop::invoke("qa_ask", &args).await.unwrap_or_default();
+        let reply = js_sys::JSON::stringify(&reply)
+            .ok()
+            .and_then(|s| s.as_string())
+            .unwrap_or_default();
+        check(
+            "a question on a scan (OCR text)",
+            reply.contains("\"found\"") && reply.contains("March 2027"),
+            format!("{indexed:?}; {reply}"),
+        );
+    } else {
+        check(
+            "a question on a scan (OCR text)",
+            false,
+            "OCR failed".into(),
         );
     }
 }
