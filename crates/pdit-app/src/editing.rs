@@ -196,7 +196,9 @@ impl Editing {
             });
             return;
         }
-        if crate::ai_ui::desktop::available() && selection.adding.is_none() && !restyled {
+        // Text read from a scan is invisible over the picture: PDFium covers the old words and writes the new.
+        let scan = pdit_core::is_scan_text(selection.page, selection.object_index);
+        if crate::ai_ui::desktop::available() && selection.adding.is_none() && !restyled && !scan {
             spawn(async move {
                 if let Err(error) = self.edit_with_mupdf(&selection, &state.draft).await {
                     crate::log(&format!("pdit: MuPDF edit not used: {error}"));

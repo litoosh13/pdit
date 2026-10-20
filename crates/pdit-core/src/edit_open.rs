@@ -283,6 +283,8 @@ struct Base {
     slanted: bool,
     /// Set by [`with_underline`] when the next object is pdit's underline.
     underline: bool,
+    /// Invisible text over a scan (OCR, D-055): the words are printed in the picture underneath.
+    hidden: bool,
 }
 
 impl Base {
@@ -305,6 +307,11 @@ impl Base {
             matrix.set_c(slant_c);
             matrix.set_d(slant_d);
         }
+        let hidden = text.render_mode() == PdfPageTextRenderMode::Invisible;
+        // OCR text is stretched to its word's box; new words aren't.
+        if hidden && is_upright(&matrix) {
+            matrix.set_a(matrix.d());
+        }
         Ok(Some(Base {
             matrix,
             fill: object.fill_color()?,
@@ -320,6 +327,7 @@ impl Base {
             stroked: text.render_mode() == PdfPageTextRenderMode::FilledThenStroked,
             slanted,
             underline: false,
+            hidden,
         }))
     }
 
@@ -339,6 +347,18 @@ impl Base {
             underline: self.underline,
         }
     }
+}
+
+/// Whether text object `index` on `page` is invisible text over a scan (OCR, D-055).
+pub fn is_scan_text(page: u16, index: usize) -> bool {
+    with_open(|document| {
+        let pdf_page = document.pages().get(page.into())?;
+        let object = pdf_page.objects().get(index)?;
+        Ok(object
+            .as_text_object()
+            .is_some_and(|t| t.render_mode() == PdfPageTextRenderMode::Invisible))
+    })
+    .unwrap_or(false)
 }
 
 /// The traits of text object `index`'s font on `page`.
@@ -407,6 +427,73 @@ fn is_underline_for(
 /// Text that runs left to right without rotation (a slant is fine).
 fn is_upright(matrix: &PdfMatrix) -> bool {
     matrix.a() > 0.0 && matrix.b().abs() < 1e-3 * matrix.a()
+}
+
+/// Covers the words printed in a scan under edited OCR text (P-050): a patch the colour of the paper around
+/// `bounds`, put at `index`. Returns how many objects it added (1).
+fn cover_scan(
+    document: &PdfDocument<'static>,
+    pdf_page: &mut PdfPage<'static>,
+    index: usize,
+    [left, bottom, right, top]: [f32; 4],
+) -> Result<usize, Error> {
+    let pad = 0.15 * (top - bottom);
+    let bounds = [left - pad, bottom - pad, right + pad, top + pad];
+    let paper = paper_around(pdf_page, bounds).unwrap_or(PdfColor::WHITE);
+    let patch = PdfPagePathObject::new_rect(
+        document,
+        PdfRect::new_from_values(bounds[1], bounds[0], bounds[3], bounds[2]),
+        None,
+        None,
+        Some(paper),
+    )?;
+    pdf_page
+        .objects_mut()
+        .insert_object_at_index(index, PdfPageObject::Path(patch))?;
+    Ok(1)
+}
+
+/// The paper's colour in a thin band around `bounds` on the page as drawn (the median of each channel).
+/// ponytail: one flat colour; on a scan with a strong light gradient the patch shows at its ends (sample per side
+/// and draw a gradient if that matters).
+fn paper_around(pdf_page: &PdfPage<'_>, [left, bottom, right, top]: [f32; 4]) -> Option<PdfColor> {
+    let area = pdf_page.boundaries().bounding().ok()?.bounds;
+    let (ox, oy) = (area.left().value, area.bottom().value);
+    let (width, height) = (area.width().value, area.height().value);
+    // About 1 px per point: enough for a colour, quick to draw.
+    let bitmap = pdf_page
+        .render_with_config(&PdfRenderConfig::new().set_target_width(width.round() as Pixels))
+        .ok()?;
+    let (w, h) = (bitmap.width(), bitmap.height());
+    let k = w as f32 / width.max(1.0);
+    let px = |x: f32| ((x - ox) * k).round() as i32;
+    let py = |y: f32| ((oy + height - y) * k).round() as i32;
+    let band = 3;
+    let (l, r, t, b) = (px(left), px(right), py(top), py(bottom));
+    let rgba = bitmap.as_rgba_bytes();
+    let mut channels: [Vec<u8>; 3] = Default::default();
+    for y in (t - band).max(0)..(b + band).min(h) {
+        for x in (l - band).max(0)..(r + band).min(w) {
+            if (l..r).contains(&x) && (t..b).contains(&y) {
+                continue;
+            }
+            let i = ((y * w + x) * 4) as usize;
+            for (c, values) in channels.iter_mut().enumerate() {
+                values.push(rgba[i + c]);
+            }
+        }
+    }
+    let median = |values: &mut Vec<u8>| {
+        values.sort_unstable();
+        values.get(values.len() / 2).copied()
+    };
+    let [red, green, blue] = &mut channels;
+    Some(PdfColor::new(
+        median(red)?,
+        median(green)?,
+        median(blue)?,
+        255,
+    ))
 }
 
 /// Text that [`insert_text`] placed on the page.
@@ -581,6 +668,7 @@ fn preview_replace(
     with_open(|document| {
         let mut pdf_page = document.pages().get(page.into())?;
         let base = with_underline(&pdf_page, index)?;
+        let old_bounds = rect(pdf_page.objects().get(index)?.bounds()?);
         let mut removed = vec![(index, pdf_page.objects_mut().remove_object_at_index(index)?)];
         if base.underline {
             // The old underline goes too; a new one follows the new text.
@@ -589,10 +677,14 @@ fn preview_replace(
                 pdf_page.objects_mut().remove_object_at_index(index)?,
             ));
         }
+        let cover = match base.hidden {
+            true => cover_scan(document, &mut pdf_page, index, old_bounds)?,
+            false => 0,
+        };
         match insert_text(
             document,
             &mut pdf_page,
-            index,
+            index + cover,
             new_text,
             &base,
             style,
@@ -608,7 +700,7 @@ fn preview_replace(
                         page,
                         index,
                         removed,
-                        added,
+                        added: added + cover,
                     })
                 });
                 Ok(EditPreview {
@@ -618,6 +710,9 @@ fn preview_replace(
                 })
             }
             Err(read_back) => {
+                for _ in 0..cover {
+                    pdf_page.objects_mut().remove_object_at_index(index)?;
+                }
                 put_back(&mut pdf_page, removed)?;
                 Err(Error::UnsupportedCharacters {
                     intended: new_text.to_owned(),
@@ -753,6 +848,7 @@ fn reflow(
         let mut pdf_page = document.pages().get(page.into())?;
         // Geometry: each line's baseline (matrix f), left (matrix e), right edge.
         let (mut left_x, mut max_right) = (f32::MAX, f32::MIN);
+        let mut old_bounds = [f32::MAX, f32::MAX, f32::MIN, f32::MIN];
         let mut baselines = Vec::new();
         let mut top_index = min;
         let mut top_baseline = f32::MIN;
@@ -761,7 +857,14 @@ fn reflow(
             let matrix = object.matrix()?;
             baselines.push(matrix.f());
             left_x = left_x.min(matrix.e());
-            max_right = max_right.max(rect(object.bounds()?)[2]);
+            let [l, b, r, t] = rect(object.bounds()?);
+            max_right = max_right.max(r);
+            old_bounds = [
+                old_bounds[0].min(l),
+                old_bounds[1].min(b),
+                old_bounds[2].max(r),
+                old_bounds[3].max(t),
+            ];
             if matrix.f() > top_baseline {
                 top_baseline = matrix.f();
                 top_index = i;
@@ -827,7 +930,10 @@ fn reflow(
         let at = idx[idx.len() - 1] + 1 - idx.len();
         // Place each wrapped line at the block's left, one line-height apart.
         let mut method = EditMethod::Native;
-        let mut added = 0usize;
+        let mut added = match base.hidden {
+            true => cover_scan(document, &mut pdf_page, at, old_bounds)?,
+            false => 0,
+        };
         let (mut l, mut b, mut r, mut t) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
         for (i, line) in lines.iter().enumerate() {
             base.matrix.set_e(left_x);
@@ -1053,6 +1159,7 @@ fn nearest_base(pdf_page: &PdfPage<'_>, x: f32, y: f32) -> Result<Base, Error> {
         stroked: false,
         slanted: false,
         underline: false,
+        hidden: false,
     }))
 }
 

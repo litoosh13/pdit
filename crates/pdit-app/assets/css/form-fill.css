@@ -152,43 +152,11 @@
 }
 
 /* ---- Find fields (D-053, approved mockup .claude/research/find-fields-ui/) ---- */
-/* Suggestions: the form editor's dashed outline + name tag; clicked off, they fade. */
-.pdit-ff-sug {
-  position: absolute;
-  z-index: 6;
-  cursor: pointer;
-  outline: 1px dashed #0285ff;
-  outline-offset: 2px;
-  background: #0285ff0d;
-  transition: opacity 0.15s, background-color 0.15s;
-}
-.pdit-ff-sug:hover {
-  background: #0285ff1f;
-}
-.pdit-ff-sug.is-off {
-  opacity: 0.35;
-  background: none;
-}
-.pdit-ff-sug.is-off .pdit-fe-tag {
-  text-decoration: line-through;
-}
-/* The bar: the form editor's, with a status line and a primary Add. */
+/* The bar: the form editor's, with a status line. */
 .pdit-ff-bar .msg {
   padding: 0 6px;
   white-space: nowrap;
 }
 .pdit-ff-bar .msg b {
   font-weight: 600;
-}
-.pdit-ff-bar .act.is-primary {
-  background: #0285ff;
-  color: #fff;
-}
-.pdit-ff-bar .act.is-primary:hover {
-  background: #0285ff;
-  filter: brightness(1.05);
-}
-.pdit-ff-bar .act:disabled {
-  opacity: 0.4;
-  pointer-events: none;
 }

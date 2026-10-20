@@ -89,6 +89,7 @@ pub async fn run(font_url: &str) {
     split_replace_session(&font);
     print_session();
     clean_scan_session();
+    scan_edit_session(&font);
     crop_session();
     image_crop_session();
     remove_background_session();
@@ -976,6 +977,93 @@ fn find_session(font: &[u8]) {
 /// Clean scan (D-068) on fixtures/synthetic-scan.pdf: both pages are scans;
 /// the flat scan's shadowed paper turns white, and the photographed page is cut
 /// out of the dark table (its corners become paper).
+/// Editing a line read from a scan (P-050): the words printed in the picture are covered in the paper's colour
+/// and the new text shows. The OCR words are placed by hand on the made-up scan's title.
+fn scan_edit_session(font: &[u8]) {
+    let check = |name: &str, ok: bool, detail: String| {
+        log(&format!(
+            "pdit self-check {}: scan edit: {name}: {detail}",
+            if ok { "PASS" } else { "FAIL" }
+        ))
+    };
+    if let Err(error) = pdit_core::open_document(SCAN.to_vec()) {
+        return check("open", false, error.to_string());
+    }
+    let word = |text: &str, rect| pdit_core::LayerWord {
+        text: text.into(),
+        rect,
+    };
+    let layered = pdit_core::add_text_layer(
+        0,
+        &[
+            word("Riverside", [52.8, 763.3, 144.0, 780.6]),
+            word("Bicycle", [149.2, 759.0, 217.8, 780.6]),
+            word("Workshop", [222.6, 759.0, 324.9, 780.6]),
+        ],
+        font,
+    );
+    // The darkest channel and the median colour in [left, bottom, right, top] (points) of page 1, drawn 1 px per
+    // point (the page is A4).
+    let look = |[l, b, r, t]: [f32; 4]| -> Option<(u8, [u8; 3])> {
+        let image = pdit_core::render_page(0, 595).ok()?;
+        let (w, data) = (image.width() as usize, image.data());
+        let mut darkest = 255;
+        let mut channels: [Vec<u8>; 3] = Default::default();
+        for y in (842.0 - t) as usize..(842.0 - b) as usize {
+            for x in l as usize..r as usize {
+                let i = (y * w + x) * 4;
+                for (c, values) in channels.iter_mut().enumerate() {
+                    darkest = darkest.min(data[i + c]);
+                    values.push(data[i + c]);
+                }
+            }
+        }
+        let median = |mut v: Vec<u8>| {
+            v.sort_unstable();
+            v.get(v.len() / 2).copied()
+        };
+        let [r, g, b] = channels;
+        Some((darkest, [median(r)?, median(g)?, median(b)?]))
+    };
+    let workshop = [230.0, 763.0, 320.0, 778.0];
+    let before = look(workshop);
+    let Some(line) = pdit_core::visual_text_lines(0)
+        .ok()
+        .and_then(|lines| lines.into_iter().find(|l| l.text.contains("Riverside")))
+    else {
+        return check("the read line is there", false, format!("{layered:?}"));
+    };
+    let edited = pdit_core::preview_reflow(
+        0,
+        &line.object_indices,
+        "Lakeside",
+        None,
+        &pdit_core::Fonts {
+            look_alike: None,
+            noto_sans: font,
+        },
+    );
+    pdit_core::keep_edit();
+    let after = look(workshop);
+    let new_word = look([56.0, 764.0, 120.0, 779.0]);
+    let paper = look([60.0, 785.0, 320.0, 792.0]);
+    check(
+        "the printed words are covered",
+        before.is_some_and(|(d, _)| d < 100) && after.is_some_and(|(d, _)| d > 140),
+        format!("darkest before {before:?}, after {after:?}; {edited:?}"),
+    );
+    check(
+        "the cover has the paper's colour",
+        matches!((after, paper), (Some((_, a)), Some((_, p))) if a.iter().zip(p).all(|(a, p)| a.abs_diff(p) <= 12)),
+        format!("cover {after:?}, paper above it {paper:?}"),
+    );
+    check(
+        "the new text shows",
+        new_word.is_some_and(|(d, _)| d < 100),
+        format!("{new_word:?}"),
+    );
+}
+
 fn clean_scan_session() {
     use pdit_core::scan_clean::{clean_scan, is_scan_page};
     let check = |name: &str, ok: bool, detail: String| {

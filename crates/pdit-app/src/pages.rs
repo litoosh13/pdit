@@ -477,11 +477,6 @@ fn PageView(index: u16, count: usize, width_pt: f32, height_pt: f32) -> Element 
                     page_height_pt: height_pt,
                     scale,
                 }
-                crate::find_fields_ui::FindFieldsOverlay {
-                    page: index,
-                    page_height_pt: height_pt,
-                    scale,
-                }
                 crate::form_edit_ui::FormEditOverlay {
                     page: index,
                     page_width_pt: width_pt,
