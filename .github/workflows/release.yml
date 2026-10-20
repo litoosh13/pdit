@@ -1,21 +1,88 @@
-# Pushing a version tag builds the desktop app for macOS (Apple silicon + Intel),
-# Windows and Linux and publishes them as one GitHub Release, with the signed
-# update files (latest.json) the app checks for updates.
-#   git tag v0.1.0-beta.1 && git push origin v0.1.0-beta.1
-# The macOS app is ad-hoc signed only (users allow it once: System Settings →
-# Privacy & Security → Open Anyway); the Windows installer is unsigned (Windows
-# SmartScreen: More info → Run anyway).
+# Builds the desktop app for macOS (Apple silicon + Intel), Windows and Linux, publishes them as one GitHub Release
+# with the signed update files (latest.json) the app checks for updates, and puts the same version online (GitHub
+# Pages, https://litoosh13.github.io/pdit/).
+#
+# Start it from the Actions tab: Release → Run workflow (on main) → the version, e.g. 0.1.0-beta.17. It creates the
+# tag v0.1.0-beta.17 itself. Runs on main keep their build caches for the next release; a pushed tag still works
+# (git push origin v0.1.0-beta.17) but can't use them (GitHub shares caches only from the default branch).
+#
+# The web app is built once (it is the same on every system) and the desktop jobs only build the app around it.
+# The macOS app is ad-hoc signed only (users allow it once: System Settings → Privacy & Security → Open Anyway); the
+# Windows installer is unsigned (Windows SmartScreen: More info → Run anyway).
 name: Release
 
 on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version without the v, e.g. 0.1.0-beta.17"
+        required: true
   push:
     tags: ["v*"]
 
 permissions:
   contents: write
+  pages: write
+  id-token: write
+
+env:
+  TAG: ${{ inputs.version && format('v{0}', inputs.version) || github.ref_name }}
 
 jobs:
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust toolchain
+        run: rustup toolchain install
+
+      # Shared with CI (ci.yml), which keeps it fresh on every push to main.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: web
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: PDFium (pinned, checksum-verified)
+        run: scripts/fetch-pdfium.sh
+
+      - name: React island
+        working-directory: web/gooey-island
+        run: npm ci --no-audit --no-fund && npm run build
+
+      - uses: cargo-bins/cargo-binstall@main
+
+      - name: dx
+        run: cargo binstall dioxus-cli@0.7.10 --no-confirm
+
+      - name: Web app for the desktop app
+        working-directory: crates/pdit-app
+        run: dx build --release --platform web
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web
+          path: target/dx/pdit-app/release/web/public
+
+      # The online version: served from /pdit/ (the repository's name); About shows the version.
+      - name: Online version
+        working-directory: crates/pdit-app
+        run: PDIT_VERSION="$TAG" dx build --release --platform web --base-path pdit
+
+      # Offline use (public/sw.js): every file to keep, and a cache name new to this deployment.
+      - name: Offline file list
+        working-directory: target/dx/pdit-app/release/web/public
+        run: |
+          find assets -type f | sort > precache.txt
+          sed -i "s/pdit-dev/pdit-${GITHUB_SHA::12}/" sw.js
+          grep -q "pdit-${GITHUB_SHA::12}" sw.js
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: target/dx/pdit-app/release/web/public
+
   build:
+    needs: web
     strategy:
       fail-fast: false
       matrix:
@@ -50,49 +117,40 @@ jobs:
           rustup component add llvm-tools
           if [ -n "${{ matrix.targets }}" ]; then rustup target add ${{ matrix.targets }}; fi
 
+      # Only the desktop app is compiled here (MuPDF's C build included), so only its cache.
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: |
-            .
-            desktop
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-
-      - name: PDFium (pinned, checksum-verified)
-        run: scripts/fetch-pdfium.sh
-
-      - name: React island
-        working-directory: web/gooey-island
-        run: npm ci --no-audit --no-fund && npm run build
+          workspaces: desktop
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - uses: cargo-bins/cargo-binstall@main
 
-      # dx is compiled from source on Linux and macOS: the prebuilt Linux dx needs glibc 2.39
-      # (Ubuntu 24.04; the app is built on 22.04 so it runs on older distributions too), and the
-      # prebuilt macOS dx looks for OpenSSL where Homebrew puts it on Intel Macs (/usr/local),
-      # not on the Apple-silicon runner (/opt/homebrew).
-      - name: Build tools
-        run: |
-          cargo binstall tauri-cli@2.12.1 --no-confirm
-          if [ "$RUNNER_OS" != "Windows" ]; then
-            cargo install dioxus-cli --version 0.7.10 --locked
-          else
-            cargo binstall dioxus-cli@0.7.10 --no-confirm
-          fi
+      - name: tauri-cli
+        run: cargo binstall tauri-cli@2.12.1 --no-confirm
 
-      # The app's version comes from the tag: v0.1.0-beta.1 → 0.1.0-beta.1.
-      - name: Version from the tag
+      - uses: actions/download-artifact@v4
+        with:
+          name: web
+          path: target/dx/pdit-app/release/web/public
+
+      - name: OCR files (macOS)
+        if: runner.os == 'macOS'
+        run: desktop/scripts/fetch-ocr.sh
+
+      # The version comes from the tag (v0.1.0-beta.1 → 0.1.0-beta.1); the web app is already built.
+      - name: Version, prebuilt web app
         run: |
           node -e '
-            const fs = require("fs"), f = "desktop/tauri.conf.json";
-            const c = JSON.parse(fs.readFileSync(f, "utf8"));
-            c.version = process.env.GITHUB_REF_NAME.replace(/^v/, "");
-            fs.writeFileSync(f, JSON.stringify(c, null, 2) + "\n");'
+            const fs = require("fs");
+            for (const f of ["desktop/tauri.conf.json", "desktop/tauri.macos.conf.json"]) {
+              const c = JSON.parse(fs.readFileSync(f, "utf8"));
+              if (f.endsWith("/tauri.conf.json")) c.version = process.env.TAG.replace(/^v/, "");
+              c.build = { ...c.build, beforeBuildCommand: "" };
+              fs.writeFileSync(f, JSON.stringify(c, null, 2) + "\n");
+            }'
 
-      # Builds the web app first (tauri.conf.json's beforeBuildCommand; on macOS it also
-      # fetches the OCR files), then the app, the installers and the signed update files.
+      # The app, the installers and the signed update files; the release and its tag (at this commit) are created
+      # by the first job to finish.
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -102,8 +160,9 @@ jobs:
           projectPath: desktop
           tauriScript: cargo tauri
           args: ${{ matrix.args }}
-          tagName: ${{ github.ref_name }}
-          releaseName: pdit ${{ github.ref_name }}
+          tagName: ${{ env.TAG }}
+          releaseName: pdit ${{ env.TAG }}
+          releaseCommitish: ${{ github.sha }}
           releaseBody: |
             Download the file for your computer below.
             - macOS (Apple silicon and Intel): the .dmg. First start: System Settings → Privacy & Security → Open Anyway.
@@ -113,3 +172,16 @@ jobs:
           releaseDraft: false
           # Not marked "pre-release", so the app's update check (releases/latest) finds it.
           prerelease: false
+
+  pages:
+    needs: web
+    runs-on: ubuntu-latest
+    concurrency:
+      group: pages
+      cancel-in-progress: true
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
