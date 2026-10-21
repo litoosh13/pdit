@@ -89,6 +89,7 @@ pub async fn run(font_url: &str) {
     split_replace_session(&font);
     print_session();
     clean_scan_session();
+    history_session();
     scan_edit_session(&font);
     crop_session();
     image_crop_session();
@@ -1061,6 +1062,69 @@ fn scan_edit_session(font: &[u8]) {
         "the new text shows",
         new_word.is_some_and(|(d, _)| d < 100),
         format!("{new_word:?}"),
+    );
+}
+
+/// Undo / Redo (P-050 #2): every change is kept by the engine's history; a press starts a new step, changes
+/// without one are a single step.
+fn history_session() {
+    use pdit_core::history;
+    use pdit_core::page_ops;
+    let check = |name: &str, ok: bool, detail: String| {
+        log(&format!(
+            "pdit self-check {}: history: {name}: {detail}",
+            if ok { "PASS" } else { "FAIL" }
+        ))
+    };
+    if pdit_core::open_document(RENTAL.to_vec()).is_err() {
+        return check("open", false, String::new());
+    }
+    history::clear();
+    let sizes = || page_ops::page_sizes().unwrap_or_default();
+    let start = sizes();
+    let _ = page_ops::rotate_page(0, true);
+    history::new_step();
+    let _ = page_ops::insert_blank_page(0);
+    let two = sizes();
+    let first = history::undo().ok().flatten();
+    let second = history::undo().ok().flatten();
+    check(
+        "two steps back",
+        two.len() == 2
+            && first
+                .as_ref()
+                .is_some_and(|s| s.len() == 1 && s[0] != start[0])
+            && second.as_ref().is_some_and(|s| *s == start)
+            && !history::can_undo(),
+        format!("{start:?} → {two:?}; undo {first:?}, {second:?}"),
+    );
+    let again = history::redo().ok().flatten();
+    let both = history::redo().ok().flatten();
+    check(
+        "two steps forward again",
+        again
+            .as_ref()
+            .is_some_and(|s| s.len() == 1 && s[0] != start[0])
+            && both.as_ref().is_some_and(|s| s.len() == 2)
+            && !history::can_redo(),
+        format!("redo {again:?}, {both:?}"),
+    );
+    // Without a press in between, quick changes are one step (a drag).
+    history::new_step();
+    let _ = page_ops::rotate_page(0, true);
+    let _ = page_ops::rotate_page(0, true);
+    let back = history::undo().ok().flatten();
+    check(
+        "quick changes are one step",
+        back.as_ref() == both.as_ref(),
+        format!("{back:?} (before them: {both:?})"),
+    );
+    // A new change after Undo drops the Redo steps.
+    let _ = page_ops::delete_page(1);
+    check(
+        "a change after Undo ends Redo",
+        !history::can_redo() && history::can_undo(),
+        String::new(),
     );
 }
 

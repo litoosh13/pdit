@@ -75,7 +75,7 @@ function ReadyBadge({ percent, waiting }) {
   return <Badge size="sm" tone={waiting ? 'warning' : 'info'}>{percent}%</Badge>;
 }
 
-function Frame({ hasDoc, mode, fileName, zoom, pages, canUndo, aiPercent, aiWaiting, aiNow, onMode, onUndo, onZoom, onSave, onPages }) {
+function Frame({ hasDoc, mode, fileName, zoom, pages, canUndo, canRedo, aiPercent, aiWaiting, aiNow, onMode, onUndo, onRedo, onZoom, onSave, onPages }) {
   const current = useCurrentPage(pages);
   const ai = mode === 'ai';
   const fullscreen = () => {
@@ -102,8 +102,7 @@ function Frame({ hasDoc, mode, fileName, zoom, pages, canUndo, aiPercent, aiWait
           </button>
         </div>
         <span className="fr-sep" />
-        {/* No redo history yet (LATER: an app-wide undo history). */}
-        <button type="button" className="fr-icon" aria-label="Redo" title="Redo — not available yet" disabled>
+        <button type="button" className="fr-icon" aria-label="Redo" title="Redo" disabled={!canRedo} onClick={onRedo}>
           <IconRedo />
         </button>
       </div>
@@ -139,7 +138,7 @@ function Frame({ hasDoc, mode, fileName, zoom, pages, canUndo, aiPercent, aiWait
 }
 
 /** Renders the frame into `element`. The app calls `update(state)` when its state changes; the callbacks report
- *  the user's choices (`onMode('edit' | 'ai')`, `onZoom(percent)`, `onUndo`, `onSave`, `onPages`). */
+ *  the user's choices (`onMode('edit' | 'ai')`, `onZoom(percent)`, `onUndo`, `onRedo`, `onSave`, `onPages`). */
 export function mountFrame(element, callbacks = {}) {
   const root = createRoot(element);
   const render = (state) => root.render(<Frame {...state} {...callbacks} />);

@@ -4,7 +4,6 @@
 //! `pdit-watermark`) holding the settings, so pdit can find them again to
 //! show the current settings, replace them, or remove them.
 
-use crate::edit_open::discard_edit;
 use crate::render::with_open;
 use crate::{Error, pdfium};
 use pdfium_render::prelude::*;
@@ -41,7 +40,7 @@ pub struct Watermark {
 
 /// Replaces pdit's header & footer with `hf` (`date` fills `{date}`).
 pub fn set_header_footer(hf: &HeaderFooter, date: &str) -> Result<(), Error> {
-    discard_edit()?;
+    crate::history::before_change()?;
     remove_tagged(HF_TAG)?;
     let params = hf_params(hf);
     with_open(|document| {
@@ -88,7 +87,7 @@ pub fn set_header_footer(hf: &HeaderFooter, date: &str) -> Result<(), Error> {
 
 /// Replaces pdit's watermark with `wm`.
 pub fn set_watermark(wm: &Watermark) -> Result<(), Error> {
-    discard_edit()?;
+    crate::history::before_change()?;
     remove_tagged(WM_TAG)?;
     if wm.text.trim().is_empty() {
         return Ok(());
@@ -129,13 +128,13 @@ pub fn set_watermark(wm: &Watermark) -> Result<(), Error> {
 
 /// Removes pdit's header & footer; returns how many objects went.
 pub fn remove_header_footer() -> Result<usize, Error> {
-    discard_edit()?;
+    crate::history::before_change()?;
     remove_tagged(HF_TAG)
 }
 
 /// Removes pdit's watermark; returns how many objects went.
 pub fn remove_watermark() -> Result<usize, Error> {
-    discard_edit()?;
+    crate::history::before_change()?;
     remove_tagged(WM_TAG)
 }
 

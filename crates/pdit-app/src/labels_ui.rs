@@ -123,7 +123,7 @@ impl PageNumbers {
                     let bytes = js_sys::Uint8Array::new(&value).to_vec();
                     self.edit(|d| d.busy = false);
                     tools.apply_since(before, "Page numbers changed", ICON_TAG, move || {
-                        pdit_core::page_ops::restore(bytes).map(|_| ())
+                        pdit_core::history::replace_document(bytes).map(|_| ())
                     });
                     self.close();
                 }

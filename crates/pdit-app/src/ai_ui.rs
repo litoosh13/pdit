@@ -476,7 +476,9 @@ impl Ai {
                 }
             }
 
-            // 3. Questions. (Form fields are found only when asked: Form → Find fields, P-050 #17.)
+            // 3. Questions. (Form fields are found only when asked: Form → Find fields, P-050 #17.) The OCR text
+            // goes with the document (Ai::ocr_text), so the record is set first.
+            self.record.set(Some(Rc::new(record.clone())));
             self.prepare_questions().await;
             let before = self.analysis.peek().before.clone();
             self.analysis.with_mut(|a| {

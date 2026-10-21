@@ -192,6 +192,7 @@ fn labels(options: &PdfFormFieldOptions<'_>) -> Vec<String> {
 /// Replaces the text of text or combo-box field `annotation` on `page` with `text`,
 /// as if the user had selected all of it and typed `text`.
 pub fn fill_text(page: u16, annotation: usize, text: &str) -> Result<(), Error> {
+    crate::history::before_change()?;
     let mut wide: Vec<u8> = text.encode_utf16().flat_map(u16::to_le_bytes).collect();
     wide.extend([0, 0]); // PDFium reads up to a 16-bit NUL
     with_field(page, annotation, |form, pdf_page| {
@@ -208,6 +209,7 @@ pub fn fill_text(page: u16, annotation: usize, text: &str) -> Result<(), Error> 
 /// Toggles checkbox `annotation`, or selects radio button `annotation`, on `page`,
 /// as if the user had focused it and pressed the space bar.
 pub fn toggle_choice(page: u16, annotation: usize) -> Result<(), Error> {
+    crate::history::before_change()?;
     with_field(page, annotation, |form, pdf_page| {
         // SAFETY: handles are valid for the duration of `with_field`.
         let pressed = unsafe { pdfium().bindings().FORM_OnChar(form, pdf_page, 0x20, 0) };
@@ -220,6 +222,7 @@ pub fn toggle_choice(page: u16, annotation: usize) -> Result<(), Error> {
 
 /// Chooses option `option` (0-based) of combo or list box `annotation` on `page`.
 pub fn select_option(page: u16, annotation: usize, option: usize) -> Result<(), Error> {
+    crate::history::before_change()?;
     let index = i32::try_from(option).map_err(|_| Error::Pdfium("option out of range".into()))?;
     with_field(page, annotation, |form, pdf_page| {
         // SAFETY: handles are valid for the duration of `with_field`.

@@ -85,6 +85,57 @@ pub fn FrameBars() -> Element {
         use_callback(move |ai: bool| frame.set_mode(if ai { Mode::Ai } else { Mode::Edit }));
     let on_zoom = use_callback(move |p: f64| zoom.set(p as f32, None));
     let on_undo = use_callback(move |_: ()| tools.undo_last());
+    let on_redo = use_callback(move |_: ()| tools.redo());
+    // Undo / Redo (P-050 #2): every tool changes the document through the engine, which keeps the history; its
+    // state is read a few times a second. ⌘Z / ⇧⌘Z (Ctrl+Y) go a step, except while typing in a field.
+    use_future(move || async move {
+        loop {
+            tools.sync_history();
+            crate::print_ui::pause(300).await;
+        }
+    });
+    use_hook(move || {
+        use wasm_bindgen::closure::Closure;
+        let on_key =
+            Closure::<dyn FnMut(web_sys::KeyboardEvent)>::new(move |e: web_sys::KeyboardEvent| {
+                if !(e.meta_key() || e.ctrl_key()) {
+                    return;
+                }
+                let typing = e
+                    .target()
+                    .and_then(|t| t.dyn_into::<web_sys::HtmlElement>().ok())
+                    .is_some_and(|t| {
+                        matches!(t.tag_name().as_str(), "INPUT" | "TEXTAREA")
+                            || t.is_content_editable()
+                    });
+                let key = e.key().to_lowercase();
+                let redo = (key == "z" && e.shift_key()) || key == "y";
+                if typing || !(key == "z" || redo) {
+                    return;
+                }
+                e.prevent_default();
+                if redo {
+                    on_redo.call(())
+                } else {
+                    on_undo.call(())
+                }
+            });
+        // A press starts a new Undo step (a drag is one step).
+        let on_press =
+            Closure::<dyn FnMut(web_sys::Event)>::new(move |_| pdit_core::history::new_step());
+        if let Some(window) = web_sys::window() {
+            let _ =
+                window.add_event_listener_with_callback("keydown", on_key.as_ref().unchecked_ref());
+            let _ = window.add_event_listener_with_callback_and_bool(
+                "pointerdown",
+                on_press.as_ref().unchecked_ref(),
+                true,
+            );
+        }
+        // The frame lives as long as the page.
+        on_key.forget();
+        on_press.forget();
+    });
     let on_save = use_callback(move |_: ()| crate::save_current());
     let on_pages =
         use_callback(move |_: ()| consume_context::<crate::tools_ui::Tools>().open_pages());
@@ -120,7 +171,7 @@ pub fn FrameBars() -> Element {
             .map(|d| (d.name.clone(), d.page_sizes.len())),
         (frame.mode)(),
         *zoom.percent.read(),
-        tools.can_undo(),
+        (tools.can_undo(), tools.can_redo()),
         {
             let a = ai.analysis();
             a.percent().map(|p| (p, a.needs_models(), a.now()))
@@ -132,7 +183,7 @@ pub fn FrameBars() -> Element {
         let Some(update) = push.borrow().clone() else {
             return;
         };
-        let (doc, mode, percent, can_undo, ready) = state;
+        let (doc, mode, percent, (can_undo, can_redo), ready) = state;
         let s = Object::new();
         let _ = Reflect::set(&s, &"hasDoc".into(), &doc.is_some().into());
         if let Some((name, pages)) = doc {
@@ -143,6 +194,7 @@ pub fn FrameBars() -> Element {
         let _ = Reflect::set(&s, &"mode".into(), &mode.into());
         let _ = Reflect::set(&s, &"zoom".into(), &f64::from(percent).into());
         let _ = Reflect::set(&s, &"canUndo".into(), &can_undo.into());
+        let _ = Reflect::set(&s, &"canRedo".into(), &can_redo.into());
         // How ready the AI is (D-066): the AI tab's badge.
         if let Some((pct, waiting, now)) = ready {
             let _ = Reflect::set(&s, &"aiPercent".into(), &f64::from(pct).into());
@@ -175,6 +227,7 @@ pub fn FrameBars() -> Element {
                         }
                     }));
                     on("onUndo", Closure::new(move |_| on_undo.call(())));
+                    on("onRedo", Closure::new(move |_| on_redo.call(())));
                     on("onSave", Closure::new(move |_| on_save.call(())));
                     on("onPages", Closure::new(move |_| on_pages.call(())));
                     match crate::island::mount_with(&element, "mountFrame", &options).await {

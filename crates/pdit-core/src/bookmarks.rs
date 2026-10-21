@@ -68,6 +68,7 @@ pub fn bookmarks() -> Result<Vec<Bookmark>, Error> {
 /// them). A level more than one deeper than the bookmark before it is
 /// treated as one deeper.
 pub fn set_bookmarks(list: &[Bookmark]) -> Result<(), Error> {
+    crate::history::before_change()?;
     let bytes = crate::page_ops::snapshot()?;
     let written = write_outline(bytes, list)
         .map_err(|e| Error::Pdfium(format!("could not write the bookmarks: {e}")))?;

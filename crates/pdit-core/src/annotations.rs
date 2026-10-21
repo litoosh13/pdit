@@ -3,7 +3,6 @@
 //! Also the page's words with their boxes, for selecting text to mark.
 //! Every change first drops a previewed text edit, like the page ops.
 
-use crate::edit_open::discard_edit;
 use crate::render::with_open;
 use crate::{Error, inspect};
 use pdfium_render::prelude::*;
@@ -97,7 +96,7 @@ pub fn add_markup(
     let Some(&first) = rects.first() else {
         return Err(Error::Pdfium("nothing selected to mark".into()));
     };
-    discard_edit()?;
+    crate::history::before_change()?;
     let bounds = rects.iter().fold(first, |a, &b| union(a, b));
     with_open(|document| {
         let mut pdf_page = document.pages().get(page.into())?;
@@ -129,7 +128,7 @@ pub fn add_markup(
 /// Adds a sticky note with `text` whose icon's top-left is at (`x`, `top`).
 /// Returns its index. No author is set (D-040).
 pub fn add_note(page: u16, x: f32, top: f32, text: &str) -> Result<usize, Error> {
-    discard_edit()?;
+    crate::history::before_change()?;
     with_open(|document| {
         let mut pdf_page = document.pages().get(page.into())?;
         let mut note = pdf_page.annotations_mut().create_text_annotation(text)?;
@@ -142,7 +141,7 @@ pub fn add_note(page: u16, x: f32, top: f32, text: &str) -> Result<usize, Error>
 
 /// Replaces the text of the note at `index`.
 pub fn set_note_text(page: u16, index: usize, text: &str) -> Result<(), Error> {
-    discard_edit()?;
+    crate::history::before_change()?;
     with_open(|document| {
         let pdf_page = document.pages().get(page.into())?;
         let mut note = pdf_page
@@ -156,7 +155,7 @@ pub fn set_note_text(page: u16, index: usize, text: &str) -> Result<(), Error> {
 
 /// Recolours the markup at `index`.
 pub fn set_markup_color(page: u16, index: usize, color: [u8; 3]) -> Result<(), Error> {
-    discard_edit()?;
+    crate::history::before_change()?;
     with_open(|document| {
         let pdf_page = document.pages().get(page.into())?;
         let mut markup = pdf_page
@@ -170,7 +169,7 @@ pub fn set_markup_color(page: u16, index: usize, color: [u8; 3]) -> Result<(), E
 
 /// Deletes the note or markup at `index`.
 pub fn delete_annotation(page: u16, index: usize) -> Result<(), Error> {
-    discard_edit()?;
+    crate::history::before_change()?;
     with_open(|document| {
         let mut pdf_page = document.pages().get(page.into())?;
         let annotations = pdf_page.annotations_mut();
@@ -193,7 +192,7 @@ pub fn add_ink(
     if points.len() < 2 {
         return Err(Error::Pdfium("a drawing needs at least two points".into()));
     }
-    discard_edit()?;
+    crate::history::before_change()?;
     let pad = width_pt.max(0.5);
     let bounds = points.iter().fold(
         [f32::MAX, f32::MAX, f32::MIN, f32::MIN],
@@ -286,7 +285,7 @@ pub fn add_stamp(
     const PAD_Y: f32 = 5.0;
     const LINE_PT: f32 = 2.0;
     const TILT_DEG: f32 = 6.0;
-    discard_edit()?;
+    crate::history::before_change()?;
     let label = label.to_uppercase();
     let pt = PdfPoints::new;
     with_open(|document| {

@@ -44,6 +44,7 @@ const COMBO_FLAGS: i64 = 131072;
 /// Adds a field on `page` at `rect` ([left, bottom, right, top] in points).
 /// Names must be new, except a radio button joining its group.
 pub fn add_field(page: u16, kind: &NewField, rect: [f32; 4], name: &str) -> Result<(), Error> {
+    crate::history::before_change()?;
     let name = name.trim();
     if name.is_empty() {
         return Err(Error::Pdfium("a field needs a name".into()));
@@ -121,6 +122,7 @@ pub fn add_field(page: u16, kind: &NewField, rect: [f32; 4], name: &str) -> Resu
 /// A move keeps the field's look as it is; a resize redraws it, and a value it
 /// holds is filled in again (cleared first, so PDFium draws it anew).
 pub fn set_field_rect(page: u16, index: usize, old: [f32; 4], rect: [f32; 4]) -> Result<(), Error> {
+    crate::history::before_change()?;
     let size = |r: [f32; 4]| ((r[2] - r[0]).abs(), (r[3] - r[1]).abs());
     let resized = {
         let ((w0, h0), (w1, h1)) = (size(old), size(rect));
@@ -174,6 +176,7 @@ pub fn set_field_settings(
     rect: [f32; 4],
     settings: &FieldSettings,
 ) -> Result<(), Error> {
+    crate::history::before_change()?;
     let name = settings.name.trim();
     if name.is_empty() {
         return Err(Error::Pdfium("a field needs a name".into()));
@@ -259,6 +262,7 @@ pub fn set_field_settings(
 /// Deletes the field at `index` on `page` (at `rect`). A radio button leaves
 /// its group; the group goes with its last button.
 pub fn delete_field(page: u16, index: usize, rect: [f32; 4]) -> Result<(), Error> {
+    crate::history::before_change()?;
     edit(|inc, pages| {
         let page_id = pages[usize::from(page)];
         let widget = widget_at(inc, pages, page, index, rect)?;

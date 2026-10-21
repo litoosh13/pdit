@@ -34,7 +34,7 @@ pub fn is_scan_page(page: u16) -> Result<bool, Error> {
 #[cfg(target_arch = "wasm32")]
 /// Cleans the scan on `page`; false when the page isn't one.
 pub fn clean_scan(page: u16) -> Result<bool, Error> {
-    crate::edit_open::discard_edit()?;
+    crate::history::before_change()?;
     with_open(|document| {
         let mut pdf_page = document.pages().get(page.into())?;
         let Some(index) = largest_image(&pdf_page)? else {

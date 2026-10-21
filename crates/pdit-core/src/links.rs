@@ -4,7 +4,6 @@
 //! with lopdf (D-045). Every change first drops a previewed text edit.
 
 use crate::annotations::{pdf_rect, quad, rect, union};
-use crate::edit_open::discard_edit;
 use crate::render::{open_document, with_open};
 use crate::{Error, pdfium};
 use pdfium_render::prelude::*;
@@ -82,7 +81,7 @@ pub fn add_web_link(page: u16, rects: &[[f32; 4]], url: &str) -> Result<usize, E
         return Err(Error::Pdfium("nothing selected to link".into()));
     };
     let url = checked(url)?;
-    discard_edit()?;
+    crate::history::before_change()?;
     let bounds = rects.iter().fold(first, |a, &b| union(a, b));
     let index = with_open(|document| {
         let mut pdf_page = document.pages().get(page.into())?;
@@ -107,7 +106,7 @@ pub fn add_web_link(page: u16, rects: &[[f32; 4]], url: &str) -> Result<usize, E
 /// Points the link at `index` to `url` (an address [`normalize_url`] accepts).
 pub fn set_web_link(page: u16, index: usize, url: &str) -> Result<(), Error> {
     let url = checked(url)?;
-    discard_edit()?;
+    crate::history::before_change()?;
     with_link(page, index, |annot| unsafe {
         let bindings = pdfium().bindings();
         if bindings.is_true(bindings.FPDFAnnot_SetURI(annot, &url)) {
@@ -206,7 +205,7 @@ fn append_page_link(
 
 /// Removes the link at `index`.
 pub fn delete_link(page: u16, index: usize) -> Result<(), Error> {
-    discard_edit()?;
+    crate::history::before_change()?;
     with_open(|document| {
         let mut pdf_page = document.pages().get(page.into())?;
         let annotations = pdf_page.annotations_mut();

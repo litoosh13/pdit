@@ -35,7 +35,7 @@ pub fn restore(snapshot: Vec<u8>) -> Result<Vec<(f32, f32)>, Error> {
 
 /// Turns page `index` a quarter turn clockwise, or anticlockwise.
 pub fn rotate_page(index: u16, clockwise: bool) -> Result<(), Error> {
-    discard_edit()?;
+    crate::history::before_change()?;
     with_open(|document| {
         let mut page = document.pages().get(index.into())?;
         let quarter_turns = match page.rotation()? {
@@ -57,7 +57,7 @@ pub fn rotate_page(index: u16, clockwise: bool) -> Result<(), Error> {
 
 /// Inserts an empty page after page `index`, the same size as that page.
 pub fn insert_blank_page(index: u16) -> Result<(), Error> {
-    discard_edit()?;
+    crate::history::before_change()?;
     with_open(|document| {
         let size = document.pages().page_size(index.into())?;
         let paper = PdfPagePaperSize::from_points(size.width(), size.height());
@@ -70,6 +70,7 @@ pub fn insert_blank_page(index: u16) -> Result<(), Error> {
 
 /// Inserts a copy of page `index` right after it.
 pub fn duplicate_page(index: u16) -> Result<(), Error> {
+    crate::history::before_change()?;
     // PDFium copies pages between documents, so the page comes from a
     // temporary copy of the open document.
     let copy = snapshot()?;
@@ -97,6 +98,7 @@ pub fn move_page(from: u16, to: u16) -> Result<(), Error> {
     if from == to {
         return Ok(());
     }
+    crate::history::before_change()?;
     let copy = snapshot()?;
     with_open(|document| {
         let count = document.pages().len();
@@ -133,7 +135,7 @@ pub fn add_image(
     top_pt: f32,
     width_pt: f32,
 ) -> Result<(), Error> {
-    discard_edit()?;
+    crate::history::before_change()?;
     let img = image::load_from_memory(&bytes)
         .map_err(|e| Error::Pdfium(format!("could not read the image: {e}")))?;
     let (px_w, px_h) = (img.width().max(1), img.height().max(1));
@@ -156,7 +158,7 @@ pub fn add_image(
 /// Replaces page `index`'s content with a picture of itself, `width_px` wide
 /// (like a scan: no text of its own afterwards). Annotations stay.
 pub fn rasterize_page(index: u16, width_px: u32) -> Result<(), Error> {
-    discard_edit()?;
+    crate::history::before_change()?;
     let image = crate::render_page(index, width_px)?;
     let (w, h) = (image.width(), image.height());
     let pixels = image::RgbaImage::from_raw(w, h, image.data().to_vec())
@@ -205,7 +207,7 @@ pub fn add_shape(
     width_pt: f32,
     fill: Option<[u8; 3]>,
 ) -> Result<(), Error> {
-    discard_edit()?;
+    crate::history::before_change()?;
     let color = |[r, g, b]: [u8; 3]| PdfColor::new(r, g, b, 255);
     with_open(|document| {
         let mut pdf_page = document.pages().get(page.into())?;
@@ -293,7 +295,7 @@ pub fn add_table(
     let (bottom, top) = (y1.min(y2), y1.max(y2));
     let col_widths = vec![(right - left) / f32::from(cols); cols.into()];
     let row_heights = vec![(top - bottom) / f32::from(rows); rows.into()];
-    discard_edit()?;
+    crate::history::before_change()?;
     draw_grid(page, left, top, &col_widths, &row_heights, stroke, width_pt)
 }
 
@@ -356,7 +358,7 @@ pub fn replace_table(
             "a table needs 1 to 100 rows and columns".into(),
         ));
     }
-    discard_edit()?;
+    crate::history::before_change()?;
     let (old_xs, old_ys, new_xs, new_ys) = (old.xs(), old.ys(), new.xs(), new.ys());
     let [left, bottom, right, top] = old.bounds();
     with_open(|document| {
@@ -504,7 +506,7 @@ pub fn move_image(
     dx_pt: f32,
     dy_pt: f32,
 ) -> Result<[f32; 4], Error> {
-    discard_edit()?;
+    crate::history::before_change()?;
     with_open(|document| {
         let mut pdf_page = document.pages().get(page.into())?;
         let mut object = pdf_page.objects_mut().get(object_index)?;
@@ -522,7 +524,7 @@ pub fn move_image(
 /// [`move_image`] if it needs a fixed anchor. Size is correct regardless.
 // ponytail: scale about origin, not object centre — UI re-anchors via move_image + returned bounds. Anchor in-engine only if a caller needs it.
 pub fn resize_image(page: u16, object_index: usize, width_pt: f32) -> Result<[f32; 4], Error> {
-    discard_edit()?;
+    crate::history::before_change()?;
     with_open(|document| {
         let mut pdf_page = document.pages().get(page.into())?;
         let mut object = pdf_page.objects_mut().get(object_index)?;
@@ -544,7 +546,7 @@ pub fn resize_image(page: u16, object_index: usize, width_pt: f32) -> Result<[f3
 /// Rotation is about the PDF page origin, so the object's position shifts; the
 /// caller repositions with [`move_image`] using the returned bounds if needed.
 pub fn rotate_image(page: u16, object_index: usize, degrees: f32) -> Result<[f32; 4], Error> {
-    discard_edit()?;
+    crate::history::before_change()?;
     with_open(|document| {
         let mut pdf_page = document.pages().get(page.into())?;
         let mut object = pdf_page.objects_mut().get(object_index)?;
@@ -556,7 +558,7 @@ pub fn rotate_image(page: u16, object_index: usize, degrees: f32) -> Result<[f32
 /// Deletes the object at `object_index` on `page` (any kind: a selected image
 /// from [`image_at`], D-023a). The removed object is dropped, freeing it.
 pub fn delete_image(page: u16, object_index: usize) -> Result<(), Error> {
-    discard_edit()?;
+    crate::history::before_change()?;
     with_open(|document| {
         let mut pdf_page = document.pages().get(page.into())?;
         pdf_page
@@ -570,7 +572,7 @@ pub fn delete_image(page: u16, object_index: usize) -> Result<(), Error> {
 /// (the crop frame over its bounds). The pixels outside are cut away and the rest stays where it was on the page
 /// (turned pictures included). Returns the new bounds [left, bottom, right, top].
 pub fn crop_image(page: u16, object_index: usize, frame: [f32; 4]) -> Result<[f32; 4], Error> {
-    discard_edit()?;
+    crate::history::before_change()?;
     with_open(|document| {
         let mut pdf_page = document.pages().get(page.into())?;
         let mut object = pdf_page.objects_mut().get(object_index)?;
@@ -640,7 +642,7 @@ fn image_pixels(
 /// stamp or handwriting photographed on paper); paper and light printed lines become transparent
 /// ([`crate::scan_clean::ink_only`]). Place and size don't change.
 pub fn remove_image_background(page: u16, object_index: usize) -> Result<(), Error> {
-    discard_edit()?;
+    crate::history::before_change()?;
     with_open(|document| {
         let mut pdf_page = document.pages().get(page.into())?;
         let mut object = pdf_page.objects_mut().get(object_index)?;
@@ -792,7 +794,7 @@ pub fn content_bounds(index: u16) -> Result<Option<[f32; 4]>, Error> {
 /// whole page) of page `index` (D-070): the crop box. Nothing is deleted; the
 /// whole page's rect shows everything again.
 pub fn crop_page(index: u16, rect: [f32; 4]) -> Result<(), Error> {
-    discard_edit()?;
+    crate::history::before_change()?;
     let (_, whole) = page_boxes(index)?;
     let [l, b, r, t] = [
         rect[0].max(whole[0]),
@@ -813,7 +815,7 @@ pub fn crop_page(index: u16, rect: [f32; 4]) -> Result<(), Error> {
 
 /// Deletes page `index`. The last page can't be deleted.
 pub fn delete_page(index: u16) -> Result<(), Error> {
-    discard_edit()?;
+    crate::history::before_change()?;
     with_open(|document| {
         if document.pages().len() <= 1 {
             return Err(Error::Pdfium("a PDF needs at least one page".into()));
@@ -890,7 +892,7 @@ pub fn blank_document() -> Vec<u8> {
 
 /// Inserts all pages of the PDF `bytes` after page `index`; returns how many.
 pub fn insert_pdf(bytes: Vec<u8>, index: u16) -> Result<usize, Error> {
-    discard_edit()?;
+    crate::history::before_change()?;
     with_open(|document| {
         reserve_for_pdfium_copy(bytes.len());
         let source = pdfium().load_pdf_from_byte_vec(bytes, None)?;

@@ -199,6 +199,8 @@ fn show_document(
     ai_ui::opened_file(&bytes);
     match pdit_core::open_document(bytes) {
         Ok(page_sizes) => {
+            // Another file: nothing to undo (P-050 #2).
+            pdit_core::history::clear();
             editing.state.set(Default::default());
             // Only counts are logged: document contents stay out of the console.
             log(&format!(

@@ -151,11 +151,11 @@ impl FindFields {
 
     /// Undo: the document as before.
     fn undo(mut self) {
-        let Stage::Added { before, .. } = self.stage.peek().clone() else {
+        if !matches!(*self.stage.peek(), Stage::Added { .. }) {
             return;
-        };
+        }
         consume_context::<crate::form_edit_ui::FormEdit>().finish();
-        consume_context::<PageTools>().restore_snapshot(&before);
+        consume_context::<PageTools>().undo_last();
         self.stage.set(Stage::Idle);
     }
 

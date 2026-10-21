@@ -243,7 +243,7 @@ impl Editing {
             return Err("no document came back".into());
         }
         tools.apply_since(before, "Text changed", ICON_TEXT_CHANGED, move || {
-            pdit_core::page_ops::restore(bytes).map(|_| ())
+            pdit_core::history::replace_document(bytes).map(|_| ())
         });
         Ok(())
     }
@@ -290,7 +290,7 @@ impl Editing {
         self.typing.set(false);
         self.state.set(EditState::default());
         tools.apply_since(before, "Text added", ICON_TEXT_CHANGED, move || {
-            pdit_core::page_ops::restore(bytes).map(|_| ())
+            pdit_core::history::replace_document(bytes).map(|_| ())
         });
         Ok(())
     }

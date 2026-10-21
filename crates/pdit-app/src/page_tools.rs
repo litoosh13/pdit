@@ -116,6 +116,8 @@ pub struct PageTools {
     /// The table as it was before the last table step, which the toast's Undo
     /// brings back (`None` after a draw: Undo removes the table).
     table_before: Signal<Option<TableSelection>>,
+    /// Whether Undo / Redo can go a step (P-050 #2: the engine's history, read by [`Self::sync_history`]).
+    undoable: Signal<(bool, bool)>,
 }
 
 impl PageTools {
@@ -130,6 +132,7 @@ impl PageTools {
             drag_undo: Signal::new(None),
             table: Signal::new(None),
             table_before: Signal::new(None),
+            undoable: Signal::new((false, false)),
         })
     }
 
@@ -902,46 +905,76 @@ impl PageTools {
         });
     }
 
-    /// The last page-tool step can be undone (the centre bar's Undo, D-062).
+    /// A step can be undone / redone (the centre bar, D-062; the engine's history, P-050 #2).
     pub fn can_undo(&self) -> bool {
-        self.toast.read().as_ref().is_some_and(|t| t.undo.is_some())
+        self.undoable.read().0
     }
 
-    /// The centre bar's Undo: the same as the last toast's Undo.
+    pub fn can_redo(&self) -> bool {
+        self.undoable.read().1
+    }
+
+    /// Reads the engine's history again (it changes from every tool, so the frame calls this often).
+    pub fn sync_history(mut self) {
+        let now = (
+            pdit_core::history::can_undo(),
+            pdit_core::history::can_redo(),
+        );
+        if *self.undoable.peek() != now {
+            self.undoable.set(now);
+        }
+    }
+
+    /// The centre bar's Undo, ⌘Z, and a toast's Undo: one step back.
     pub fn undo_last(self) {
         self.undo();
     }
 
-    fn undo(mut self) {
-        let Some(toast) = self.toast.peek().clone() else {
-            return;
-        };
-        self.table.set(None);
-        self.hide(toast.id);
-        let Some(snapshot) = toast.undo else {
-            return;
-        };
-        // Used once: a second Undo must not restore the same snapshot again.
+    fn undo(self) {
+        self.step(true);
+    }
+
+    /// The centre bar's Redo, ⇧⌘Z: one step forward again.
+    pub fn redo(self) {
+        self.step(false);
+    }
+
+    fn step(mut self, back: bool) {
+        let toast = self.toast.peek().as_ref().map(|t| t.id);
+        if let Some(id) = toast {
+            self.hide(id);
+        }
         self.toast.with_mut(|t| {
             if let Some(t) = t.as_mut() {
                 t.undo = None;
             }
         });
-        let before = self
-            .table_before
-            .peek()
-            .clone()
-            .map(|t| TableSelection { shown: true, ..t });
+        // Undoing a table step brings back the table it grew from.
+        let table = match back {
+            true => self
+                .table_before
+                .peek()
+                .clone()
+                .map(|t| TableSelection { shown: true, ..t }),
+            false => None,
+        };
+        self.table.set(None);
+        self.image_selection.set(None);
         consume_context::<Editing>().cancel();
-        match page_ops::restore(snapshot.as_ref().clone()) {
-            Ok(sizes) => {
+        let result = match back {
+            true => pdit_core::history::undo(),
+            false => pdit_core::history::redo(),
+        };
+        match result {
+            Ok(Some(sizes)) => {
                 refresh(sizes);
-                // Undoing a table step brings back the table it grew from.
-                self.table.set(before);
+                self.table.set(table);
                 self.table_before.set(None);
             }
-            Err(error) => crate::log(&format!("pdit: could not undo: {error}")),
+            Ok(None) => {}
+            Err(error) => crate::log(&format!("pdit: could not undo / redo: {error}")),
         }
+        self.sync_history();
     }
 }
 

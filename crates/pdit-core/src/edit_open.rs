@@ -664,7 +664,7 @@ fn preview_replace(
     style: Option<&TextStyle>,
     fonts: &Fonts<'_>,
 ) -> Result<EditPreview, Error> {
-    discard_edit()?;
+    crate::history::before_change()?;
     with_open(|document| {
         let mut pdf_page = document.pages().get(page.into())?;
         let base = with_underline(&pdf_page, index)?;
@@ -833,7 +833,7 @@ fn reflow(
     fonts: &Fonts<'_>,
     wrap: bool,
 ) -> Result<EditPreview, Error> {
-    discard_edit()?;
+    crate::history::before_change()?;
     let mut idx: Vec<usize> = indices.to_vec();
     idx.sort_unstable();
     idx.dedup();
@@ -1021,7 +1021,7 @@ pub fn preview_add_wrapped(
     fonts: &Fonts<'_>,
     width: f32,
 ) -> Result<AddPreview, Error> {
-    discard_edit()?;
+    crate::history::before_change()?;
     with_open(|document| {
         let mut pdf_page = document.pages().get(page.into())?;
         let mut base = nearest_base(&pdf_page, x, y)?;
@@ -1250,7 +1250,7 @@ pub struct LayerWord {
 /// so Find, select and copy work and other apps can search it too. Words Noto
 /// Sans can't show (Arabic script) are left out. Returns how many were added.
 pub fn add_text_layer(page: u16, words: &[LayerWord], noto_sans: &[u8]) -> Result<usize, Error> {
-    discard_edit()?;
+    crate::history::before_change()?;
     let words: Vec<&LayerWord> = words
         .iter()
         .filter(|w| !w.text.trim().is_empty() && crate::subset::covers(noto_sans, &w.text))
