@@ -2201,8 +2201,8 @@ checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 
 [[package]]
 name = "leafmind-fields"
-version = "0.7.0"
-source = "git+https://github.com/litoosh13/leafmind?tag=v0.7.0#a717f46aa802688bd9dd319e1c158ab6b62ff061"
+version = "0.8.1"
+source = "git+https://github.com/litoosh13/leafmind?tag=v0.8.1#2e385d944ccba5fc047fb1af756acc55d876412d"
 dependencies = [
  "getrandom 0.4.3",
  "tract-onnx",

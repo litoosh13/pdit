@@ -33,6 +33,7 @@ const WRAPPED: &[u8] = include_bytes!("../../../fixtures/synthetic-wrapped.pdf")
 const FORM: &[u8] = include_bytes!("../../../fixtures/synthetic-form.pdf");
 const SPLIT: &[u8] = include_bytes!("../../../fixtures/synthetic-split-lines.pdf");
 const SCAN: &[u8] = include_bytes!("../../../fixtures/synthetic-scan.pdf");
+const ROWS: &[u8] = include_bytes!("../../../fixtures/synthetic-rows.pdf");
 
 pub async fn run(font_url: &str) {
     let font = match fetch_bytes(font_url).await {
@@ -2016,6 +2017,48 @@ async fn ask_session() {
             ok,
             format!("{text} in {:.0} ms", js_sys::Date::now() - started),
         );
+    }
+    // A form of "LABEL: value" rows in capitals (leafmind 0.8.1): each answer is its own row — read from the PDF's
+    // text (R-007) and as a scan's OCR text gives it (one row per line, R-005). With a page of prose after it the
+    // rows aren't answered yet (R-006); add ("scan + prose page", [rows, prose]) when leafmind does.
+    let rows = "GARDEN CLUB REGISTRATION\nMEMBER NAME: Robin Example\nCLUB NAME: Mossbury Allotment Society\n\
+        CLUB ADDRESS: 3 Orchard Road, Mossbury\nPLOT SIZE: Half plot\nSTART OF SEASON: 1 March 2027\n\
+        YEARLY FEE: 45 Euro\nWATER ACCESS: Shared tap";
+    for (how, ocr) in [
+        ("text PDF", Vec::new()),
+        ("scan", vec![(1u32, rows.to_owned())]),
+    ] {
+        let mut body = match ocr.is_empty() {
+            true => Vec::new(),
+            false => serde_json::to_vec(&ocr).unwrap_or_default(),
+        };
+        let ocr_len = body.len();
+        body.extend(ROWS);
+        let indexed =
+            desktop::invoke_raw("qa_index", &body, &[("x-ocr", ocr_len.to_string())]).await;
+        for (question, want) in [
+            ("Club address?", "3 Orchard Road"),
+            ("What is the club address?", "3 Orchard Road"),
+            ("Club name?", "Mossbury Allotment Society"),
+            ("Yearly fee?", "45 Euro"),
+        ] {
+            let args = Object::new();
+            let _ = Reflect::set(&args, &"question".into(), &question.into());
+            let reply = desktop::invoke("qa_ask", &args).await.unwrap_or_default();
+            let text = js_sys::JSON::stringify(&reply)
+                .ok()
+                .and_then(|s| s.as_string())
+                .unwrap_or_default();
+            // The row alone: no other row's label in the answer.
+            let others = ["MEMBER", "PLOT", "SEASON", "WATER"]
+                .iter()
+                .any(|label| text.contains(label));
+            check(
+                &format!("form row ({how}): {question}"),
+                text.contains("\"found\"") && text.contains(want) && !others,
+                format!("{indexed:?}; {text}"),
+            );
+        }
     }
     // A scan: the rental page as a picture, read by OCR (its text layer is invisible, which leafmind's PDF reader
     // skips), so its OCR text goes along (x-ocr).
