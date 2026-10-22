@@ -33,6 +33,12 @@ percent-encoding = "2"
 # Own workspace: Tauri's native dependencies stay out of the web (wasm) build.
 [workspace]
 
+# MuPDF is built in its Release configuration in debug builds too: its Debug one links the debug C runtime, which
+# clashes on Windows with the static runtime Tauri links (LNK2005 __CxxFrameHandler3; mupdf-sys picks Debug below
+# opt-level 2).
+[profile.dev.package.mupdf-sys]
+opt-level = 3
+
 [profile.release]
 lto = true
 codegen-units = 1

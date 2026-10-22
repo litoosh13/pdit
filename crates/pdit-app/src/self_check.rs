@@ -1635,6 +1635,9 @@ async fn scan_session() {
     if !crate::ai_ui::desktop::available() {
         return log("pdit self-check: scans: OCR skipped (not the desktop app)");
     }
+    if !ocr_available().await {
+        return log("pdit self-check: scans: OCR skipped (OCR is macOS-only for now)");
+    }
     let language = crate::ai_ui::desktop::language(0).await;
     let words = crate::ai_ui::desktop::read(0, language.unwrap_or("eng")).await;
     let font = crate::fetch_bytes(&crate::FALLBACK_FONT.to_string())
@@ -2062,7 +2065,9 @@ async fn ask_session() {
     }
     // A scan: the rental page as a picture, read by OCR (its text layer is invisible, which leafmind's PDF reader
     // skips), so its OCR text goes along (x-ocr).
-    if pdit_core::open_document(RENTAL.to_vec()).is_ok()
+    if !ocr_available().await {
+        log("pdit self-check: ask: a question on a scan skipped (OCR is macOS-only for now)");
+    } else if pdit_core::open_document(RENTAL.to_vec()).is_ok()
         && pdit_core::page_ops::rasterize_page(0, 1240).is_ok()
         && let Ok((words, text)) = desktop::read(0, "eng").await
     {
@@ -3392,6 +3397,15 @@ fn edit_session(font: &[u8]) {
         Err(error) => check("save", false, error.to_string()),
     }
     pdit_core::close_document();
+}
+
+/// The desktop app can read scans (Tesseract is bundled on macOS only).
+async fn ocr_available() -> bool {
+    crate::ai_ui::desktop::invoke("ocr_available", &js_sys::Object::new())
+        .await
+        .ok()
+        .and_then(|v| v.as_bool())
+        == Some(true)
 }
 
 async fn fetch_bytes(url: &str) -> Result<Vec<u8>, wasm_bindgen::JsValue> {
