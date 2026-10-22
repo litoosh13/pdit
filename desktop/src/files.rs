@@ -15,6 +15,8 @@ static FOLDER: Mutex<Option<PathBuf>> = Mutex::new(None);
 
 /// The PDF last dropped onto the window, waiting for the app to take it.
 static DROPPED: Mutex<Option<PathBuf>> = Mutex::new(None);
+/// The picture (PNG, JPEG) last dropped onto the window, for the app to place on the current page.
+static DROPPED_IMAGE: Mutex<Option<PathBuf>> = Mutex::new(None);
 /// The open document's file (dropped onto the window).
 static OPENED: Mutex<Option<PathBuf>> = Mutex::new(None);
 
@@ -27,6 +29,30 @@ pub fn dropped(path: &std::path::Path) -> bool {
         *d = Some(path.to_path_buf());
     }
     pdf
+}
+
+/// A picture dropped onto the window: kept when it is a PNG or JPEG; true then.
+pub fn dropped_image(path: &std::path::Path) -> bool {
+    let picture = path.extension().is_some_and(|e| {
+        ["png", "jpg", "jpeg"]
+            .iter()
+            .any(|t| e.eq_ignore_ascii_case(t))
+    });
+    if picture && let Ok(mut d) = DROPPED_IMAGE.lock() {
+        *d = Some(path.to_path_buf());
+    }
+    picture
+}
+
+/// The dropped picture's bytes (once); empty when none waits.
+#[tauri::command]
+pub fn take_dropped_image() -> Result<tauri::ipc::Response, String> {
+    let path = DROPPED_IMAGE.lock().map_err(|_| "busy")?.take();
+    let bytes = match path {
+        Some(path) => std::fs::read(path).map_err(|e| e.to_string())?,
+        None => Vec::new(),
+    };
+    Ok(tauri::ipc::Response::new(bytes))
 }
 
 /// The dropped PDF becomes the open document; returns its file name, or None when nothing waits.

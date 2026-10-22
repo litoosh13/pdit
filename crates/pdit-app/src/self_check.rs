@@ -3142,6 +3142,18 @@ fn page_session() {
                 matches!(&rotated, Ok(bb) if centred(bb)),
                 format!("{rotated:?} vs centre ({cx:.0},{cy:.0})"),
             );
+            // Fit to page: the (rotated) picture covers the whole page.
+            let (w, h_pt) = pages::page_sizes()
+                .ok()
+                .and_then(|s| s.first().copied())
+                .unwrap_or_default();
+            let fitted = pages::fit_image_to_page(0, h.object_index);
+            check(
+                "fit image to page covers the page",
+                matches!(&fitted, Ok([l, b, r, t]) if l.abs() < 0.5 && b.abs() < 0.5
+                    && (r - w).abs() < 0.5 && (t - h_pt).abs() < 0.5),
+                format!("{fitted:?} vs page {w}×{h_pt}"),
+            );
             let before = pages::page_sizes().ok();
             let deleted = pages::delete_image(0, h.object_index);
             check(

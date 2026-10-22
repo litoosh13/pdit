@@ -101,7 +101,9 @@ fn App() -> Element {
     use_close_on_outside(editing);
     use_close_popups();
     use_hook(install_offline);
-    use_hook(move || listen_for_drops(editing, document, engine_ready));
+    let on_image =
+        use_callback(move |bytes: Vec<u8>| consume_context::<PageTools>().drop_image(bytes));
+    use_hook(move || listen_for_drops(editing, document, engine_ready, on_image));
     use_hook(|| {
         spawn(async move {
             match pdit_core::engine::start(&PDFIUM_JS.to_string(), &PDFIUM_WASM.to_string()).await {
@@ -401,12 +403,14 @@ fn use_close_popups() {
     });
 }
 
-/// A PDF dragged onto pdit opens (P-050 #1). Online: the browser's drop event. Desktop: the window catches the
-/// drop (and keeps the file's path) and calls `window.__pditDropped`, which fetches the file.
+/// A PDF dragged onto pdit opens (P-050 #1); a picture (PNG, JPEG) lands on the page being looked at. Online: the
+/// browser's drop event. Desktop: the window catches the drop (and keeps the file's path) and calls
+/// `window.__pditDropped` / `window.__pditDroppedImage`, which fetch the file.
 fn listen_for_drops(
     editing: Editing,
     document: Signal<Option<OpenDocument>>,
     engine_ready: Signal<bool>,
+    on_image: Callback<Vec<u8>>,
 ) {
     use js_sys::{Promise, Reflect};
     use wasm_bindgen::closure::Closure;
@@ -436,6 +440,23 @@ fn listen_for_drops(
         });
         let _ = Reflect::set(&window, &"__pditDropped".into(), dropped.as_ref());
         dropped.forget();
+        let image = Closure::<dyn FnMut()>::new(move || {
+            wasm_bindgen_futures::spawn_local(async move {
+                match ai_ui::desktop::invoke("take_dropped_image", &js_sys::Object::new()).await {
+                    Ok(buffer) => {
+                        let bytes = js_sys::Uint8Array::new(&buffer).to_vec();
+                        if !bytes.is_empty() && document.peek().is_some() {
+                            on_image.call(bytes);
+                        }
+                    }
+                    Err(error) => log(&format!(
+                        "pdit: could not read the dropped picture: {error:?}"
+                    )),
+                }
+            });
+        });
+        let _ = Reflect::set(&window, &"__pditDroppedImage".into(), image.as_ref());
+        image.forget();
         return;
     }
     // Online: allow dropping anywhere, then open the first PDF dropped.
@@ -453,7 +474,9 @@ fn listen_for_drops(
             .ok()
             .and_then(|n| n.as_string())
             .unwrap_or_default();
-        if !name.to_lowercase().ends_with(".pdf") {
+        let lower = name.to_lowercase();
+        let picture = [".png", ".jpg", ".jpeg"].iter().any(|e| lower.ends_with(e));
+        if !lower.ends_with(".pdf") && !(picture && document.peek().is_some()) {
             return;
         }
         let read = Reflect::get(&file, &"arrayBuffer".into())
@@ -464,6 +487,7 @@ fn listen_for_drops(
         let Some(read) = read else { return };
         wasm_bindgen_futures::spawn_local(async move {
             match wasm_bindgen_futures::JsFuture::from(read).await {
+                Ok(buffer) if picture => on_image.call(js_sys::Uint8Array::new(&buffer).to_vec()),
                 Ok(buffer) => open(js_sys::Uint8Array::new(&buffer).to_vec(), name),
                 Err(error) => log(&format!("pdit: could not read the dropped file: {error:?}")),
             }

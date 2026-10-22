@@ -181,6 +181,7 @@ fn handlers() -> impl Fn(tauri::ipc::Invoke) -> bool {
         files::pick_folder,
         files::save_into_folder,
         files::take_dropped,
+        files::take_dropped_image,
         files::read_opened,
         files::open_pdf,
         files::forget_opened,
@@ -218,6 +219,7 @@ fn handlers() -> impl Fn(tauri::ipc::Invoke) -> bool {
         files::pick_folder,
         files::save_into_folder,
         files::take_dropped,
+        files::take_dropped_image,
         files::read_opened,
         files::open_pdf,
         files::forget_opened,
@@ -264,14 +266,18 @@ fn main() {
             if let Some(path) = std::env::args_os().skip(1).map(std::path::PathBuf::from).find(|p| p.is_file()) {
                 files::dropped(&path);
             }
-            // A PDF dropped onto the window opens (P-050 #1): the app takes it with take_dropped / read_opened.
+            // A PDF dropped onto the window opens (P-050 #1): the app takes it with take_dropped / read_opened; a
+            // picture goes onto the current page (take_dropped_image).
             if let Some(window) = app.get_webview_window("main") {
                 let target = window.clone();
                 window.on_window_event(move |event| {
-                    if let tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) = event
-                        && paths.iter().any(|p| files::dropped(p))
-                    {
-                        let _ = target.eval("window.__pditDropped && window.__pditDropped()");
+                    if let tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) = event {
+                        if paths.iter().any(|p| files::dropped(p)) {
+                            let _ = target.eval("window.__pditDropped && window.__pditDropped()");
+                        } else if paths.iter().any(|p| files::dropped_image(p)) {
+                            // A picture lands on the page being looked at.
+                            let _ = target.eval("window.__pditDroppedImage && window.__pditDroppedImage()");
+                        }
                     }
                 });
             }

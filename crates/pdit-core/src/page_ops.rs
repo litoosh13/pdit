@@ -539,6 +539,28 @@ pub fn resize_image(page: u16, object_index: usize, width_pt: f32) -> Result<[f3
     })
 }
 
+/// Fit to page: the object at `object_index` on `page` is stretched to cover the page's visible area exactly (a
+/// photographed document becomes the page). Returns its new bounds [left, bottom, right, top].
+pub fn fit_image_to_page(page: u16, object_index: usize) -> Result<[f32; 4], Error> {
+    crate::history::before_change()?;
+    with_open(|document| {
+        let mut pdf_page = document.pages().get(page.into())?;
+        let area = pdf_page.boundaries().bounding()?.bounds;
+        let [pl, pb, pr, pt] =
+            [area.left(), area.bottom(), area.right(), area.top()].map(|p| p.value);
+        let mut object = pdf_page.objects_mut().get(object_index)?;
+        let [l, b, r, t] = crate::inspect::rect(object.bounds()?);
+        if r <= l || t <= b {
+            return Err(Error::Pdfium("invalid image size".into()));
+        }
+        // Scaled about the page origin, then moved to the page's corner.
+        object.scale((pr - pl) / (r - l), (pt - pb) / (t - b))?;
+        let [l, b, _, _] = crate::inspect::rect(object.bounds()?);
+        object.translate(PdfPoints::new(pl - l), PdfPoints::new(pb - b))?;
+        Ok(crate::inspect::rect(object.bounds()?))
+    })
+}
+
 /// Rotates the object at `object_index` on `page` clockwise by `degrees`, and
 /// returns its new (axis-aligned) bounds [left, bottom, right, top]. Select the
 /// object with [`image_at`] first (D-023a).

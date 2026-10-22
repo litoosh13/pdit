@@ -61,6 +61,7 @@ pub enum Action {
     /// The image under the pointer: rotate (true = right) or delete.
     RotateImage(bool),
     CropImage,
+    FitImage,
     RemoveBackground,
     DeleteImage,
     EditText,
@@ -121,6 +122,7 @@ impl Action {
             Action::RotateImage(false) => "Rotate left",
             Action::RotateImage(true) => "Rotate right",
             Action::CropImage => "Crop",
+            Action::FitImage => "Fit to page",
             Action::RemoveBackground => "Remove background",
             Action::DeleteImage => "Delete image",
             Action::EditText => "Edit text",
@@ -173,6 +175,7 @@ impl Action {
             Action::OpenNote(_) => crate::annotations_ui::ICON_NOTE,
             Action::RotateImage(_) => ICON_ROTATE,
             Action::CropImage => ICON_CROP,
+            Action::FitImage => crate::page_tools::ICON_FIT,
             Action::RemoveBackground => ICON_REMOVE_BACKGROUND,
             Action::RemoveLink(_)
             | Action::DeleteField(_)
@@ -473,6 +476,7 @@ pub(crate) fn item_sections(page: u16, (x, y): (f32, f32)) -> Vec<(&'static str,
                 Action::RotateImage(false),
                 Action::RotateImage(true),
                 Action::CropImage,
+                Action::FitImage,
                 Action::RemoveBackground,
                 Action::DeleteImage,
             ],
@@ -535,6 +539,10 @@ pub(crate) fn run(action: Action, page: u16, x: f32, y: f32) {
         Action::CropImage => {
             tools.select_image(page, x, y);
             tools.start_image_crop();
+        }
+        Action::FitImage => {
+            tools.select_image(page, x, y);
+            tools.fit_image_selection();
         }
         Action::RemoveBackground => {
             tools.select_image(page, x, y);

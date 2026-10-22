@@ -21,6 +21,7 @@ pub const ICON_MERGE: &str = include_str!("../assets/icons/devigner/Documents.sv
 const ICON_CROP: &str = include_str!("../assets/icons/devigner/Crop.svg");
 /// Remove background (D-074): Devigner Grid eraser.
 const ICON_REMOVE_BACKGROUND: &str = include_str!("../assets/icons/devigner/GridEraser.svg");
+pub(crate) const ICON_FIT: &str = include_str!("../assets/icons/devigner/MaximizeSquare2.svg");
 /// The smallest crop frame side (PDF points).
 const MIN_CROP_PT: f32 = 4.0;
 const ICON_UNDO: &str = include_str!("../assets/icons/devigner/UndoLeft.svg");
@@ -221,6 +222,22 @@ impl PageTools {
             ox + w * (1.0 - ADD_IMAGE_WIDTH_FRACTION) / 2.0,
             oy + h * 0.85,
         );
+    }
+
+    /// A picture dragged onto pdit: it lands on the page being looked at, as the rail's Add image places it.
+    pub fn drop_image(mut self, bytes: Vec<u8>) {
+        let page = crate::bookmarks_ui::current_page();
+        let (w, h) = page_ops::page_sizes()
+            .ok()
+            .and_then(|sizes| sizes.get(page as usize).copied())
+            .unwrap_or((0.0, 0.0));
+        let (ox, oy) = page_ops::page_origin(page).unwrap_or((0.0, 0.0));
+        self.image_at.set(Some((
+            page,
+            ox + w * (1.0 - ADD_IMAGE_WIDTH_FRACTION) / 2.0,
+            oy + h * 0.85,
+        )));
+        self.add_image(bytes);
     }
 
     pub fn pick_image_at(mut self, page: u16, x_pt: f32, top_pt: f32) {
@@ -711,6 +728,26 @@ impl PageTools {
                 Some(undo),
             ),
             Err(error) => crate::log(&format!("pdit: could not remove the background: {error}")),
+        }
+    }
+
+    /// Fit to page: the selected picture covers the whole page.
+    pub fn fit_image_selection(self) {
+        let Some(sel) = self.image_selection.peek().clone() else {
+            return;
+        };
+        let bounds = std::rc::Rc::new(std::cell::Cell::new(sel.bounds));
+        let out = bounds.clone();
+        let result = self.change(move || {
+            out.set(page_ops::fit_image_to_page(sel.page, sel.object_index)?);
+            Ok(())
+        });
+        match result {
+            Ok(undo) => {
+                self.set_selection_bounds(bounds.get());
+                self.show("Picture fits the page".to_owned(), ICON_FIT, Some(undo));
+            }
+            Err(error) => crate::log(&format!("pdit: could not fit the picture: {error}")),
         }
     }
 
