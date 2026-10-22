@@ -239,11 +239,9 @@ impl Ai {
                     Err(error) => Step::new("Questions can't be asked", State::Skip, error),
                 }
             }
-            Models::Unsupported if desktop::available() => Step::new(
-                "Questions need an Apple-silicon Mac for now",
-                State::Skip,
-                "",
-            ),
+            Models::Unsupported if desktop::available() => {
+                Step::new("Questions don't work on Intel Macs yet", State::Skip, "")
+            }
             Models::Unsupported => Step::new("Questions need the desktop app", State::Skip, ""),
             _ => Step::new(WHAT, State::Wait, NEEDS_MODELS),
         };

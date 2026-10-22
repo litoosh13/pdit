@@ -1,9 +1,8 @@
-//! Asking questions (D-056): leafmind-qa's models, downloaded once (after the
-//! user agrees in the Ask panel) into the app's data folder — only model files,
-//! from fixed addresses with SHA-256 checks (as leafmind's
-//! scripts/fetch-qa-models.sh pins them) — then the engine reads the open
-//! document and picks the sentence that answers. Uses the system's curl, tar
-//! and shasum (macOS has them); nothing else goes online.
+//! Asking questions (D-056): leafmind-qa's models and ONNX Runtime for this system (Apple-silicon Macs, Windows
+//! x64, Linux x64; P-050 #6), downloaded once (after the user agrees in the Ask panel) into the app's data folder —
+//! only these files, from fixed addresses with SHA-256 checks (as leafmind's scripts/fetch-qa-models.sh pins the
+//! models) — then the engine reads the open document and picks the sentence that answers. Downloads with the
+//! system's curl (Linux: or wget) and unpacks with its tar (Windows 10+ ships both); nothing else goes online.
 
 use leafmind_qa::{Answer, Document, QaEngine, QaModels, QaOptions};
 use sha2::{Digest, Sha256};
@@ -15,8 +14,9 @@ use tauri::ipc::{InvokeBody, Request};
 use tauri::{AppHandle, Manager};
 
 /// (folder, file name, url, size, sha256). The question models are leafmind v0.5.0's vocabulary-pruned gte models
-/// (English, German, Persian, Arabic; scripts/fetch-qa-models.sh there).
-const FILES: [(&str, &str, &str, u64, &str); 5] = [
+/// (English, German, Persian, Arabic; scripts/fetch-qa-models.sh there), then ONNX Runtime ([`ORT`]).
+type File = (&'static str, &'static str, &'static str, u64, &'static str);
+const FILES: [File; 5] = [
     (
         "gte-embed",
         "model_int8.onnx",
@@ -45,6 +45,35 @@ const FILES: [(&str, &str, &str, u64, &str); 5] = [
         2_788_927,
         "e26ac9905f59291e2540981b82ca2e1022e9699b2456324f66ddba4804272847",
     ),
+    ORT.0,
+];
+
+/// ONNX Runtime 1.30.0 for this system (Microsoft's release; sizes and SHA-256 as GitHub lists them), and its
+/// library inside the unpacked archive. There is no Intel-Mac build of 1.30.
+#[cfg(target_os = "windows")]
+const ORT: (File, &str) = (
+    (
+        "onnxruntime",
+        "onnxruntime-win-x64-1.30.0.zip",
+        "https://github.com/microsoft/onnxruntime/releases/download/v1.30.0/onnxruntime-win-x64-1.30.0.zip",
+        82_645_522,
+        "c6ba983baf5681af108599675d2a89c2d145512d02de28aed0bff177cd0ba949",
+    ),
+    "onnxruntime/onnxruntime-win-x64-1.30.0/lib/onnxruntime.dll",
+);
+#[cfg(target_os = "linux")]
+const ORT: (File, &str) = (
+    (
+        "onnxruntime",
+        "onnxruntime-linux-x64-1.30.0.tgz",
+        "https://github.com/microsoft/onnxruntime/releases/download/v1.30.0/onnxruntime-linux-x64-1.30.0.tgz",
+        11_306_877,
+        "a5ed5a3cac51fbb2e90da632ae43d19212faaa20e76484e62bcb7c23ddb3b3fd",
+    ),
+    "onnxruntime/onnxruntime-linux-x64-1.30.0/lib/libonnxruntime.so.1.30.0",
+);
+#[cfg(not(any(target_os = "windows", target_os = "linux")))]
+const ORT: (File, &str) = (
     (
         "onnxruntime",
         "onnxruntime-osx-arm64-1.30.0.tgz",
@@ -52,13 +81,19 @@ const FILES: [(&str, &str, &str, u64, &str); 5] = [
         42_373_116,
         "6ebb5062a934537c352937821f9fe9718e7de1a2db1122a93dd363ffd53a7012",
     ),
-];
-/// The ONNX Runtime library inside the unpacked archive.
-const ORT_LIB: &str = "onnxruntime/onnxruntime-osx-arm64-1.30.0/lib/libonnxruntime.1.30.0.dylib";
+    "onnxruntime/onnxruntime-osx-arm64-1.30.0/lib/libonnxruntime.1.30.0.dylib",
+);
+const ORT_LIB: &str = ORT.1;
 
-/// ONNX Runtime 1.30 is published for Apple-silicon Macs only.
+/// Systems ONNX Runtime 1.30 is published for (and pdit is released for): not Intel Macs.
 fn supported() -> bool {
-    cfg!(all(target_os = "macos", target_arch = "aarch64"))
+    cfg!(any(
+        all(target_os = "macos", target_arch = "aarch64"),
+        all(
+            any(target_os = "windows", target_os = "linux"),
+            target_arch = "x86_64"
+        ),
+    ))
 }
 
 fn dir(app: &AppHandle) -> Result<PathBuf, String> {
@@ -112,7 +147,7 @@ pub fn qa_status(app: AppHandle) -> Result<Status, String> {
 #[tauri::command]
 pub fn qa_download(app: AppHandle) -> Result<(), String> {
     if !supported() {
-        return Err("asking questions needs an Apple-silicon Mac".into());
+        return Err("asking questions doesn't work on this computer yet".into());
     }
     if DOWNLOADING.swap(true, Ordering::SeqCst) {
         return Ok(());
@@ -139,16 +174,56 @@ pub fn qa_cancel() {
 }
 
 fn sha256(path: &Path) -> Option<String> {
-    let out = Command::new("/usr/bin/shasum")
-        .args(["-a", "256"])
-        .arg(path)
-        .output()
-        .ok()?;
-    String::from_utf8(out.stdout)
-        .ok()?
-        .split_whitespace()
-        .next()
-        .map(str::to_owned)
+    use std::io::Read;
+    let mut file = std::fs::File::open(path).ok()?;
+    let mut hasher = Sha256::new();
+    let mut buffer = vec![0; 1 << 20];
+    loop {
+        match file.read(&mut buffer).ok()? {
+            0 => break,
+            n => hasher.update(&buffer[..n]),
+        }
+    }
+    Some(
+        hasher
+            .finalize()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect(),
+    )
+}
+
+/// A system program by its full path where it has a fixed one (macOS, Windows), not whatever is first on PATH.
+fn system_tool(name: &str) -> PathBuf {
+    if cfg!(target_os = "macos") {
+        return Path::new("/usr/bin").join(name);
+    }
+    if cfg!(target_os = "windows") {
+        let root = std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into());
+        return Path::new(&root)
+            .join("System32")
+            .join(format!("{name}.exe"));
+    }
+    PathBuf::from(name)
+}
+
+/// Starts downloading `url` to `out`: curl, or on Linux wget when curl isn't installed.
+fn start_download(url: &str, out: &Path) -> std::io::Result<std::process::Child> {
+    let curl = Command::new(system_tool("curl"))
+        .args(["-fsSL", "--retry", "3", "-o"])
+        .arg(out)
+        .arg(url)
+        .spawn();
+    match curl {
+        Err(e) if cfg!(target_os = "linux") && e.kind() == std::io::ErrorKind::NotFound => {
+            Command::new("wget")
+                .args(["-q", "-O"])
+                .arg(out)
+                .arg(url)
+                .spawn()
+        }
+        other => other,
+    }
 }
 
 fn download_all(dir: &Path) -> Result<(), String> {
@@ -163,12 +238,8 @@ fn download_all(dir: &Path) -> Result<(), String> {
             continue;
         }
         let part = folder.join(format!("{name}.part"));
-        let mut curl = Command::new("/usr/bin/curl")
-            .args(["-fsSL", "--retry", "3", "-o"])
-            .arg(&part)
-            .arg(url)
-            .spawn()
-            .map_err(|e| format!("could not start the download: {e}"))?;
+        let mut curl =
+            start_download(url, &part).map_err(|e| format!("could not start the download: {e}"))?;
         let status = loop {
             if CANCEL.load(Ordering::SeqCst) {
                 let _ = curl.kill();
@@ -191,9 +262,10 @@ fn download_all(dir: &Path) -> Result<(), String> {
             return Err(format!("{name} did not match its checksum"));
         }
         std::fs::rename(&part, &out).map_err(|e| e.to_string())?;
-        if name.ends_with(".tgz") {
-            let unpacked = Command::new("/usr/bin/tar")
-                .arg("xzf")
+        if name.ends_with(".tgz") || name.ends_with(".zip") {
+            // tar reads both (Windows' tar is bsdtar).
+            let unpacked = Command::new(system_tool("tar"))
+                .arg("-xf")
                 .arg(&out)
                 .arg("-C")
                 .arg(&folder)
@@ -279,7 +351,8 @@ pub async fn qa_index(app: AppHandle, request: Request<'_>) -> Result<Option<Str
                     pages.retain(|(n, _)| !ocr.iter().any(|(o, _)| o == n));
                     pages.extend(ocr);
                     pages.sort_by_key(|(n, _)| *n);
-                    let pages: Vec<(u32, &str)> = pages.iter().map(|(n, t)| (*n, t.as_str())).collect();
+                    let pages: Vec<(u32, &str)> =
+                        pages.iter().map(|(n, t)| (*n, t.as_str())).collect();
                     engine.index_pages(&pages)
                 }
             }

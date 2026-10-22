@@ -21,7 +21,7 @@ const INPUT_ID: &str = "pdit-ask-q";
 pub(crate) enum Models {
     /// Checking.
     Unknown,
-    /// Not on this Mac (ONNX Runtime 1.30 is Apple-silicon only).
+    /// Not here: the online version, or an Intel Mac (no ONNX Runtime 1.30 for it).
     Unsupported,
     /// Not downloaded; maybe downloading (done, total) or failed.
     Missing {
@@ -193,7 +193,14 @@ impl Ask {
         }
         if *self.models.peek() != Models::Ready {
             let why = if *self.models.peek() == Models::Unsupported {
-                "Questions work on Apple-silicon Macs for now. Edits like change all \"old\" to \"new\" work here."
+                match desktop::available() {
+                    true => {
+                        "Questions don't work on Intel Macs yet. Edits like change all \"old\" to \"new\" work here."
+                    }
+                    false => {
+                        "Questions need the desktop app for now. Edits like change all \"old\" to \"new\" work here."
+                    }
+                }
             } else {
                 "Questions need the models first (the card above). Edits like change all \"old\" to \"new\" work now."
             };
@@ -377,9 +384,16 @@ pub fn AskUi() -> Element {
                     }
                 }
                 if models == Models::Unsupported {
-                    div { class: "ac-msg ai",
-                        b { "Asking questions works on Apple-silicon Macs for now" }
-                        div { class: "small", "leafmind's question models need ONNX Runtime, which pdit downloads for Apple-silicon Macs only so far." }
+                    if desktop::available() {
+                        div { class: "ac-msg ai",
+                            b { "Asking questions doesn't work on Intel Macs yet" }
+                            div { class: "small", "leafmind's question models need ONNX Runtime, which has no Intel-Mac build of the version pdit uses. Windows, Linux and Apple-silicon Macs work." }
+                        }
+                    } else {
+                        div { class: "ac-msg ai",
+                            b { "Asking questions needs the desktop app for now" }
+                            div { class: "small", "In the browser, edits like change all \"old\" to \"new\" work." }
+                        }
                     }
                 }
                 if models == Models::Ready && messages.is_empty() && !analysis.running {
