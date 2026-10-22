@@ -86,6 +86,8 @@ jobs:
           set -e
           echo "--- summary ---"
           grep -E "self-check (FAIL|summary)|desktop self-check done|panicked" selfcheck.log || true
+          echo "--- last lines ---"
+          tail -n 5 selfcheck.log
           if ! grep -q "desktop self-check done" selfcheck.log; then
             echo "The self-check didn't finish (exit code $code)."; exit 1
           fi

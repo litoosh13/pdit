@@ -1570,9 +1570,16 @@ async fn fields_session() {
             if ok { "PASS" } else { "FAIL" }
         ))
     };
+    // Progress lines: on a slow or stuck machine the log shows which step it reached.
+    let loading = js_sys::Date::now();
+    log("pdit self-check: find fields: loading the models…");
     let Some(finder) = crate::find_fields_ui::finder().await else {
         return check("load the models", false, String::new());
     };
+    log(&format!(
+        "pdit self-check: find fields: models loaded in {:.0} ms; looking at the page…",
+        js_sys::Date::now() - loading
+    ));
     if pdit_core::open_document(FORM.to_vec()).is_err() {
         return check("open", false, String::new());
     }
