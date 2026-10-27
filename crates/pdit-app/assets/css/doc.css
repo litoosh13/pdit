@@ -113,6 +113,12 @@
   cursor: pointer;
   font: inherit;
 }
+/* As in the signature window: a button that can't be used looks it. */
+.doc-box .sa-primary[disabled],
+.doc-box .sa-control[disabled] {
+  opacity: 0.4;
+  cursor: default;
+}
 .doc-box .pdit-swatch[aria-pressed='true'] {
   box-shadow: 0 0 0 2px var(--cm-surface), 0 0 0 3.5px var(--ink);
 }
