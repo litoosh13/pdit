@@ -1,8 +1,9 @@
 //! Compress PDF (M-009, D-069; approved mockup .claude/research/compress-ui/): the
 //! Print window's look (doc.css), opened from the rail's Document → Compress PDF…
-//! (desktop app). All three levels are worked out by MuPDF (desktop
-//! `compress_pdf`) as the window opens; Save copy… hands the chosen one to the
-//! user as `<name>-compressed.pdf`, and the open document doesn't change.
+//! All three levels are worked out as the window opens — by MuPDF in the desktop
+//! app (`compress_pdf`), by `pdit_core::compress` online (pictures smaller and
+//! JPEG, the file packed); Save copy… hands the chosen one to the user as
+//! `<name>-compressed.pdf`, and the open document doesn't change.
 //! Look: assets/css/compress.css.
 
 use crate::page_tools::{next_frame, set_timeout};
@@ -102,16 +103,33 @@ impl Compress {
         });
         crate::doc_ui::place_pills_soon(".pdit-compress .t-tabs");
         spawn(async move {
+            let desktop = crate::ai_ui::desktop::available();
             for level in [1usize, 0, 2] {
-                let copy = match crate::ai_ui::desktop::invoke_raw(
-                    "compress_pdf",
-                    &pdf,
-                    &[("x-level", level.to_string())],
-                )
-                .await
-                {
-                    Ok(out) => Outcome::Done(Rc::new(js_sys::Uint8Array::new(&out).to_vec())),
-                    Err(e) => Outcome::Failed(e.as_string().unwrap_or_else(|| format!("{e:?}"))),
+                let copy = if desktop {
+                    match crate::ai_ui::desktop::invoke_raw(
+                        "compress_pdf",
+                        &pdf,
+                        &[("x-level", level.to_string())],
+                    )
+                    .await
+                    {
+                        Ok(out) => Outcome::Done(Rc::new(js_sys::Uint8Array::new(&out).to_vec())),
+                        Err(e) => {
+                            Outcome::Failed(e.as_string().unwrap_or_else(|| format!("{e:?}")))
+                        }
+                    }
+                } else {
+                    // Let the window show "working" before the (blocking) work.
+                    crate::print_ui::pause(30).await;
+                    let (dpi, quality) = match level {
+                        0 => (None, 90),
+                        1 => (Some(150.0), 75),
+                        _ => (Some(100.0), 60),
+                    };
+                    match pdit_core::compress::compress_pdf(&pdf, dpi, quality) {
+                        Ok(out) => Outcome::Done(Rc::new(out)),
+                        Err(e) => Outcome::Failed(e.to_string()),
+                    }
                 };
                 if let Outcome::Failed(error) = &copy {
                     crate::log(&format!("pdit: compress level {level}: {error}"));

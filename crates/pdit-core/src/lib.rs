@@ -2,6 +2,7 @@
 //!
 //! In the browser, call [`engine::start`] once before using anything else.
 
+pub mod compress;
 mod edit;
 mod error;
 mod inspect;

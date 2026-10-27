@@ -78,11 +78,9 @@ fn rows(i: usize, stamps: bool) -> Vec<Action> {
             form
         }
         "Document" => {
-            // Compress PDF is MuPDF's, in the desktop app (D-069).
-            let compress = crate::ai_ui::desktop::available().then_some(Action::Compress);
-            [Action::Export]
+            // Compress PDF: MuPDF in the desktop app (D-069), pdit-core online.
+            [Action::Export, Action::Compress]
                 .into_iter()
-                .chain(compress)
                 .chain([
                     Action::CleanScans,
                     Action::HeaderFooter,
