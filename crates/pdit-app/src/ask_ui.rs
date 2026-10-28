@@ -4,9 +4,13 @@
 //! desktop/src/qa.rs); then the analysis's steps (ai_ui.rs) show as a message;
 //! then questions. Answers are the document's own sentences, picked by
 //! leafmind, with their page; "Show on page" marks the sentence (search_ui's
-//! mark). Look: assets/css/ask.css (Devigner UI tokens).
+//! mark). A sentence that isn't a question, in a document with form fields,
+//! fills them (D-079, fill_cmd.rs): leafmind proposes, the chat shows the
+//! changes with "Did you mean" choices, and pdit writes only after Fill.
+//! Look: assets/css/ask.css (Devigner UI tokens).
 
 use crate::ai_ui::desktop;
+use crate::fill_cmd::{self, Action, Fields, Proposal};
 use dioxus::prelude::*;
 use js_sys::{Object, Reflect};
 use wasm_bindgen::JsCast;
@@ -27,6 +31,8 @@ pub(crate) enum Models {
     Missing {
         progress: Option<(u64, u64)>,
         error: Option<String>,
+        /// Bytes still to download.
+        needed: u64,
     },
     Ready,
 }
@@ -45,6 +51,20 @@ enum Msg {
     NothingToChange(String),
     /// A plain reply (why a question can't be answered here).
     Info(&'static str),
+    /// Changes to the form's fields, waiting for Fill (or done, or cancelled).
+    Proposed(Vec<Action>, Answered),
+    /// Which field is meant is clear, the value isn't: these fields fit.
+    AskValue(Vec<String>),
+    /// The form has no field for what was asked.
+    NoField,
+    NotSupported(String),
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum Answered {
+    Waiting,
+    Filled,
+    Cancelled,
 }
 
 /// Shared Ask state.
@@ -57,6 +77,12 @@ pub struct Ask {
     busy: Signal<bool>,
     /// Which version of the document the engine has read (FNV of its bytes).
     indexed: Signal<Option<u64>>,
+    /// The form leafmind-fill has read: its version (FNV of what was sent) and fields.
+    form: Signal<Option<(u64, Fields)>>,
+    /// Online (D-080): the fill models in this browser (questions stay desktop-only).
+    fill_models: Signal<Models>,
+    /// The open document has form fields (online, the fill card shows only then).
+    has_form: Signal<bool>,
 }
 
 impl Ask {
@@ -68,6 +94,9 @@ impl Ask {
             draft: Signal::new(String::new()),
             busy: Signal::new(false),
             indexed: Signal::new(None),
+            form: Signal::new(None),
+            fill_models: Signal::new(Models::Unknown),
+            has_form: Signal::new(false),
         })
     }
 
@@ -116,12 +145,14 @@ impl Ask {
     fn reset(mut self) {
         self.messages.set(Vec::new());
         self.indexed.set(None);
+        self.form.set(None);
         self.open.set(false);
     }
 
     async fn check(mut self) {
         let Ok(status) = desktop::invoke("qa_status", &Object::new()).await else {
-            return self.models.set(Models::Unsupported);
+            self.models.set(Models::Unsupported);
+            return self.check_online().await;
         };
         let get = |k: &str| Reflect::get(&status, &k.into()).unwrap_or(JsValue::NULL);
         let num = |k: &str| get(k).as_f64().unwrap_or(0.0) as u64;
@@ -134,6 +165,7 @@ impl Ask {
                 progress: (get("downloading").as_bool() == Some(true))
                     .then(|| (num("done"), num("total"))),
                 error: get("error").as_string().filter(|e| e != "cancelled"),
+                needed: num("needed"),
             }
         };
         let downloading = matches!(
@@ -156,7 +188,72 @@ impl Ask {
         }
     }
 
+    /// Online: are the fill models in this browser (ai-fill.js)?
+    async fn check_online(mut self) {
+        self.has_form.set(fill_cmd::has_fields());
+        if matches!(
+            *self.fill_models.peek(),
+            Models::Missing {
+                progress: Some(_),
+                ..
+            }
+        ) {
+            return;
+        }
+        let models = match fill_cmd::online("status", &[]).await {
+            Err(error) => {
+                crate::log(&format!("pdit: fill models: {error}"));
+                Models::Unsupported
+            }
+            Ok(status) => match Reflect::get(&status, &"needed".into())
+                .ok()
+                .and_then(|n| n.as_f64())
+            {
+                Some(n) if n > 0.0 => Models::Missing {
+                    progress: None,
+                    error: None,
+                    needed: n as u64,
+                },
+                _ => Models::Ready,
+            },
+        };
+        self.fill_models.set(models);
+    }
+
     pub(crate) fn download(self) {
+        if !desktop::available() {
+            spawn(async move {
+                let needed = match *self.fill_models.peek() {
+                    Models::Missing { needed, .. } => needed,
+                    _ => 0,
+                };
+                let mut models = self.fill_models;
+                models.set(Models::Missing {
+                    progress: Some((0, needed)),
+                    error: None,
+                    needed,
+                });
+                let progress = Closure::<dyn FnMut(f64, f64)>::new(move |done: f64, total: f64| {
+                    models.set(Models::Missing {
+                        progress: Some((done as u64, total as u64)),
+                        error: None,
+                        needed,
+                    });
+                });
+                let result = fill_cmd::online("download", &[progress.as_ref().clone()]).await;
+                drop(progress);
+                match result {
+                    Err(error) => models.set(Models::Missing {
+                        progress: None,
+                        error: Some(error).filter(|e| e != "cancelled"),
+                        needed,
+                    }),
+                    Ok(_) => models.set(Models::Ready),
+                }
+                self.check_online().await;
+            });
+            return;
+        }
         spawn(async move {
             if let Err(error) = desktop::invoke("qa_download", &Object::new()).await {
                 crate::log(&format!("pdit: question models: {error:?}"));
@@ -166,6 +263,12 @@ impl Ask {
     }
 
     pub(crate) fn cancel(self) {
+        if !desktop::available() {
+            spawn(async move {
+                let _ = fill_cmd::online("cancel", &[]).await;
+            });
+            return;
+        }
         spawn(async move {
             let _ = desktop::invoke("qa_cancel", &Object::new()).await;
         });
@@ -191,18 +294,33 @@ impl Ask {
             next_focus();
             return;
         }
-        if *self.models.peek() != Models::Ready {
-            let why = if *self.models.peek() == Models::Unsupported {
-                match desktop::available() {
-                    true => {
-                        "Questions don't work on Intel Macs yet. Edits like change all \"old\" to \"new\" work here."
-                    }
-                    false => {
-                        "Questions need the desktop app for now. Edits like change all \"old\" to \"new\" work here."
-                    }
+        // Not a question, and the document has fields: a fill command.
+        let form = (!fill_cmd::is_question(&question))
+            .then(fill_cmd::read_form)
+            .flatten();
+        let fill_ready = match desktop::available() {
+            true => *self.models.peek() == Models::Ready,
+            false => *self.fill_models.peek() == Models::Ready,
+        };
+        let ready = match form {
+            Some(_) => fill_ready,
+            None => *self.models.peek() == Models::Ready,
+        };
+        if !ready {
+            let unsupported = *self.models.peek() == Models::Unsupported;
+            let why = match (form.is_some(), desktop::available()) {
+                (true, false) => {
+                    "Filling the form in words needs the AI models first (the card above)."
                 }
-            } else {
-                "Questions need the models first (the card above). Edits like change all \"old\" to \"new\" work now."
+                (_, true) if unsupported => {
+                    "Questions don't work on Intel Macs yet. Edits like change all \"old\" to \"new\" work here."
+                }
+                (false, false) => {
+                    "Questions need the desktop app for now. Here, a form can be filled in words, and edits like change all \"old\" to \"new\" work."
+                }
+                (_, true) => {
+                    "Questions need the models first (the card above). Edits like change all \"old\" to \"new\" work now."
+                }
             };
             self.draft.set(String::new());
             self.messages.with_mut(|m| {
@@ -216,7 +334,10 @@ impl Ask {
         self.messages
             .with_mut(|m| m.push(Msg::Me(question.clone())));
         spawn(async move {
-            let reply = self.answer(&question).await;
+            let reply = match form {
+                Some((fields, json)) => self.fill(&question, fields, json).await,
+                None => self.answer(&question).await,
+            };
             self.messages.with_mut(|m| {
                 if matches!(m.last(), Some(Msg::Wait(_))) {
                     m.pop();
@@ -225,6 +346,83 @@ impl Ask {
             });
             self.busy.set(false);
             next_focus();
+        });
+    }
+
+    async fn fill(mut self, sentence: &str, fields: Fields, json: Vec<u8>) -> Msg {
+        self.messages
+            .with_mut(|m| m.push(Msg::Wait("Reading the form…")));
+        let version = json.iter().fold(0xcbf2_9ce4_8422_2325_u64, |h, b| {
+            (h ^ u64::from(*b)).wrapping_mul(0x100_0000_01b3)
+        });
+        if self.form.peek().as_ref().map(|(v, _)| *v) != Some(version)
+            && let Err(error) = fill_cmd::prepare(&json).await
+        {
+            return Msg::Failed(error);
+        }
+        let proposal = fill_cmd::propose(sentence).await;
+        let reply = match proposal {
+            Err(error) => Msg::Failed(error),
+            Ok(Proposal::Actions(actions)) if actions.is_empty() => Msg::NoField,
+            Ok(Proposal::Actions(actions)) => Msg::Proposed(actions, Answered::Waiting),
+            Ok(Proposal::NoValue(ids)) => {
+                Msg::AskValue(ids.iter().map(|id| fields.label(*id)).collect())
+            }
+            Ok(Proposal::NoSuchField) => Msg::NoField,
+            Ok(Proposal::NotSupported(reason)) => Msg::NotSupported(reason),
+        };
+        self.form.set(Some((version, fields)));
+        reply
+    }
+
+    /// Fill (or Cancel) on proposal `k`.
+    fn answer_proposal(mut self, k: usize, fill: bool) {
+        let Some(Msg::Proposed(actions, Answered::Waiting)) = self.messages.peek().get(k).cloned()
+        else {
+            return;
+        };
+        let state = match fill {
+            false => Answered::Cancelled,
+            true => {
+                let result = self
+                    .form
+                    .peek()
+                    .as_ref()
+                    .map(|(_, fields)| fields.apply(&actions));
+                match result {
+                    Some(Ok(pages)) => {
+                        let form_fill = consume_context::<crate::forms_ui::FormFill>();
+                        for page in pages {
+                            form_fill.refresh(page);
+                        }
+                        Answered::Filled
+                    }
+                    Some(Err(error)) => {
+                        self.messages.with_mut(|m| m.push(Msg::Failed(error)));
+                        return;
+                    }
+                    None => return,
+                }
+            }
+        };
+        self.messages.with_mut(|m| {
+            if let Some(Msg::Proposed(_, s)) = m.get_mut(k) {
+                *s = state;
+            }
+        });
+        next_focus();
+    }
+
+    /// "Did you mean …?": action `i` of proposal `k` goes to field `to` instead.
+    fn pick_field(mut self, k: usize, i: usize, to: usize) {
+        self.messages.with_mut(|m| {
+            if let Some(Msg::Proposed(actions, Answered::Waiting)) = m.get_mut(k)
+                && let Some(action) = actions.get_mut(i)
+            {
+                let old = std::mem::replace(&mut action.field, to);
+                action.alternatives.retain(|a| *a != to);
+                action.alternatives.insert(0, old);
+            }
         });
     }
 
@@ -306,6 +504,14 @@ pub fn AskUi() -> Element {
     let messages = (ask.messages)();
     let draft = (ask.draft)();
     let waiting_for_models = matches!(models, Models::Missing { .. } | Models::Unknown);
+    // The download card: the desktop app's AI models, or online (D-080) the fill models when the PDF has a form.
+    let online = !desktop::available();
+    let fill_models = (ask.fill_models)();
+    let card = match (online, (ask.has_form)()) {
+        (false, _) => models.clone(),
+        (true, true) => fill_models.clone(),
+        (true, false) => Models::Unsupported,
+    };
     let can_send = !draft.trim().is_empty() && !(ask.busy)() && !waiting_for_models;
     rsx! {
         document::Stylesheet { href: ASK_CSS }
@@ -314,16 +520,21 @@ pub fn AskUi() -> Element {
             "data-open": if (ask.open)() { "true" } else { "false" },
             "aria-label": "AI chat",
             div { class: "pdit-ask-conv",
-                if let Models::Missing { progress, error } = models.clone() {
+                if let Models::Missing { progress, error, needed } = card {
                     div { class: "ac-card",
-                        b { "One last step: the question models" }
+                        b { if online { "Fill this form in words: the AI models" } else { "One last step: the question models" } }
                         span {
                             "About "
-                            b { "390 MB" }
-                            ", downloaded once to this computer. Only the models — your PDFs never leave your computer."
+                            b { "{mb(needed)} MB" }
+                            if online { ", downloaded once to this browser. " } else { ", downloaded once to this computer. " }
+                            "Only the models — your PDFs never leave your computer."
                         }
                         span { class: "small",
-                            "Answers are sentences from the document itself, with their page. Nothing is made up; if no sentence answers, pdit says so."
+                            if online {
+                                "Then write things like “my email is …” or “tick I agree”: pdit shows what it would fill, and nothing is written until you click Fill."
+                            } else {
+                                "Answers are sentences from the document itself, with their page. Nothing is made up; if no sentence answers, pdit says so."
+                            }
                         }
                         if let Some((done, total)) = progress {
                             span { class: "small", "Downloading… {mb(done)} of {mb(total)} MB" }
@@ -392,12 +603,12 @@ pub fn AskUi() -> Element {
                     } else {
                         div { class: "ac-msg ai",
                             b { "Asking questions needs the desktop app for now" }
-                            div { class: "small", "In the browser, edits like change all \"old\" to \"new\" work." }
+                            div { class: "small", "In the browser, a form can be filled in words, and edits like change all \"old\" to \"new\" work." }
                         }
                     }
                 }
                 if models == Models::Ready && messages.is_empty() && !analysis.running {
-                    div { class: "ac-msg ai", "Ask me anything about this document — I answer with the sentence and its page." }
+                    div { class: "ac-msg ai", "Ask me anything about this document — I answer with the sentence and its page. A form can be filled in words too: “my phone number is …”, “tick I agree”." }
                 }
                 for (k, m) in messages.into_iter().enumerate() {
                     match m {
@@ -468,6 +679,78 @@ pub fn AskUi() -> Element {
                         Msg::Info(text) => rsx! {
                             div { key: "{k}", class: "ac-msg ai", "{text}" }
                         },
+                        Msg::Proposed(actions, state) => {
+                            let fields = ask.form.read().as_ref().map(|(_, f)| f.clone()).unwrap_or_default();
+                            rsx! {
+                                div { key: "{k}", class: "ac-msg ai",
+                                    b {
+                                        match state {
+                                            Answered::Waiting => if actions.len() == 1 { "Fill this field?" } else { "Fill these fields?" },
+                                            Answered::Filled => if actions.len() == 1 { "Filled 1 field" } else { "Filled the fields" },
+                                            Answered::Cancelled => "Nothing filled",
+                                        }
+                                    }
+                                    for (i, action) in actions.iter().enumerate() {
+                                        div { key: "{i}",
+                                            div { class: "small", "{fields.label(action.field)} · page {fields.0.get(action.field).map_or(0, |f| f.page)}" }
+                                            div { "{fields.describe(&action.change)}" }
+                                            if state == Answered::Waiting && !action.alternatives.is_empty() {
+                                                div { class: "ac-row start",
+                                                    span { class: "small", "Did you mean" }
+                                                    for to in action.alternatives.clone() {
+                                                        button {
+                                                            key: "{to}",
+                                                            class: "ac-chip",
+                                                            r#type: "button",
+                                                            onclick: move |_| ask.pick_field(k, i, to),
+                                                            "{fields.label(to)}"
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    div { class: "ac-row start",
+                                        match state {
+                                            Answered::Waiting => rsx! {
+                                                button { class: "ac-btn", r#type: "button", onclick: move |_| ask.answer_proposal(k, false), "Cancel" }
+                                                button { class: "ac-btn primary", r#type: "button", onclick: move |_| ask.answer_proposal(k, true), "Fill" }
+                                            },
+                                            Answered::Filled => rsx! {
+                                                button {
+                                                    class: "ac-chip",
+                                                    r#type: "button",
+                                                    disabled: !tools.can_undo(),
+                                                    onclick: move |_| tools.undo_last(),
+                                                    "Undo"
+                                                }
+                                            },
+                                            Answered::Cancelled => rsx! {},
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        Msg::AskValue(labels) => rsx! {
+                            div { key: "{k}", class: "ac-msg ai",
+                                b { "What should go in?" }
+                                div { class: "small",
+                                    "Write the value too, e.g. “{labels.first().cloned().unwrap_or_default()}: …”."
+                                }
+                            }
+                        },
+                        Msg::NoField => rsx! {
+                            div { key: "{k}", class: "ac-msg ai",
+                                b { "This form has no field for that" }
+                                div { class: "small", "Nothing was filled. Name the field as the page does, or click into it to type." }
+                            }
+                        },
+                        Msg::NotSupported(reason) => rsx! {
+                            div { key: "{k}", class: "ac-msg ai",
+                                b { "That isn't done here" }
+                                div { class: "small", "{reason}" }
+                            }
+                        },
                         Msg::NothingToChange(old) => rsx! {
                             div { key: "{k}", class: "ac-msg ai",
                                 b { "“{old}” isn't in the document" }
@@ -487,9 +770,11 @@ pub fn AskUi() -> Element {
                     // edits in words still work.
                     disabled: waiting_for_models,
                     placeholder: if models == Models::Ready {
-                        "Ask about this document, or: change all \"old\" to \"new\""
+                        "Ask about this document, or fill its form: my email is …"
                     } else if waiting_for_models {
                         "Download the AI models above to start"
+                    } else if online && fill_models == Models::Ready && (ask.has_form)() {
+                        "Fill this form in words: my email is …"
                     } else {
                         "Edit in words: change all \"old\" to \"new\""
                     },
@@ -533,7 +818,12 @@ pub fn ModelsPrompt() -> Element {
             });
         }
     });
-    let Models::Missing { progress, error } = (ask.models)() else {
+    let Models::Missing {
+        progress,
+        error,
+        needed,
+    } = (ask.models)()
+    else {
         return rsx! {};
     };
     if closed() || frame.is_ai() || updates.on_screen() {
@@ -557,7 +847,7 @@ pub fn ModelsPrompt() -> Element {
                     } else {
                         span {
                             "pdit's AI needs its models: "
-                            b { "390 MB" }
+                            b { "{mb(needed)} MB" }
                             ", downloaded once "
                             span { class: "pdit-update-dim", "· your PDFs never leave this computer" }
                         }

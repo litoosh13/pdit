@@ -5,6 +5,7 @@
 pub mod compress;
 mod edit;
 mod error;
+mod font_trim;
 mod inspect;
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 mod lines;

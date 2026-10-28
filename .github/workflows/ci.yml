@@ -29,6 +29,9 @@ jobs:
       - name: PDFium (pinned, checksum-verified)
         run: scripts/fetch-pdfium.sh
 
+      - name: leafmind-fill for the browser (pinned, checksum-verified)
+        run: scripts/fetch-leafmind-web.sh
+
       - name: React island
         working-directory: web/gooey-island
         run: npm ci --no-audit --no-fund && npm run build

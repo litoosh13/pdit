@@ -2,7 +2,9 @@
 //! x64, Linux x64; P-050 #6), downloaded once (after the user agrees in the Ask panel) into the app's data folder —
 //! only these files, from fixed addresses with SHA-256 checks (as leafmind's scripts/fetch-qa-models.sh pins the
 //! models) — then the engine reads the open document and picks the sentence that answers. Downloads with the
-//! system's curl (Linux: or wget) and unpacks with its tar (Windows 10+ ships both); nothing else goes online.
+//! system's curl (Linux: or wget) and unpacks with its tar (Windows 10+ ships both; Linux unzips Needle's wheel
+//! with unzip); nothing else goes online. The same download brings leafmind-fill's model and Needle's engine
+//! (fill.rs, D-079).
 
 use leafmind_qa::{Answer, Document, QaEngine, QaModels, QaOptions};
 use sha2::{Digest, Sha256};
@@ -14,9 +16,10 @@ use tauri::ipc::{InvokeBody, Request};
 use tauri::{AppHandle, Manager};
 
 /// (folder, file name, url, size, sha256). The question models are leafmind v0.5.0's vocabulary-pruned gte models
-/// (English, German, Persian, Arabic; scripts/fetch-qa-models.sh there), then ONNX Runtime ([`ORT`]).
+/// (English, German, Persian, Arabic; scripts/fetch-qa-models.sh there), leafmind-fill's model (v0.9.0), then
+/// ONNX Runtime ([`ORT`]) and Needle's engine ([`NEEDLE`]).
 type File = (&'static str, &'static str, &'static str, u64, &'static str);
-const FILES: [File; 5] = [
+const FILES: [File; 7] = [
     (
         "gte-embed",
         "model_int8.onnx",
@@ -45,8 +48,53 @@ const FILES: [File; 5] = [
         2_788_927,
         "e26ac9905f59291e2540981b82ca2e1022e9699b2456324f66ddba4804272847",
     ),
+    (
+        "fill",
+        "fill.cact",
+        "https://huggingface.co/litoo13/leafmind-fill-needle/resolve/c52f3d0a11f38e6a01d094090501a35c90f2882b/fill.cact",
+        63_437_076,
+        "6198a4579107fc6b0546816a547f6c8594979ba2ebe33a4a4b2c8643536c35fd",
+    ),
     ORT.0,
+    NEEDLE.0,
 ];
+
+/// Needle's engine 3.2.0 (Apache-2.0) for this system: Cactus's Python wheel (a zip) at the revision leafmind pins
+/// (its scripts/fetch-qa-models.sh, same checksums), and the library inside it once unpacked.
+#[cfg(target_os = "windows")]
+const NEEDLE: (File, &str) = (
+    (
+        "needle",
+        "cactus_needle-3.2.0-py3-none-win_amd64.whl",
+        "https://huggingface.co/Cactus-Compute/needle3/resolve/d6c7d6a2e9655505e0f8e23339356dd1705900eb/python/cactus_needle-3.2.0-py3-none-win_amd64.whl",
+        696_277,
+        "0bd41dc812a4b7e504f6ba294de65a363a51b031f154d24aac748b07249dc952",
+    ),
+    "needle/needle/libneedle3.dll",
+);
+#[cfg(target_os = "linux")]
+const NEEDLE: (File, &str) = (
+    (
+        "needle",
+        "cactus_needle-3.2.0-py3-none-manylinux2014_x86_64.whl",
+        "https://huggingface.co/Cactus-Compute/needle3/resolve/d6c7d6a2e9655505e0f8e23339356dd1705900eb/python/cactus_needle-3.2.0-py3-none-manylinux2014_x86_64.whl",
+        684_813,
+        "0e8a3bce4e52968ee14e8e9d47098e65ed06dd5b7c18cef3a7fa1375756736f9",
+    ),
+    "needle/needle/libneedle3.so",
+);
+#[cfg(not(any(target_os = "windows", target_os = "linux")))]
+const NEEDLE: (File, &str) = (
+    (
+        "needle",
+        "cactus_needle-3.2.0-py3-none-macosx_11_0_arm64.whl",
+        "https://huggingface.co/Cactus-Compute/needle3/resolve/d6c7d6a2e9655505e0f8e23339356dd1705900eb/python/cactus_needle-3.2.0-py3-none-macosx_11_0_arm64.whl",
+        535_559,
+        "3b0887a43cd6e9a99009fabf35b231c11bb3a978ab8af94b8119b2eb76e19832",
+    ),
+    "needle/needle/libneedle3.dylib",
+);
+pub(crate) const NEEDLE_LIB: &str = NEEDLE.1;
 
 /// ONNX Runtime 1.30.0 for this system (Microsoft's release; sizes and SHA-256 as GitHub lists them), and its
 /// library inside the unpacked archive. There is no Intel-Mac build of 1.30.
@@ -83,10 +131,10 @@ const ORT: (File, &str) = (
     ),
     "onnxruntime/onnxruntime-osx-arm64-1.30.0/lib/libonnxruntime.1.30.0.dylib",
 );
-const ORT_LIB: &str = ORT.1;
+pub(crate) const ORT_LIB: &str = ORT.1;
 
 /// Systems ONNX Runtime 1.30 is published for (and pdit is released for): not Intel Macs.
-fn supported() -> bool {
+pub(crate) fn supported() -> bool {
     cfg!(any(
         all(target_os = "macos", target_arch = "aarch64"),
         all(
@@ -96,7 +144,7 @@ fn supported() -> bool {
     ))
 }
 
-fn dir(app: &AppHandle) -> Result<PathBuf, String> {
+pub(crate) fn dir(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(app
         .path()
         .app_data_dir()
@@ -106,14 +154,26 @@ fn dir(app: &AppHandle) -> Result<PathBuf, String> {
 
 /// The models are there at their expected size (older models, e.g. before leafmind v0.5.0, differ in size and are
 /// downloaded again).
-fn ready(dir: &Path) -> bool {
+pub(crate) fn ready(dir: &Path) -> bool {
     FILES
         .iter()
-        .filter(|f| f.0 != "onnxruntime")
+        .filter(|f| !matches!(f.0, "onnxruntime" | "needle"))
         .all(|(folder, name, _, size, _)| {
             std::fs::metadata(dir.join(folder).join(name)).is_ok_and(|m| m.len() == *size)
         })
         && dir.join(ORT_LIB).is_file()
+        && dir.join(NEEDLE_LIB).is_file()
+}
+
+/// Bytes still to download (files not there at their size).
+fn needed(dir: &Path) -> u64 {
+    FILES
+        .iter()
+        .filter(|(folder, name, _, size, _)| {
+            !std::fs::metadata(dir.join(folder).join(name)).is_ok_and(|m| m.len() == *size)
+        })
+        .map(|f| f.3)
+        .sum()
 }
 
 static DOWNLOADING: AtomicBool = AtomicBool::new(false);
@@ -128,17 +188,21 @@ pub struct Status {
     downloading: bool,
     done: u64,
     total: u64,
+    /// Bytes still to download (shown before the download starts).
+    needed: u64,
     error: Option<String>,
 }
 
 #[tauri::command]
 pub fn qa_status(app: AppHandle) -> Result<Status, String> {
+    let dir = dir(&app)?;
     Ok(Status {
         supported: supported(),
-        ready: ready(&dir(&app)?),
+        ready: ready(&dir),
         downloading: DOWNLOADING.load(Ordering::SeqCst),
         done: DONE.load(Ordering::SeqCst),
         total: FILES.iter().map(|f| f.3).sum(),
+        needed: needed(&dir),
         error: ERROR.lock().ok().and_then(|e| e.clone()),
     })
 }
@@ -262,17 +326,25 @@ fn download_all(dir: &Path) -> Result<(), String> {
             return Err(format!("{name} did not match its checksum"));
         }
         std::fs::rename(&part, &out).map_err(|e| e.to_string())?;
-        if name.ends_with(".tgz") || name.ends_with(".zip") {
-            // tar reads both (Windows' tar is bsdtar).
-            let unpacked = Command::new(system_tool("tar"))
-                .arg("-xf")
-                .arg(&out)
-                .arg("-C")
-                .arg(&folder)
+        if [".tgz", ".zip", ".whl"].iter().any(|e| name.ends_with(e)) {
+            // macOS's and Windows' tar (bsdtar) read all three; GNU tar (Linux) can't read a zip.
+            let mut unpack = match cfg!(target_os = "linux") && name.ends_with(".whl") {
+                true => {
+                    let mut c = Command::new("unzip");
+                    c.arg("-o").arg("-q").arg(&out).arg("-d").arg(&folder);
+                    c
+                }
+                false => {
+                    let mut c = Command::new(system_tool("tar"));
+                    c.arg("-xf").arg(&out).arg("-C").arg(&folder);
+                    c
+                }
+            };
+            let unpacked = unpack
                 .status()
-                .map_err(|e| e.to_string())?;
+                .map_err(|e| format!("could not unpack {name}: {e}"))?;
             if !unpacked.success() {
-                return Err("could not unpack ONNX Runtime".into());
+                return Err(format!("could not unpack {name}"));
             }
         }
         finished += size;

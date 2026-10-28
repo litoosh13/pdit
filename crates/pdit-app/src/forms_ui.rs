@@ -43,7 +43,7 @@ impl FormFill {
     }
 
     /// Redraws the page (so the new appearance shows) and refreshes the overlays.
-    fn refresh(mut self, page: u16) {
+    pub(crate) fn refresh(mut self, page: u16) {
         consume_context::<Editing>().redraw(page);
         *self.version.write() += 1;
     }

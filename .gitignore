@@ -23,6 +23,8 @@ node_modules/
 
 # Downloaded by scripts/fetch-pdfium.sh (pinned by checksum)
 /crates/pdit-app/assets/pdfium/
+# Downloaded by scripts/fetch-leafmind-web.sh (pinned by checksum)
+/crates/pdit-app/assets/ai-fill/leafmind-fill/
 
 # Built by `docker compose run --rm islands`
 /crates/pdit-app/assets/islands/

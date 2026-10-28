@@ -17,6 +17,7 @@ mod crop_ui;
 mod doc_ui;
 mod editing;
 mod export_ui;
+mod fill_cmd;
 mod find_fields_ui;
 mod font_catalog;
 mod fonts;

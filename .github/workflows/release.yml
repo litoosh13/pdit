@@ -46,6 +46,9 @@ jobs:
       - name: PDFium (pinned, checksum-verified)
         run: scripts/fetch-pdfium.sh
 
+      - name: leafmind-fill for the browser (pinned, checksum-verified)
+        run: scripts/fetch-leafmind-web.sh
+
       - name: React island
         working-directory: web/gooey-island
         run: npm ci --no-audit --no-fund && npm run build
@@ -73,7 +76,8 @@ jobs:
       - name: Offline file list
         working-directory: target/dx/pdit-app/release/web/public
         run: |
-          find assets -type f | sort > precache.txt
+          # leafmind-fill's browser files load only when a form is filled online (D-080): not kept up front.
+          find assets -type f | grep -v -e leafmind -e ai-fill | sort > precache.txt
           sed -i "s/pdit-dev/pdit-${GITHUB_SHA::12}/" sw.js
           grep -q "pdit-${GITHUB_SHA::12}" sw.js
 

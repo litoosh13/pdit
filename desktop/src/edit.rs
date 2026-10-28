@@ -152,12 +152,12 @@ mod tests {
     #[test]
     fn same_letters_ignores_spacing_and_lost_hyphens() {
         assert!(super::same_letters(
-            "Texas A&M University-Corpus Christi.",
-            "Texas A&M University Corpus  Christi"
+            "Riverside Bicycle-Workshop opens.",
+            "Riverside Bicycle Workshop  opens"
         ));
         assert!(!super::same_letters(
-            "Dear Yasin,",
-            "April 23, 2025 Dear Yasin,"
+            "Dear Robin,",
+            "March 3, 2027 Dear Robin,"
         ));
     }
 }

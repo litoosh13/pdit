@@ -21,6 +21,7 @@ Asking questions needs an Apple-silicon Mac and downloads its models (about 760 
 
 ```bash
 scripts/fetch-pdfium.sh            # once: the pinned PDFium engine
+scripts/fetch-leafmind-web.sh      # once: leafmind's form-filling engine for the browser
 docker compose run --rm islands    # the React parts of the interface
 docker compose up serve            # browser version at http://localhost:8080
 ```

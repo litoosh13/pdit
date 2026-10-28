@@ -11,6 +11,7 @@
 mod cache;
 mod edit;
 mod files;
+mod fill;
 mod qa;
 mod update;
 
@@ -163,6 +164,8 @@ fn handlers() -> impl Fn(tauri::ipc::Invoke) -> bool {
         qa::qa_cancel,
         qa::qa_index,
         qa::qa_ask,
+        fill::fill_prepare,
+        fill::fill_propose,
         update::update_check,
         update::update_install,
         update::update_progress,
@@ -201,6 +204,8 @@ fn handlers() -> impl Fn(tauri::ipc::Invoke) -> bool {
         qa::qa_cancel,
         qa::qa_index,
         qa::qa_ask,
+        fill::fill_prepare,
+        fill::fill_propose,
         update::update_check,
         update::update_install,
         update::update_progress,

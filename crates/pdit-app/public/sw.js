@@ -3,6 +3,8 @@
 // cached. "pdit-dev" is replaced per deployment (.github/workflows/pages.yml), so a new version gets a fresh cache;
 // the old one is dropped once no tab uses it any more (no skipWaiting: an open tab keeps its files).
 const CACHE = 'pdit-dev';
+// The AI models the user downloaded (ai-fill.js, D-080): kept across versions, served only from there.
+const MODELS = 'ai-models-v1';
 
 // precache.txt (written by the deploy workflow) lists every file, so fonts and models load offline before first use.
 self.addEventListener('install', event => {
@@ -26,6 +28,10 @@ self.addEventListener('activate', event => {
 self.addEventListener('fetch', event => {
   const request = event.request;
   if (request.method !== 'GET' || new URL(request.url).origin !== self.location.origin) return;
+  if (new URL(request.url).pathname.includes('/ai-models/')) {
+    event.respondWith(caches.open(MODELS).then(c => c.match(request)).then(r => r ?? new Response('not downloaded', { status: 404 })));
+    return;
+  }
   event.respondWith((async () => {
     const cache = await caches.open(CACHE);
     // The page itself: newest when online, the kept one offline.

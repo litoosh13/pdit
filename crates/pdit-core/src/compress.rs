@@ -1,5 +1,6 @@
 //! Compress PDF without MuPDF (the online version; D-069 is MuPDF's, on the desktop): pictures shown sharper than
-//! `dpi` are made smaller and stored as JPEG, and the file is packed (object streams). Works on a copy: the open
+//! `dpi` are made smaller and stored as JPEG, embedded TrueType fonts keep only the glyphs they can show
+//! (`font_trim`, at every level), and the file is packed (object streams). Works on a copy: the open
 //! document doesn't change. Pictures with transparency, masks, CMYK or uncommon formats are left as they are.
 
 use crate::Error;
@@ -26,6 +27,7 @@ pub fn compress_pdf(pdf: &[u8], dpi: Option<f32>, quality: u8) -> Result<Vec<u8>
             }
         }
     }
+    crate::font_trim::trim_fonts(&mut doc);
     doc.prune_objects();
     doc.compress();
     let mut out = Vec::new();

@@ -103,6 +103,7 @@ pub async fn run(font_url: &str) {
     fields_session().await;
     scan_session().await;
     ask_session().await;
+    fill_session().await;
     mupdf_session().await;
     compress_session().await;
     labels_session().await;
@@ -2110,6 +2111,119 @@ async fn ask_session() {
             "OCR failed".into(),
         );
     }
+}
+
+/// Filling a form from a sentence (D-079, leafmind-fill), desktop only: the synthetic membership form (Full name,
+/// Email, "I agree to the terms", Country). Each sentence's proposal and time is logged for leafmind (R-008).
+async fn fill_session() {
+    use crate::fill_cmd::{self, Change, Proposal};
+    let check = |name: &str, ok: bool, detail: String| {
+        log(&format!(
+            "pdit self-check {}: fill: {name}: {detail}",
+            if ok { "PASS" } else { "FAIL" }
+        ))
+    };
+    if !crate::ai_ui::desktop::available() {
+        return log("pdit self-check: fill: skipped (not the desktop app)");
+    }
+    if pdit_core::open_document(FORM.to_vec()).is_err() {
+        return check("open", false, String::new());
+    }
+    pdit_core::history::clear();
+    let Some((fields, json)) = fill_cmd::read_form() else {
+        return check("fields read", false, String::new());
+    };
+    let labels: Vec<String> = fields.0.iter().map(|f| f.label.clone()).collect();
+    let started = js_sys::Date::now();
+    let prepared = fill_cmd::prepare(&json).await;
+    check(
+        "fields and their labels read",
+        prepared.is_ok()
+            && labels.iter().any(|l| l == "Full name")
+            && labels.iter().any(|l| l == "Email"),
+        format!(
+            "{labels:?} in {:.0} ms; {prepared:?}",
+            js_sys::Date::now() - started
+        ),
+    );
+    let id = |label: &str| labels.iter().position(|l| l == label);
+    let mut proposals = Vec::new();
+    for sentence in [
+        "my full name is Robin Example",
+        "email: r.example@example.org",
+        "tick I agree to the terms",
+        "country: France",
+        "fill in my email",
+        "sign the form",
+        "my passport number is X1234567",
+        "clear the email",
+    ] {
+        let started = js_sys::Date::now();
+        let proposal = fill_cmd::propose(sentence).await;
+        log(&format!(
+            "pdit self-check: fill: {sentence:?} → {proposal:?} ({:.0} ms)",
+            js_sys::Date::now() - started
+        ));
+        proposals.push(proposal.unwrap_or(Proposal::NoSuchField));
+    }
+    let one = |p: &Proposal, field: Option<usize>, change: &Change| matches!(p, Proposal::Actions(a) if a.len() == 1 && Some(a[0].field) == field && a[0].change == *change);
+    let agree = labels.iter().position(|l| l.contains("agree"));
+    check(
+        "fill, tick and choose proposals",
+        one(
+            &proposals[0],
+            id("Full name"),
+            &Change::Fill("Robin Example".into()),
+        ) && one(
+            &proposals[1],
+            id("Email"),
+            &Change::Fill("r.example@example.org".into()),
+        ) && one(&proposals[2], agree, &Change::Check(true)),
+        format!("{:?}", &proposals[..4]),
+    );
+    check(
+        "no value asks; a signature isn't done here",
+        matches!(proposals[4], Proposal::NoValue(_))
+            && matches!(proposals[5], Proposal::NotSupported(_)),
+        format!("{:?}", &proposals[4..6]),
+    );
+    // Written only now (the Fill button): the first three, as one Undo step.
+    let actions: Vec<_> = proposals[..3]
+        .iter()
+        .flat_map(|p| match p {
+            Proposal::Actions(a) => a.clone(),
+            _ => Vec::new(),
+        })
+        .collect();
+    pdit_core::history::new_step();
+    let applied = fields.apply(&actions);
+    let value = |label: &str| {
+        pdit_core::form_fields(0)
+            .unwrap_or_default()
+            .into_iter()
+            .find(|f| {
+                f.name
+                    .as_deref()
+                    .is_some_and(|n| n.to_lowercase().contains(label))
+            })
+            .map(|f| (f.value, f.checked))
+    };
+    check(
+        "Fill writes the confirmed changes",
+        applied.is_ok()
+            && value("name") == Some((Some("Robin Example".into()), false))
+            && value("email").and_then(|v| v.0).as_deref() == Some("r.example@example.org")
+            && value("agree").is_some_and(|v| v.1),
+        format!("{applied:?}; {:?}", pdit_core::form_fields(0).ok()),
+    );
+    let undone = pdit_core::history::undo();
+    check(
+        "one Undo takes them all back",
+        undone.is_ok()
+            && value("name").is_some_and(|v| v.0.is_none())
+            && value("agree").is_some_and(|v| !v.1),
+        format!("{undone:?}; {:?}", pdit_core::form_fields(0).ok()),
+    );
 }
 
 fn links_session(font: &[u8]) {
