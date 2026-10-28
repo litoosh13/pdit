@@ -339,6 +339,116 @@ pub fn add_stamp(
     })
 }
 
+/// A stamp or pen drawing: placed on the page and moved, resized like a picture (D-081).
+fn drawn(kind: AnnotationKind) -> bool {
+    matches!(kind, AnnotationKind::Stamp | AnnotationKind::Ink)
+}
+
+/// The stamp or pen drawing under (`x`, `y`) PDF points on `page` (the top one): its index, kind and bounds
+/// [left, bottom, right, top].
+pub fn drawn_at(
+    page: u16,
+    x: f32,
+    y: f32,
+) -> Result<Option<(usize, AnnotationKind, [f32; 4])>, Error> {
+    Ok(annotations(page)?
+        .into_iter()
+        .rev()
+        .find(|a| {
+            let [l, b, r, t] = a.bounds;
+            drawn(a.kind) && x >= l && x <= r && y >= b && y <= t
+        })
+        .map(|a| (a.index, a.kind, a.bounds)))
+}
+
+/// Moves stamp, pen drawing or note `index` on `page` by (`dx`, `dy`) PDF points; returns its new bounds.
+pub fn move_drawn(page: u16, index: usize, dx: f32, dy: f32) -> Result<[f32; 4], Error> {
+    crate::history::before_change()?;
+    transform_drawn(page, index, 1.0, dx, dy)
+}
+
+/// Resizes stamp or pen drawing `index` on `page` to `width_pt` wide (its shape kept), its bottom-left corner
+/// staying put; returns its new bounds. (Like pictures, the caller moves it to the corner it holds.)
+pub fn resize_drawn(page: u16, index: usize, width_pt: f32) -> Result<[f32; 4], Error> {
+    crate::history::before_change()?;
+    let [l, b, r, _] = annotations(page)?
+        .into_iter()
+        .find(|a| a.index == index)
+        .map(|a| a.bounds)
+        .ok_or_else(|| Error::Pdfium("that stamp or drawing has changed".into()))?;
+    if r <= l || width_pt <= 0.0 {
+        return Err(Error::Pdfium("invalid width".into()));
+    }
+    let k = width_pt / (r - l);
+    transform_drawn(page, index, k, l - k * l, b - k * b)
+}
+
+/// Scales stamp or pen drawing `index` by `k` and moves it by (`e`, `f`). The drawing itself isn't touched: every
+/// viewer fits its own box (the appearance's /BBox) into the annotation's box (/Rect), which is what changes.
+/// (Moving the drawn objects instead left them clipped to their old place.) A pen drawing's strokes (/InkList),
+/// which some viewers draw from, move along. pdfium-render has no wrapper for these, so PDFium is called directly
+/// (the page handle and bindings are public in our copy, D-036).
+fn transform_drawn(page: u16, index: usize, k: f32, e: f32, f: f32) -> Result<[f32; 4], Error> {
+    with_open(|document| {
+        let pdf_page = document.pages().get(page.into())?;
+        let ink = kind_of(&pdf_page.annotations().get(index)?) == Some(AnnotationKind::Ink);
+        // A note moves the same way (its icon is drawn at a fixed size, so it isn't resized).
+        expect(&pdf_page.annotations().get(index)?, |k| {
+            drawn(k) || k == AnnotationKind::Note
+        })?;
+        let bindings = crate::pdfium().bindings();
+        let at = |v: f32, by: f32| v * k + by;
+        // SAFETY: the annotation handle comes from this open page and is closed before returning; the stroke
+        // buffers outlive the calls that fill or read them.
+        unsafe {
+            let annot = bindings.FPDFPage_GetAnnot(pdf_page.page_handle(), index as i32);
+            if annot.is_null() {
+                return Err(Error::Pdfium("the stamp or drawing was not found".into()));
+            }
+            if ink {
+                let strokes: Vec<Vec<FS_POINTF>> = (0..bindings.FPDFAnnot_GetInkListCount(annot))
+                    .map(|i| {
+                        let n =
+                            bindings.FPDFAnnot_GetInkListPath(annot, i, std::ptr::null_mut(), 0);
+                        let mut points = vec![FS_POINTF { x: 0.0, y: 0.0 }; n as usize];
+                        bindings.FPDFAnnot_GetInkListPath(annot, i, points.as_mut_ptr(), n);
+                        points
+                            .into_iter()
+                            .map(|p| FS_POINTF {
+                                x: at(p.x, e),
+                                y: at(p.y, f),
+                            })
+                            .collect()
+                    })
+                    .collect();
+                bindings.FPDFAnnot_RemoveInkList(annot);
+                for stroke in &strokes {
+                    bindings.FPDFAnnot_AddInkStroke(annot, stroke.as_ptr(), stroke.len() as _);
+                }
+            }
+            let mut rect = FS_RECTF {
+                left: 0.0,
+                top: 0.0,
+                right: 0.0,
+                bottom: 0.0,
+            };
+            bindings.FPDFAnnot_GetRect(annot, &mut rect);
+            let moved = FS_RECTF {
+                left: at(rect.left, e),
+                right: at(rect.right, e),
+                bottom: at(rect.bottom, f),
+                top: at(rect.top, f),
+            };
+            let set = bindings.FPDFAnnot_SetRect(annot, &moved);
+            bindings.FPDFPage_CloseAnnot(annot);
+            if !bindings.is_true(set) {
+                return Err(Error::Pdfium("could not move the stamp or drawing".into()));
+            }
+            Ok([moved.left, moved.bottom, moved.right, moved.top])
+        }
+    })
+}
+
 /// The notes and markup on `page` (other annotation types are left alone).
 pub fn annotations(page: u16) -> Result<Vec<Annotation>, Error> {
     with_open(|document| {

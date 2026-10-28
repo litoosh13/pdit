@@ -78,8 +78,36 @@ struct Toast {
 #[derive(Clone, PartialEq, Debug)]
 pub struct ImageSelection {
     pub page: u16,
+    /// The picture's or shape's object index, or the stamp's or drawing's annotation index.
     pub object_index: usize,
     pub bounds: [f32; 4],
+    pub kind: Placed,
+}
+
+/// What is selected (D-081): all are moved, resized and deleted the same way; rotate, crop and background are for
+/// pictures only.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Placed {
+    Picture,
+    /// A shape pdit drew (a page object with its tag).
+    Shape,
+    Stamp,
+    /// A pen drawing.
+    Drawing,
+    /// Text added with pdit (its lines move and scale together; `object_index` is its box number).
+    TextBox,
+}
+
+impl Placed {
+    fn name(self) -> &'static str {
+        match self {
+            Placed::Picture => "Image",
+            Placed::Shape => "Shape",
+            Placed::Stamp => "Stamp",
+            Placed::Drawing => "Drawing",
+            Placed::TextBox => "Text",
+        }
+    }
 }
 
 /// The table drawn in this session (D-038), which its "+" buttons grow and its
@@ -595,14 +623,12 @@ impl PageTools {
     pub fn select_image(mut self, page: u16, x: f32, y: f32) {
         consume_context::<Editing>().cancel();
         self.image_crop.set(None);
-        match page_ops::image_at(page, x, y) {
-            Ok(Some(hit)) => self.image_selection.set(Some(ImageSelection {
-                page,
-                object_index: hit.object_index,
-                bounds: hit.bounds,
-            })),
-            _ => self.image_selection.set(None),
-        }
+        self.image_selection.set(placed_at(page, x, y));
+    }
+
+    /// Something that can be selected, moved and resized is under (x, y) on `page` (D-081).
+    pub fn movable_at(&self, page: u16, x: f32, y: f32) -> bool {
+        placed_at(page, x, y).is_some()
     }
 
     /// The selected image, for the overlay to draw its ring and bar.
@@ -757,10 +783,18 @@ impl PageTools {
         let Some(sel) = self.image_selection.peek().clone() else {
             return;
         };
-        match self.change(|| page_ops::delete_image(sel.page, sel.object_index)) {
+        let result = self.change(|| match sel.kind {
+            Placed::Stamp | Placed::Drawing => {
+                pdit_core::annotations::delete_annotation(sel.page, sel.object_index)
+            }
+            Placed::TextBox => page_ops::delete_text_box(sel.page, sel.object_index),
+            Placed::Picture | Placed::Shape => page_ops::delete_image(sel.page, sel.object_index),
+        });
+        match result {
             Ok(undo) => {
                 self.image_selection.set(None);
-                self.show("Image deleted".to_owned(), ICON_TRASH, Some(undo));
+                let message = format!("{} deleted", sel.kind.name());
+                self.show(message, ICON_TRASH, Some(undo));
             }
             Err(error) => crate::log(&format!("pdit: could not delete the image: {error}")),
         }
@@ -796,7 +830,7 @@ impl PageTools {
         let Some(sel) = self.image_selection.peek().clone() else {
             return;
         };
-        if let Ok(bounds) = page_ops::move_image(page, sel.object_index, dx_pt, dy_pt) {
+        if let Ok(bounds) = move_selected(&sel, dx_pt, dy_pt) {
             self.set_selection_bounds(bounds);
             self.redraw(page);
         }
@@ -817,14 +851,21 @@ impl PageTools {
         let Some(sel) = self.image_selection.peek().clone() else {
             return;
         };
-        let Ok([l, b, r, t]) = page_ops::resize_image(page, sel.object_index, width_pt) else {
+        let resized = match sel.kind {
+            Placed::Stamp | Placed::Drawing => {
+                pdit_core::annotations::resize_drawn(page, sel.object_index, width_pt)
+            }
+            Placed::TextBox => page_ops::resize_text_box(page, sel.object_index, width_pt),
+            Placed::Picture | Placed::Shape => {
+                page_ops::resize_image(page, sel.object_index, width_pt)
+            }
+        };
+        let Ok([l, b, r, t]) = resized else {
             return;
         };
         let fx = if fixed_left { l } else { r };
         let fy = if fixed_top { t } else { b };
-        if let Ok(bounds) =
-            page_ops::move_image(page, sel.object_index, anchor.0 - fx, anchor.1 - fy)
-        {
+        if let Ok(bounds) = move_selected(&sel, anchor.0 - fx, anchor.1 - fy) {
             self.set_selection_bounds(bounds);
             self.redraw(page);
         }
@@ -835,17 +876,31 @@ impl PageTools {
     /// current from the live redraws, so we don't `refresh` here — that would
     /// remount the page and flash the skeleton. (The pages-panel thumbnail then
     /// lags until the next refresh-triggering edit; acceptable for a drag.)
+    /// Ends a drag that isn't the selection's (a note, D-081): the Undo toast for the whole gesture.
+    pub fn end_drag(mut self, message: &str) {
+        let undo = self.drag_undo.peek().clone();
+        if let Some(undo) = undo {
+            self.drag_undo.set(None);
+            self.show(message.to_owned(), ICON_MOVE, Some(undo));
+        }
+    }
+
     pub fn end_image_drag(mut self, resized: bool) {
         let Some(undo) = self.drag_undo.peek().clone() else {
             return;
         };
         self.drag_undo.set(None);
-        let (message, icon) = if resized {
-            ("Image resized", ICON_IMAGE)
-        } else {
-            ("Image moved", ICON_MOVE)
+        let kind = self
+            .image_selection
+            .peek()
+            .as_ref()
+            .map_or(Placed::Picture, |s| s.kind);
+        let (message, icon) = match (resized, kind) {
+            (true, Placed::Picture) => (format!("{} resized", kind.name()), ICON_IMAGE),
+            (true, _) => (format!("{} resized", kind.name()), ICON_MOVE),
+            (false, _) => (format!("{} moved", kind.name()), ICON_MOVE),
         };
-        self.show(message.to_owned(), icon, Some(undo));
+        self.show(message, icon, Some(undo));
     }
 
     fn insert_pdf(self, bytes: Vec<u8>) {
@@ -1304,47 +1359,50 @@ pub fn ImageOverlay(page: u16, page_height_pt: f32, scale: f32) -> Element {
                 // a bar button's click runs, so Rotate/Delete would do nothing.
                 onpointerdown: move |event| event.stop_propagation(),
                 div { class: "sa-bar",
-                    button {
-                        r#type: "button",
-                        class: "sa-control",
-                        "aria-label": "Rotate left",
-                        onclick: move |event| {
-                            event.stop_propagation();
-                            tools.rotate_image_selection(false);
-                        },
-                        span { dangerous_inner_html: ICON_ROTATE, style: "display: contents" }
-                    }
-                    button {
-                        r#type: "button",
-                        class: "sa-control sa-mirror",
-                        "aria-label": "Rotate right",
-                        onclick: move |event| {
-                            event.stop_propagation();
-                            tools.rotate_image_selection(true);
-                        },
-                        span { dangerous_inner_html: ICON_ROTATE, style: "display: contents" }
-                    }
-                    button {
-                        r#type: "button",
-                        class: "sa-control",
-                        "aria-label": "Crop",
-                        title: "Crop",
-                        onclick: move |event| {
-                            event.stop_propagation();
-                            tools.start_image_crop();
-                        },
-                        span { dangerous_inner_html: ICON_CROP, style: "display: contents" }
-                    }
-                    button {
-                        r#type: "button",
-                        class: "sa-control",
-                        "aria-label": "Remove background",
-                        title: "Remove background (keep only the ink)",
-                        onclick: move |event| {
-                            event.stop_propagation();
-                            tools.remove_background_selection();
-                        },
-                        span { dangerous_inner_html: ICON_REMOVE_BACKGROUND, style: "display: contents" }
+                    // Rotate, crop and background are for pictures; the rest is moved, resized or deleted.
+                    if sel.kind == Placed::Picture {
+                        button {
+                            r#type: "button",
+                            class: "sa-control",
+                            "aria-label": "Rotate left",
+                            onclick: move |event| {
+                                event.stop_propagation();
+                                tools.rotate_image_selection(false);
+                            },
+                            span { dangerous_inner_html: ICON_ROTATE, style: "display: contents" }
+                        }
+                        button {
+                            r#type: "button",
+                            class: "sa-control sa-mirror",
+                            "aria-label": "Rotate right",
+                            onclick: move |event| {
+                                event.stop_propagation();
+                                tools.rotate_image_selection(true);
+                            },
+                            span { dangerous_inner_html: ICON_ROTATE, style: "display: contents" }
+                        }
+                        button {
+                            r#type: "button",
+                            class: "sa-control",
+                            "aria-label": "Crop",
+                            title: "Crop",
+                            onclick: move |event| {
+                                event.stop_propagation();
+                                tools.start_image_crop();
+                            },
+                            span { dangerous_inner_html: ICON_CROP, style: "display: contents" }
+                        }
+                        button {
+                            r#type: "button",
+                            class: "sa-control",
+                            "aria-label": "Remove background",
+                            title: "Remove background (keep only the ink)",
+                            onclick: move |event| {
+                                event.stop_propagation();
+                                tools.remove_background_selection();
+                            },
+                            span { dangerous_inner_html: ICON_REMOVE_BACKGROUND, style: "display: contents" }
+                        }
                     }
                     button {
                         r#type: "button",
@@ -1360,6 +1418,46 @@ pub fn ImageOverlay(page: u16, page_height_pt: f32, scale: f32) -> Element {
             }
         }
     }
+}
+
+/// Moves the selection by (`dx`, `dy`) PDF points; returns its new bounds.
+fn move_selected(sel: &ImageSelection, dx: f32, dy: f32) -> Result<[f32; 4], pdit_core::Error> {
+    match sel.kind {
+        Placed::Stamp | Placed::Drawing => {
+            pdit_core::annotations::move_drawn(sel.page, sel.object_index, dx, dy)
+        }
+        Placed::TextBox => page_ops::move_text_box(sel.page, sel.object_index, dx, dy),
+        Placed::Picture | Placed::Shape => page_ops::move_image(sel.page, sel.object_index, dx, dy),
+    }
+}
+
+/// What can be moved and resized under (x, y) on `page`, the top one first: a stamp or pen drawing (they lie over
+/// the page's content), then text or a shape added with pdit, then a picture.
+fn placed_at(page: u16, x: f32, y: f32) -> Option<ImageSelection> {
+    if let Ok(Some((index, kind, bounds))) = pdit_core::annotations::drawn_at(page, x, y) {
+        return Some(ImageSelection {
+            page,
+            object_index: index,
+            bounds,
+            kind: match kind {
+                pdit_core::annotations::AnnotationKind::Stamp => Placed::Stamp,
+                _ => Placed::Drawing,
+            },
+        });
+    }
+    let (hit, kind) = if let Ok(Some(hit)) = page_ops::text_box_at(page, x, y) {
+        (hit, Placed::TextBox)
+    } else if let Ok(Some(hit)) = page_ops::shape_at(page, x, y) {
+        (hit, Placed::Shape)
+    } else {
+        (page_ops::image_at(page, x, y).ok()??, Placed::Picture)
+    };
+    Some(ImageSelection {
+        page,
+        object_index: hit.object_index,
+        bounds: hit.bounds,
+        kind,
+    })
 }
 
 /// Clears and clicks a hidden file input by id (so choosing the same file again

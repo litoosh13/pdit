@@ -180,6 +180,10 @@ impl Tools {
         if places(action) {
             let again = *self.placing.peek() == Some(action);
             self.placing.set(if again { None } else { Some(action) });
+            // The page is free for the click (user, 2026-10-28): the panel closes; the crosshair shows the tool.
+            if !again {
+                self.close();
+            }
             return;
         }
         self.placing.set(None);

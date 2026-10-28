@@ -52,6 +52,24 @@ struct Pending {
     /// How many objects the preview put at `index` (the text, plus its
     /// underline when underlined).
     added: usize,
+    /// The text box (D-081) the new text belongs to when kept: the one the replaced text was in, or
+    /// [`NEW_TEXT_BOX`] for added text.
+    text_box: Option<i32>,
+}
+
+/// A text box number not given yet: added text becomes a new box when kept.
+const NEW_TEXT_BOX: i32 = -1;
+
+/// The text box (D-081) of the object at `index` on the page.
+fn text_box_at(pdf_page: &PdfPage, index: usize) -> Option<i32> {
+    let bindings = crate::pdfium().bindings();
+    // SAFETY: the object handle comes from this open page and is only read.
+    unsafe {
+        let object = bindings.FPDFPage_GetObject(pdf_page.page_handle(), index as i32);
+        (!object.is_null())
+            .then(|| crate::marks::text_box(bindings, object))
+            .flatten()
+    }
 }
 
 thread_local! {
@@ -669,6 +687,7 @@ fn preview_replace(
         let mut pdf_page = document.pages().get(page.into())?;
         let base = with_underline(&pdf_page, index)?;
         let old_bounds = rect(pdf_page.objects().get(index)?.bounds()?);
+        let text_box = text_box_at(&pdf_page, index);
         let mut removed = vec![(index, pdf_page.objects_mut().remove_object_at_index(index)?)];
         if base.underline {
             // The old underline goes too; a new one follows the new text.
@@ -701,6 +720,7 @@ fn preview_replace(
                         index,
                         removed,
                         added: added + cover,
+                        text_box,
                     })
                 });
                 Ok(EditPreview {
@@ -902,6 +922,7 @@ fn reflow(
         // stay right), to restore on discard or free on keep. First, so the
         // words measured below aren't read over identical old text (PDFium's
         // text reading drops text drawn twice in one place).
+        let text_box = idx.iter().find_map(|&i| text_box_at(&pdf_page, i));
         let mut removed = Vec::new();
         for &i in idx.iter().rev() {
             removed.push((i, pdf_page.objects_mut().remove_object_at_index(i)?));
@@ -980,6 +1001,7 @@ fn reflow(
                 index: at,
                 removed,
                 added,
+                text_box,
             })
         });
         Ok(EditPreview {
@@ -1104,6 +1126,7 @@ pub fn preview_add_wrapped(
                 index,
                 removed: Vec::new(),
                 added,
+                text_box: Some(NEW_TEXT_BOX),
             })
         });
         Ok(AddPreview {
@@ -1166,7 +1189,56 @@ fn nearest_base(pdf_page: &PdfPage<'_>, x: f32, y: f32) -> Result<Base, Error> {
 /// Keeps the previewed edit in the document.
 pub fn keep_edit() {
     // Dropping the pending state frees the removed original object.
-    PENDING.with_borrow_mut(|pending| *pending = None);
+    let Some(pending) = PENDING.with_borrow_mut(|pending| pending.take()) else {
+        return;
+    };
+    if let Some(text_box) = pending.text_box
+        && let Err(error) = tag_text_box(pending.page, pending.index, pending.added, text_box)
+    {
+        log::warn!("pdit: could not tag the text box: {error}");
+    }
+}
+
+/// Tags the kept text objects `index..index + added` on `page` as text box `text_box` (a new number for
+/// [`NEW_TEXT_BOX`]), so the box can be picked, moved and resized (D-081).
+fn tag_text_box(page: u16, index: usize, added: usize, text_box: i32) -> Result<(), Error> {
+    with_open(|document| {
+        let pdf_page = document.pages().get(page.into())?;
+        let bindings = crate::pdfium().bindings();
+        let handle = pdf_page.page_handle();
+        // SAFETY: the handles come from this open document and page.
+        unsafe {
+            let count = bindings.FPDFPage_CountObjects(handle);
+            let text_box = match text_box {
+                NEW_TEXT_BOX => {
+                    (0..count)
+                        .filter_map(|i| {
+                            crate::marks::text_box(bindings, bindings.FPDFPage_GetObject(handle, i))
+                        })
+                        .max()
+                        .unwrap_or(0)
+                        + 1
+                }
+                n => n,
+            };
+            for i in index..(index + added).min(count as usize) {
+                let object = bindings.FPDFPage_GetObject(handle, i as i32);
+                if bindings.FPDFPageObj_GetType(object) == FPDF_PAGEOBJ_TEXT as i32 {
+                    crate::marks::tag(
+                        bindings,
+                        document.handle(),
+                        object,
+                        crate::marks::TEXT_BOX,
+                        Some(text_box),
+                    );
+                }
+            }
+            if !bindings.is_true(bindings.FPDFPage_GenerateContent(handle)) {
+                return Err(Error::Pdfium("could not write the page".into()));
+            }
+        }
+        Ok(())
+    })
 }
 
 /// Undoes the previewed edit, if there is one, putting the original object back

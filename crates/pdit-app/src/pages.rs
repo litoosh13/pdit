@@ -247,11 +247,18 @@ fn PageView(index: u16, count: usize, width_pt: f32, height_pt: f32) -> Element 
                 if annotate.take_click() || shapes.pen_armed() || forms.editing() {
                     return;
                 }
+                // The click selected a stamp or picture (pointer-down): not the text under it.
+                if tools.image_selection().is_some_and(|s| {
+                    let [l, b, r, t] = s.bounds;
+                    s.page == index && x >= l && x <= r && y >= b && y <= t
+                }) {
+                    return;
+                }
                 editing.select_at(index, x, y);
             },
             // A double-click on text opens the edit box (D-062); the first
             // click selected the line.
-            ondoubleclick: move |_| {
+            ondoubleclick: move |event| {
                 if locks.peek().contains(&index) {
                     return;
                 }
@@ -261,6 +268,26 @@ fn PageView(index: u16, count: usize, width_pt: f32, height_pt: f32) -> Element 
                         consume_context::<crate::forms_ui::FormFill>().fill_selected(page, annotation);
                     }
                     return;
+                }
+                // A selected text box (D-081): the double-click edits its text, like any line.
+                if let Some(sel) = tools
+                    .image_selection()
+                    .filter(|s| s.page == index && s.kind == crate::page_tools::Placed::TextBox)
+                    && let Some(slot) = slot_element.peek().clone()
+                {
+                    let rect = slot.get_bounding_client_rect();
+                    let point = event.client_coordinates();
+                    let per_pt = rect.width() / f64::from(width_pt);
+                    let x = ((point.x - rect.left()) / per_pt) as f32 + ox;
+                    let y = height_pt - ((point.y - rect.top()) / per_pt) as f32 + oy;
+                    tools.clear_image_selection();
+                    // The line under the pointer, or (between lines) the box's first line.
+                    if crate::editing::line_at(index, x, y).is_some() {
+                        editing.select_at(index, x, y);
+                    } else {
+                        let [l, b, r, t] = sel.bounds;
+                        editing.select_at(index, l + (r - l).min(4.0), t - ((t - b) * 0.25).min(6.0));
+                    }
                 }
                 if editing.state.peek().selection.is_some() {
                     editing.open_edit();
@@ -305,7 +332,9 @@ fn PageView(index: u16, count: usize, width_pt: f32, height_pt: f32) -> Element 
                 }
                 tools.table_press(index, x, y);
                 annotate.dismiss();
-                if crate::editing::line_at(index, x, y).is_some() {
+                // A stamp or picture lies over the page's text (D-081): it is picked first.
+                let movable = tools.movable_at(index, x, y);
+                if !movable && crate::editing::line_at(index, x, y).is_some() {
                     tools.clear_image_selection();
                     // A drag from here selects words to mark (D-040); a plain
                     // click still edits the line (onclick).
@@ -315,8 +344,8 @@ fn PageView(index: u16, count: usize, width_pt: f32, height_pt: f32) -> Element 
                     }
                     return;
                 }
-                match pdit_core::page_ops::image_at(index, x, y) {
-                    Ok(Some(_)) => {
+                match movable {
+                    true => {
                         tools.select_image(index, x, y);
                         // Capture the pointer so move/up still fire if the drag
                         // leaves the page, avoiding a stuck drag.
@@ -332,7 +361,7 @@ fn PageView(index: u16, count: usize, width_pt: f32, height_pt: f32) -> Element 
                             moved: false,
                         }));
                     }
-                    _ => tools.clear_image_selection(),
+                    false => tools.clear_image_selection(),
                 }
             },
             onpointermove: move |event| {

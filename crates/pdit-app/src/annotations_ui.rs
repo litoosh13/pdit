@@ -8,6 +8,7 @@
 use crate::page_tools::{PageTools, next_frame, set_timeout};
 use dioxus::prelude::*;
 use pdit_core::annotations::{self as annots, Annotation, AnnotationKind, MarkupKind, Word};
+use wasm_bindgen::JsCast;
 
 const ANNOTATIONS_CSS: Asset = asset!("/assets/css/annotations.css");
 /// Transitions.dev "Tabs sliding" lives there; the link box uses it (D-043).
@@ -450,6 +451,10 @@ pub fn AnnotationOverlay(
     scale: f32,
 ) -> Element {
     let mut annotate = use_context::<Annotate>();
+    // A note being dragged (D-081): its index, the pointer's last spot, and whether it moved (then the click that
+    // ends the press doesn't open it). Written on every step, so the boxes below are read again.
+    let mut note_drag = use_signal(|| None::<(usize, f64, f64, bool)>);
+    let _ = note_drag.read();
     // Re-read when the page is redrawn after a change (pages remount then).
     let existing = annots::annotations(page).unwrap_or_default();
     let flash = *annotate.flash.read();
@@ -512,12 +517,65 @@ pub fn AnnotationOverlay(
                             },
                             "data-annot": "{page}-{a.index}",
                             title: if a.kind == AnnotationKind::Note { a.text.clone() } else { String::new() },
-                            style: "left: {x}px; top: {y}px; width: {w}px; height: {h}px;",
-                            onpointerdown: move |event| event.stop_propagation(),
+                            // A stamp or pen drawing is picked by the page (D-081: moved and resized like a picture); its box only
+                            // flashes from the comments list.
+                            style: if matches!(a.kind, AnnotationKind::Stamp | AnnotationKind::Ink) {
+                                "left: {x}px; top: {y}px; width: {w}px; height: {h}px; pointer-events: none;"
+                            } else {
+                                "left: {x}px; top: {y}px; width: {w}px; height: {h}px;"
+                            },
+                            onpointerdown: {
+                                let note = a.kind == AnnotationKind::Note;
+                                let index = a.index;
+                                move |event: Event<PointerData>| {
+                                    event.stop_propagation();
+                                    if !note {
+                                        return;
+                                    }
+                                    if let Some(pe) = event.data().downcast::<web_sys::PointerEvent>()
+                                        && let Some(el) = pe.target().and_then(|t| t.dyn_into::<web_sys::Element>().ok())
+                                    {
+                                        let _ = el.set_pointer_capture(pe.pointer_id());
+                                    }
+                                    let p = event.client_coordinates();
+                                    note_drag.set(Some((index, p.x, p.y, false)));
+                                }
+                            },
+                            onpointermove: move |event| {
+                                let Some((index, x0, y0, moved)) = *note_drag.peek() else { return };
+                                if index != a.index {
+                                    return;
+                                }
+                                let p = event.client_coordinates();
+                                // A few pixels of jitter stay a click.
+                                if !moved && (p.x - x0).abs() + (p.y - y0).abs() <= 3.0 {
+                                    return;
+                                }
+                                let tools = consume_context::<PageTools>();
+                                if !moved {
+                                    tools.begin_image_drag();
+                                }
+                                let (dx, dy) = ((p.x - x0) as f32 / scale, (y0 - p.y) as f32 / scale);
+                                if annots::move_drawn(page, index, dx, dy).is_ok() {
+                                    consume_context::<crate::editing::Editing>().redraw(page);
+                                }
+                                note_drag.set(Some((index, p.x, p.y, true)));
+                            },
+                            onpointerup: move |_| {
+                                if let Some((index, _, _, true)) = *note_drag.peek()
+                                    && index == a.index
+                                {
+                                    consume_context::<PageTools>().end_drag("Note moved");
+                                }
+                            },
                             onclick: {
                                 let a = a.clone();
                                 move |event: Event<MouseData>| {
                                     event.stop_propagation();
+                                    // The end of a drag, not a click.
+                                    if note_drag.take().is_some_and(|(_, _, _, moved)| moved) {
+                                        return;
+                                    }
                                     if a.kind == AnnotationKind::Note {
                                         annotate.open_note(page, &a);
                                     } else {

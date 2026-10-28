@@ -86,6 +86,7 @@ pub async fn run(font_url: &str) {
     bookmarks_session(&font);
     form_edit_session();
     menus_session(&font);
+    placed_text_session(&font);
     find_session(&font);
     split_replace_session(&font);
     print_session();
@@ -597,6 +598,190 @@ fn annotation2_session() {
         snap.is_ok() && stamp.is_ok() && ink.is_ok() && matches!(listed, Ok(2)),
         format!("{snap:?} {stamp:?} {ink:?} {listed:?}"),
     );
+    // Moving and resizing a stamp (D-081): its box and its drawing go together.
+    let Ok(index) = stamp else {
+        return pdit_core::close_document();
+    };
+    let width_pt = pdit_core::page_ops::page_sizes()
+        .ok()
+        .and_then(|s| s.first().map(|s| s.0))
+        .unwrap_or(595.0);
+    // The stamp's blue pixels inside `[l, b, r, t]` (a render at 1 px per point).
+    let blue_in = |[l, b, r, t]: [f32; 4]| {
+        let Ok(image) = pdit_core::render_page(0, width_pt as u32) else {
+            return 0;
+        };
+        let (w, h, data) = (image.width() as f32, image.height() as f32, image.data());
+        let mut n = 0;
+        for py in (h - t).max(0.0) as u32..(h - b).min(h) as u32 {
+            for px in l.max(0.0) as u32..r.min(w) as u32 {
+                let i = ((py * w as u32 + px) * 4) as usize;
+                if data[i + 2] > 150 && data[i] < 120 {
+                    n += 1;
+                }
+            }
+        }
+        n
+    };
+    let found = annots::drawn_at(0, 110.0, 490.0);
+    let before = found.as_ref().ok().and_then(|f| f.map(|(_, _, b)| b));
+    let moved = annots::move_drawn(0, index, 120.0, -150.0);
+    let (old_blue, new_blue) = match (before, &moved) {
+        (Some(old), Ok(new)) => (blue_in(old), blue_in(*new)),
+        _ => (0, 0),
+    };
+    check(
+        "a stamp is found under the pointer and moves with its drawing",
+        found
+            .as_ref()
+            .is_ok_and(|f| f.is_some_and(|(i, k, _)| i == index && k == AnnotationKind::Stamp))
+            && moved.as_ref().is_ok_and(|n| {
+                before.is_some_and(|o| {
+                    (n[0] - o[0] - 120.0).abs() < 0.1 && (n[1] - o[1] + 150.0).abs() < 0.1
+                })
+            })
+            && old_blue == 0
+            && new_blue > 50,
+        format!(
+            "{found:?} → {moved:?}; blue pixels at the old place {old_blue}, at the new {new_blue}"
+        ),
+    );
+    let resized = annots::resize_drawn(0, index, 200.0);
+    let grown = resized.as_ref().map(|r| (r[2] - r[0], blue_in(*r)));
+    check(
+        "a stamp resizes with its drawing",
+        grown
+            .as_ref()
+            .is_ok_and(|(w, blue)| (w - 200.0).abs() < 0.5 && *blue > new_blue),
+        format!("{resized:?}; width and blue pixels {grown:?} (before {new_blue})"),
+    );
+    // The pen drawing (dark, round 200, 600) moves too, its strokes with it.
+    let dark_in = |[l, b, r, t]: [f32; 4]| {
+        let Ok(image) = pdit_core::render_page(0, width_pt as u32) else {
+            return 0;
+        };
+        let (w, h, data) = (image.width() as f32, image.height() as f32, image.data());
+        let mut n = 0;
+        for py in (h - t).max(0.0) as u32..(h - b).min(h) as u32 {
+            for px in l.max(0.0) as u32..r.min(w) as u32 {
+                let i = ((py * w as u32 + px) * 4) as usize;
+                if data[i] < 90 && data[i + 1] < 90 && data[i + 2] < 90 {
+                    n += 1;
+                }
+            }
+        }
+        n
+    };
+    let pen = annots::drawn_at(0, 200.0, 630.0);
+    let pen_moved = match &pen {
+        Ok(Some((i, AnnotationKind::Ink, old))) => {
+            annots::move_drawn(0, *i, -100.0, -300.0).map(|new| (dark_in(*old), dark_in(new)))
+        }
+        other => Err(pdit_core::Error::Pdfium(format!(
+            "no pen drawing found: {other:?}"
+        ))),
+    };
+    check(
+        "a pen drawing is found and moves with its drawing",
+        pen_moved
+            .as_ref()
+            .is_ok_and(|(old, new)| *old == 0 && *new > 50),
+        format!("{pen:?}; dark pixels at the old and new place {pen_moved:?}"),
+    );
+    // A shape pdit draws carries its tag and is found, moved and kept; the page's other content isn't a shape.
+    let drawn = pdit_core::page_ops::add_shape(
+        0,
+        pdit_core::ShapeKind::Rectangle,
+        300.0,
+        150.0,
+        400.0,
+        220.0,
+        [211, 58, 44],
+        3.0,
+        None,
+    );
+    let shape = pdit_core::page_ops::shape_at(0, 350.0, 151.0);
+    let not_shapes = [(100.0, 780.0), (60.0, 320.0)].map(|(x, y)| {
+        pdit_core::page_ops::shape_at(0, x, y)
+            .ok()
+            .flatten()
+            .is_none()
+    });
+    let red_in = |[l, b, r, t]: [f32; 4]| {
+        let Ok(image) = pdit_core::render_page(0, width_pt as u32) else {
+            return 0;
+        };
+        let (w, h, data) = (image.width() as f32, image.height() as f32, image.data());
+        let mut n = 0;
+        for py in (h - t).max(0.0) as u32..(h - b).min(h) as u32 {
+            for px in l.max(0.0) as u32..r.min(w) as u32 {
+                let i = ((py * w as u32 + px) * 4) as usize;
+                if data[i] > 170 && data[i + 1] < 110 && data[i + 2] < 110 {
+                    n += 1;
+                }
+            }
+        }
+        n
+    };
+    let shape_moved = match &shape {
+        Ok(Some(hit)) => pdit_core::page_ops::move_image(0, hit.object_index, 0.0, -100.0)
+            .map(|new| (red_in(hit.bounds), red_in(new), new)),
+        other => Err(pdit_core::Error::Pdfium(format!(
+            "no shape found: {other:?}"
+        ))),
+    };
+    check(
+        "a shape is found by its tag (not the page's text or a pen drawing) and moves",
+        drawn.is_ok()
+            && not_shapes == [true, true]
+            && shape_moved
+                .as_ref()
+                .is_ok_and(|(old, new, _)| *old == 0 && *new > 100),
+        format!(
+            "{drawn:?} {shape:?} {not_shapes:?}; red pixels at the old and new place {shape_moved:?}"
+        ),
+    );
+    let saved = pdit_core::save_document().unwrap_or_default();
+    let has = |needle: &[u8]| saved.windows(needle.len()).any(|w| w == needle);
+    check(
+        "a moved pen drawing's strokes move too",
+        has(b"/InkList") && !has(b"280 600") && has(b"180 300"),
+        format!(
+            "/InkList {}, old start {}, new start {}: {}",
+            has(b"/InkList"),
+            has(b"280 600"),
+            has(b"180 300"),
+            saved
+                .windows(8)
+                .position(|w| w == b"/InkList")
+                .map(
+                    |i| String::from_utf8_lossy(&saved[i..(i + 120).min(saved.len())]).into_owned()
+                )
+                .unwrap_or_default()
+        ),
+    );
+    let kept = pdit_core::open_document(saved)
+        .ok()
+        .and_then(|_| annots::annotations(0).ok());
+    let shape_kept = pdit_core::page_ops::shape_at(0, 350.0, 51.0);
+    check(
+        "the moved shape keeps its tag after saving",
+        shape_kept.as_ref().is_ok_and(Option::is_some),
+        format!("{shape_kept:?}"),
+    );
+    let stamp_bounds = kept.as_ref().and_then(|a| {
+        a.iter()
+            .find(|a| a.kind == AnnotationKind::Stamp)
+            .map(|a| a.bounds)
+    });
+    check(
+        "the moved stamp is saved where it was put",
+        stamp_bounds
+            .zip(resized.ok())
+            .is_some_and(|(k, r)| (k[0] - r[0]).abs() < 0.5 && (k[3] - r[3]).abs() < 0.5)
+            && stamp_bounds.is_some_and(|k| blue_in(k) > new_blue),
+        format!("{stamp_bounds:?}"),
+    );
     pdit_core::close_document();
 }
 
@@ -718,6 +903,126 @@ fn doc_content_session() {
 
 /// Links (D-043): address checks, written-out addresses found by PDFium, a web
 /// link on chosen words, edit / refuse / delete, auto-linking, save + reopen.
+/// Text added with pdit is a text box (D-081): its lines are found, moved, resized and deleted together; an edit
+/// keeps it a box; a second added text is its own box; a note moves.
+fn placed_text_session(font: &[u8]) {
+    use pdit_core::annotations;
+    use pdit_core::page_ops as pages;
+    let check = |name: &str, ok: bool, detail: String| {
+        log(&format!(
+            "pdit self-check {}: text boxes: {name}: {detail}",
+            if ok { "PASS" } else { "FAIL" }
+        ))
+    };
+    if pdit_core::open_document(pages::blank_document()).is_err() {
+        return check("open", false, String::new());
+    }
+    let fonts = pdit_core::Fonts::noto(font);
+    let added = pdit_core::preview_add(0, 72.0, 700.0, "First line\nSecond line", None, &fonts);
+    pdit_core::keep_edit();
+    let other = pdit_core::preview_add(0, 300.0, 400.0, "Other box", None, &fonts);
+    pdit_core::keep_edit();
+    let first = pages::text_box_at(0, 80.0, 697.0);
+    let second = pages::text_box_at(0, 305.0, 397.0);
+    let empty = pages::text_box_at(0, 500.0, 100.0);
+    let number = |hit: &Result<Option<pages::ImageHit>, pdit_core::Error>| {
+        hit.as_ref()
+            .ok()
+            .and_then(|h| h.as_ref().map(|h| h.object_index))
+    };
+    let tall = first
+        .as_ref()
+        .ok()
+        .and_then(Option::as_ref)
+        .map(|h| h.bounds[3] - h.bounds[1]);
+    check(
+        "added text is a box with both its lines; another is its own box",
+        added.is_ok()
+            && other.is_ok()
+            && number(&first) == Some(1)
+            && number(&second) == Some(2)
+            && matches!(empty, Ok(None))
+            && tall.is_some_and(|h| h > 20.0),
+        format!("{first:?} {second:?} {empty:?}"),
+    );
+    let word = |text: &str| {
+        annotations::words(0)
+            .ok()
+            .and_then(|w| w.into_iter().find(|w| w.text == text))
+            .map(|w| w.bounds)
+    };
+    let (before_first, before_second) = (word("First"), word("Second"));
+    let moved = pages::move_text_box(0, 1, 100.0, -200.0);
+    let shift = |a: Option<[f32; 4]>, b: Option<[f32; 4]>| {
+        a.zip(b).map(|(a, b)| (b[0] - a[0], b[1] - a[1]))
+    };
+    let (d1, d2) = (
+        shift(before_first, word("First")),
+        shift(before_second, word("Second")),
+    );
+    let near = |d: Option<(f32, f32)>| {
+        d.is_some_and(|(x, y)| (x - 100.0).abs() < 0.5 && (y + 200.0).abs() < 0.5)
+    };
+    check(
+        "both lines move together; the other box stays",
+        moved.is_ok() && near(d1) && near(d2) && word("Other").is_some_and(|o| o[0] < 310.0),
+        format!("{moved:?}; moved by {d1:?} {d2:?}"),
+    );
+    let width = moved.as_ref().map(|b| b[2] - b[0]).unwrap_or(0.0);
+    let resized = pages::resize_text_box(0, 1, width * 2.0);
+    check(
+        "the box resizes (its text grows)",
+        resized
+            .as_ref()
+            .is_ok_and(|b| ((b[2] - b[0]) - width * 2.0).abs() < 1.0),
+        format!("{width} → {resized:?}"),
+    );
+    // Editing a line keeps it in its box.
+    let line = pdit_core::text_lines(0)
+        .ok()
+        .and_then(|l| l.into_iter().find(|l| l.text.contains("Second")));
+    let edited =
+        line.map(|l| pdit_core::preview_edit(0, l.object_index, "Second line, edited", &fonts));
+    pdit_core::keep_edit();
+    let after = word("edited").and_then(|b| {
+        pages::text_box_at(0, b[0] + 1.0, (b[1] + b[3]) / 2.0)
+            .ok()
+            .flatten()
+    });
+    check(
+        "an edited line stays in its box",
+        after.as_ref().is_some_and(|h| h.object_index == 1),
+        format!("{edited:?}; {after:?}"),
+    );
+    let deleted = pages::delete_text_box(0, 1);
+    check(
+        "deleting the box removes all its lines, not the other box",
+        deleted.is_ok()
+            && word("First").is_none()
+            && word("edited").is_none()
+            && word("Other").is_some(),
+        format!("{deleted:?}"),
+    );
+    // A note moves (its icon keeps its size).
+    let note = annotations::add_note(0, 400.0, 500.0, "Synthetic note");
+    let moved_note = note
+        .as_ref()
+        .map(|&i| annotations::move_drawn(0, i, -50.0, 60.0));
+    let listed = annotations::annotations(0)
+        .ok()
+        .and_then(|a| {
+            a.into_iter()
+                .find(|a| a.kind == annotations::AnnotationKind::Note)
+        })
+        .map(|a| a.bounds);
+    check(
+        "a note moves",
+        listed.is_some_and(|b| (b[0] - 350.0).abs() < 0.5 && (b[3] - 560.0).abs() < 0.5),
+        format!("{moved_note:?}; {listed:?}"),
+    );
+    pdit_core::close_document();
+}
+
 /// Item-only right-click menus (D-050): on a synthetic page with a text line,
 /// a link, a note and a form field, each point gets its own item's menu and
 /// empty space the page's.

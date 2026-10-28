@@ -54,3 +54,10 @@ fresh appearance and are visible in every viewer. pdfium-render's bindings imple
 
 Copy the new release from crates.io, apply the four visibility changes above, remove the same files, and
 update the version pin in the workspace `Cargo.toml`.
+
+## Behaviour fix (2026-10-28, D-081)
+
+- `src/bindings/wasm_bindings.rs`, `FPDFAnnot_GetInkListPath`: the browser build passed three arguments to PDFium's
+  four-argument function (the buffer `length` was left out), so PDFium only returned the point count and never filled
+  the buffer; pdit then read uninitialised memory as stroke points. Now `length` is passed. Needed to move a pen
+  drawing's `/InkList` along with it.

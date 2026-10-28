@@ -9,6 +9,8 @@ mod font_trim;
 mod inspect;
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 mod lines;
+#[cfg(target_arch = "wasm32")]
+mod marks;
 pub mod subset;
 
 #[cfg(target_arch = "wasm32")]

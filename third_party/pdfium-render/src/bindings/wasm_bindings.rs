@@ -7552,11 +7552,14 @@ impl PdfiumLibraryBindings for WasmPdfiumBindings {
                     JsFunctionArgumentType::Pointer,
                     JsFunctionArgumentType::Number,
                     JsFunctionArgumentType::Pointer,
+                    JsFunctionArgumentType::Number,
                 ]),
-                Some(&JsValue::from(Array::of3(
+                // pdit (PDIT_PATCH.md, 2026-10-28): upstream left out `length`, so PDFium never filled the buffer.
+                Some(&JsValue::from(Array::of4(
                     &Self::js_value_from_annotation(annot),
                     &JsValue::from_f64(path_index as f64),
                     &Self::js_value_from_offset(ptr_buffer),
+                    &JsValue::from_f64(length as f64),
                 ))),
             )
             .as_f64()

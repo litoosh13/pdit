@@ -269,7 +269,201 @@ pub fn add_shape(
                     .add_object(PdfPageObject::Path(path))?;
             }
         }
+        mark_last_as_shape(document, &pdf_page)
+    })
+}
+
+/// Tags the page's newest object as a shape of pdit's (crate::marks).
+fn mark_last_as_shape(document: &PdfDocument, pdf_page: &PdfPage) -> Result<(), Error> {
+    let bindings = pdfium().bindings();
+    // SAFETY: the handles come from this open document and page.
+    unsafe {
+        let handle = pdf_page.page_handle();
+        let object =
+            bindings.FPDFPage_GetObject(handle, bindings.FPDFPage_CountObjects(handle) - 1);
+        if object.is_null()
+            || !crate::marks::tag(
+                bindings,
+                document.handle(),
+                object,
+                crate::marks::SHAPE,
+                None,
+            )
+        {
+            return Err(Error::Pdfium("could not tag the shape".into()));
+        }
+        if !bindings.is_true(bindings.FPDFPage_GenerateContent(handle)) {
+            return Err(Error::Pdfium("could not write the page".into()));
+        }
+    }
+    Ok(())
+}
+
+/// The text box (text added with pdit, D-081) under (`x_pt`, `y_pt`) on `page`: its number as `object_index` and
+/// the bounds of all its lines.
+pub fn text_box_at(page: u16, x_pt: f32, y_pt: f32) -> Result<Option<ImageHit>, Error> {
+    with_text_boxes(page, |_, _, objects| {
+        let mut boxes: Vec<(i32, [f32; 4])> = Vec::new();
+        for &(_, number, bounds) in objects {
+            match boxes.iter_mut().find(|(n, _)| *n == number) {
+                Some((_, u)) => *u = union(*u, bounds),
+                None => boxes.push((number, bounds)),
+            }
+        }
+        Ok(boxes
+            .into_iter()
+            .rev()
+            .find(|(_, [l, b, r, t])| x_pt >= *l && x_pt <= *r && y_pt >= *b && y_pt <= *t)
+            .map(|(number, bounds)| ImageHit {
+                object_index: number as usize,
+                bounds,
+            }))
+    })
+}
+
+fn union(a: [f32; 4], b: [f32; 4]) -> [f32; 4] {
+    [
+        a[0].min(b[0]),
+        a[1].min(b[1]),
+        a[2].max(b[2]),
+        a[3].max(b[3]),
+    ]
+}
+
+/// Runs `f` with PDFium's bindings, the page handle and every text-box object on `page` (handle, box number,
+/// bounds), all within one load of the page: the object handles belong to it.
+fn with_text_boxes<R>(
+    page: u16,
+    f: impl FnOnce(
+        &dyn PdfiumLibraryBindings,
+        FPDF_PAGE,
+        &[(FPDF_PAGEOBJECT, i32, [f32; 4])],
+    ) -> Result<R, Error>,
+) -> Result<R, Error> {
+    with_open(|document| {
+        let pdf_page = document.pages().get(page.into())?;
+        let bindings = pdfium().bindings();
+        let handle = pdf_page.page_handle();
+        let mut objects = Vec::new();
+        // SAFETY: object handles come from this open page, which stays loaded while `f` runs.
+        unsafe {
+            for i in 0..bindings.FPDFPage_CountObjects(handle) {
+                let object = bindings.FPDFPage_GetObject(handle, i);
+                let Some(number) = crate::marks::text_box(bindings, object) else {
+                    continue;
+                };
+                let (mut l, mut b, mut r, mut t) = (0.0, 0.0, 0.0, 0.0);
+                if bindings
+                    .is_true(bindings.FPDFPageObj_GetBounds(object, &mut l, &mut b, &mut r, &mut t))
+                {
+                    objects.push((object, number, [l, b, r, t]));
+                }
+            }
+        }
+        f(bindings, handle, &objects)
+    })
+}
+
+/// Moves text box `number` on `page` by (`dx`, `dy`) points; returns its new bounds.
+pub fn move_text_box(page: u16, number: usize, dx: f32, dy: f32) -> Result<[f32; 4], Error> {
+    transform_text_box(page, number, |_| [1.0, f64::from(dx), f64::from(dy)])
+}
+
+/// Resizes text box `number` on `page` to `width_pt` wide (the text grows or shrinks, its shape kept), scaled
+/// about the page origin like [`resize_image`]: the caller moves it back to the corner it holds.
+pub fn resize_text_box(page: u16, number: usize, width_pt: f32) -> Result<[f32; 4], Error> {
+    transform_text_box(page, number, |[l, _, r, _]| {
+        [f64::from(width_pt / (r - l).max(0.1)), 0.0, 0.0]
+    })
+}
+
+/// Deletes text box `number` on `page`.
+pub fn delete_text_box(page: u16, number: usize) -> Result<(), Error> {
+    crate::history::before_change()?;
+    with_text_boxes(page, |bindings, handle, objects| {
+        // SAFETY: the handles come from this loaded page; each removed object is then destroyed.
+        unsafe {
+            for &(object, n, _) in objects {
+                if n as usize == number
+                    && bindings.is_true(bindings.FPDFPage_RemoveObject(handle, object))
+                {
+                    bindings.FPDFPageObj_Destroy(object);
+                }
+            }
+            bindings.FPDFPage_GenerateContent(handle);
+        }
         Ok(())
+    })
+}
+
+/// Scales text box `number` by `k` and moves it by (`e`, `f`), from `how(its bounds)`; returns its new bounds.
+fn transform_text_box(
+    page: u16,
+    number: usize,
+    how: impl FnOnce([f32; 4]) -> [f64; 3],
+) -> Result<[f32; 4], Error> {
+    crate::history::before_change()?;
+    with_text_boxes(page, |bindings, handle, objects| {
+        let mine: Vec<_> = objects
+            .iter()
+            .filter(|(_, n, _)| *n as usize == number)
+            .collect();
+        let bounds = mine
+            .iter()
+            .map(|(_, _, b)| *b)
+            .reduce(union)
+            .ok_or_else(|| Error::Pdfium("that text box has changed".into()))?;
+        let [k, e, f] = how(bounds);
+        let mut moved: Option<[f32; 4]> = None;
+        // SAFETY: the handles come from this loaded page.
+        unsafe {
+            for &&(object, _, _) in &mine {
+                bindings.FPDFPageObj_Transform(object, k, 0.0, 0.0, k, e, f);
+                let (mut l, mut b, mut r, mut t) = (0.0, 0.0, 0.0, 0.0);
+                bindings.FPDFPageObj_GetBounds(object, &mut l, &mut b, &mut r, &mut t);
+                moved = Some(moved.map_or([l, b, r, t], |u| union(u, [l, b, r, t])));
+            }
+            if !bindings.is_true(bindings.FPDFPage_GenerateContent(handle)) {
+                return Err(Error::Pdfium("could not write the page".into()));
+            }
+        }
+        Ok(moved.unwrap_or(bounds))
+    })
+}
+
+/// The shape pdit drew under (`x_pt`, `y_pt`) on `page` (the top one; a few points of slack for thin lines).
+pub fn shape_at(page: u16, x_pt: f32, y_pt: f32) -> Result<Option<ImageHit>, Error> {
+    const SLACK: f32 = 4.0;
+    with_open(|document| {
+        let pdf_page = document.pages().get(page.into())?;
+        let bindings = pdfium().bindings();
+        let handle = pdf_page.page_handle();
+        let mut found = None;
+        // SAFETY: object and mark handles come from this open page and are only read.
+        unsafe {
+            for index in 0..bindings.FPDFPage_CountObjects(handle) {
+                let object = bindings.FPDFPage_GetObject(handle, index);
+                if object.is_null()
+                    || crate::marks::find(bindings, object, crate::marks::SHAPE).is_none()
+                {
+                    continue;
+                }
+                let (mut l, mut b, mut r, mut t) = (0.0, 0.0, 0.0, 0.0);
+                if !bindings
+                    .is_true(bindings.FPDFPageObj_GetBounds(object, &mut l, &mut b, &mut r, &mut t))
+                {
+                    continue;
+                }
+                if x_pt >= l - SLACK && x_pt <= r + SLACK && y_pt >= b - SLACK && y_pt <= t + SLACK
+                {
+                    found = Some(ImageHit {
+                        object_index: index as usize,
+                        bounds: [l, b, r, t],
+                    });
+                }
+            }
+        }
+        Ok(found)
     })
 }
 
