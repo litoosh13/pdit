@@ -25,13 +25,27 @@ permissions:
   pages: write
   id-token: write
 
-env:
-  TAG: ${{ inputs.version && format('v{0}', inputs.version) || github.ref_name }}
-
 jobs:
   web:
     runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
     steps:
+      # The tag from the typed version (with or without its v, spaces dropped) or the pushed tag; anything that
+      # isn't a version like 0.1.0-beta.17 stops the release here, before anything is built.
+      - id: version
+        name: Version
+        env:
+          INPUT: ${{ inputs.version }}
+        run: |
+          v="${INPUT:-$GITHUB_REF_NAME}"
+          v="$(printf '%s' "$v" | tr -d '[:space:]' | sed 's/^[vV]*//')"
+          if ! printf '%s' "$v" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$'; then
+            echo "::error::\"$INPUT\" is not a version like 0.1.0-beta.17"
+            exit 1
+          fi
+          echo "tag=v$v" >> "$GITHUB_OUTPUT"
+
       - uses: actions/checkout@v4
 
       - name: Rust toolchain
@@ -70,6 +84,8 @@ jobs:
       # The online version: served from /pdit/ (the repository's name); About shows the version.
       - name: Online version
         working-directory: crates/pdit-app
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
         run: PDIT_VERSION="$TAG" dx build --release --platform web --base-path pdit
 
       # Offline use (public/sw.js): every file to keep, and a cache name new to this deployment.
@@ -87,6 +103,8 @@ jobs:
 
   build:
     needs: web
+    env:
+      TAG: ${{ needs.web.outputs.tag }}
     strategy:
       fail-fast: false
       matrix:
