@@ -106,6 +106,7 @@ pub async fn run(font_url: &str) {
     ask_session().await;
     fill_session().await;
     mupdf_session().await;
+    mupdf_text_box_session(&font).await;
     compress_session().await;
     labels_session().await;
     office_session().await;
@@ -2273,6 +2274,89 @@ async fn mupdf_session() {
             added.as_ref().err()
         ),
     );
+}
+
+/// A text box edited by the desktop app's MuPDF (D-081): the new text is still the same box, the other box too.
+async fn mupdf_text_box_session(font: &[u8]) {
+    use crate::ai_ui::desktop;
+    use pdit_core::page_ops as pages;
+    let check = |name: &str, ok: bool, detail: String| {
+        log(&format!(
+            "pdit self-check {}: mupdf text box: {name}: {detail}",
+            if ok { "PASS" } else { "FAIL" }
+        ))
+    };
+    if !desktop::available() {
+        return log("pdit self-check: mupdf text box: skipped (not the desktop app)");
+    }
+    if pdit_core::open_document(pages::blank_document()).is_err() {
+        return check("open", false, String::new());
+    }
+    let fonts = pdit_core::Fonts::noto(font);
+    let _ = pdit_core::preview_add(0, 72.0, 700.0, "Box text to change", None, &fonts);
+    pdit_core::keep_edit();
+    let _ = pdit_core::preview_add(0, 300.0, 400.0, "Other box", None, &fonts);
+    pdit_core::keep_edit();
+    let height = pages::page_sizes()
+        .ok()
+        .and_then(|s| s.first().map(|s| s.1))
+        .unwrap_or(842.0);
+    // The numbers the app sends MuPDF (editing.rs): the edited line's box, a new box's number.
+    let numbers = (
+        pdit_core::text_box_for(0, Some(0)),
+        pdit_core::text_box_for(0, None),
+    );
+    check(
+        "the app reads the edited line's box and a new box's number",
+        numbers == (Some(1), Some(3)),
+        format!("{numbers:?}"),
+    );
+    let (box_, bytes) = (
+        pages::text_box_at(0, 80.0, 697.0),
+        pdit_core::save_document(),
+    );
+    pdit_core::close_document();
+    let (Ok(Some(hit)), Ok(bytes)) = (box_, bytes) else {
+        return check("setup", false, String::new());
+    };
+    let [left, _, _, top] = hit.bounds;
+    let encode = |s: &str| String::from(js_sys::encode_uri_component(s));
+    let headers = [
+        ("x-page", "0".to_owned()),
+        ("x-x", (left + 2.0).to_string()),
+        ("x-y", (height - top + 2.0).to_string()),
+        ("x-expected", encode("Box text to change")),
+        ("x-text", encode("Box text changed by MuPDF")),
+        ("x-box", hit.object_index.to_string()),
+    ];
+    let edited = desktop::invoke_raw("edit_paragraph", &bytes, &headers).await;
+    let Ok(value) = edited else {
+        return check("edit", false, format!("{edited:?}"));
+    };
+    if pdit_core::open_document(js_sys::Uint8Array::new(&value).to_vec()).is_err() {
+        return check("reopen", false, String::new());
+    }
+    let word = |text: &str| {
+        pdit_core::annotations::words(0)
+            .ok()
+            .and_then(|w| w.into_iter().find(|w| w.text == text))
+            .map(|w| w.bounds)
+    };
+    let number = |b: Option<[f32; 4]>| {
+        b.and_then(|b| {
+            pages::text_box_at(0, b[0] + 1.0, (b[1] + b[3]) / 2.0)
+                .ok()
+                .flatten()
+        })
+        .map(|h| h.object_index)
+    };
+    let (changed, other) = (number(word("MuPDF")), number(word("Other")));
+    check(
+        "the edited text is still box 1, the other still box 2",
+        changed == Some(1) && other == Some(2),
+        format!("{changed:?} {other:?}"),
+    );
+    pdit_core::close_document();
 }
 
 async fn ask_session() {

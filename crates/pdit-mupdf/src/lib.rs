@@ -86,6 +86,7 @@ unsafe extern "C" {
         place: fz_rect,
         html: *const c_char,
         css: *const c_char,
+        mark: *const c_char,
         names: *const *const c_char,
         datas: *const *const u8,
         lens: *const usize,
@@ -101,13 +102,22 @@ unsafe extern "C" {
 
 pub struct Editor {
     doc: PdfDocument,
+    /// Marked content put around text this editor adds (`mark_text_box`).
+    mark: Option<CString>,
 }
 
 impl Editor {
     pub fn open(bytes: &[u8]) -> Result<Self, Error> {
         Ok(Self {
             doc: PdfDocument::from_bytes(bytes)?,
+            mark: None,
         })
+    }
+
+    /// Text added from now on (`replace_paragraph`, `add_text`) is tagged as pdit's text box `number`
+    /// (`/pditText <</box n>> BDC`, as pdit-core tags it), so it stays one movable box (D-081).
+    pub fn mark_text_box(&mut self, number: i32) {
+        self.mark = CString::new(format!("/pditText <</box {number}>> BDC")).ok();
     }
 
     pub fn page_count(&self) -> Result<i32, Error> {
@@ -372,6 +382,7 @@ impl Editor {
                 place,
                 html.as_ptr(),
                 css.as_ptr(),
+                self.mark.as_ref().map_or(std::ptr::null(), |m| m.as_ptr()),
                 names.as_ptr(),
                 datas.as_ptr(),
                 lens.as_ptr(),

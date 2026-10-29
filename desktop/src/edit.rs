@@ -13,8 +13,8 @@ const VAZIRMATN: &[u8] = include_bytes!("../fonts/vazirmatn/Vazirmatn-Regular.tt
 
 /// Body: the PDF. Headers: x-page (from 0), x-x / x-y (a point in the paragraph, points from the page's
 /// top-left), x-expected (the paragraph's text as the app read it) and x-text (the new text), both
-/// percent-encoded. Fails with "different paragraph" when MuPDF's paragraph there isn't the app's, so the app
-/// can edit its own way instead.
+/// percent-encoded; optional x-box, the pdit text box (D-081) the paragraph is in. Fails with "different
+/// paragraph" when MuPDF's paragraph there isn't the app's, so the app can edit its own way instead.
 #[tauri::command]
 pub async fn edit_paragraph(request: Request<'_>) -> Result<Response, String> {
     let InvokeBody::Raw(pdf) = request.body() else {
@@ -40,6 +40,9 @@ pub async fn edit_paragraph(request: Request<'_>) -> Result<Response, String> {
     let (expected, new_text) = (text("x-expected")?, text("x-text")?);
 
     let mut editor = pdit_mupdf::Editor::open(pdf).map_err(|e| e.to_string())?;
+    if let Ok(n) = number("x-box") {
+        editor.mark_text_box(n as i32);
+    }
     let paragraph = editor
         .paragraph_at(page, x, y)
         .map_err(|e| e.to_string())?
@@ -93,7 +96,8 @@ pub async fn paragraph_lines(request: Request<'_>) -> Result<Option<ParagraphLin
 
 /// A new text box with text the PDF's fonts can't shape (Persian, Arabic…; P-050 #16): body the PDF; headers
 /// x-page, x-x, x-top (the box's top-left in MuPDF's page space), x-width, x-size (points), x-color ("r,g,b") and
-/// x-text (percent-encoded). Returns the PDF with the text laid out by MuPDF in Noto Sans / Vazirmatn.
+/// x-text (percent-encoded); optional x-box, the new text box's number (D-081). Returns the PDF with the text
+/// laid out by MuPDF in Noto Sans / Vazirmatn.
 #[tauri::command]
 pub async fn add_text(request: Request<'_>) -> Result<Response, String> {
     let InvokeBody::Raw(pdf) = request.body() else {
@@ -119,6 +123,9 @@ pub async fn add_text(request: Request<'_>) -> Result<Response, String> {
         .collect();
     let color = [0, 1, 2].map(|i| color.get(i).copied().unwrap_or(0));
     let mut editor = pdit_mupdf::Editor::open(pdf).map_err(|e| e.to_string())?;
+    if let Ok(n) = number("x-box") {
+        editor.mark_text_box(n as i32);
+    }
     editor
         .add_text(
             number("x-page")? as i32,
@@ -168,7 +175,11 @@ pub async fn compress_pdf(request: Request<'_>) -> Result<Response, String> {
     let InvokeBody::Raw(pdf) = request.body() else {
         return Err("expected the PDF as raw bytes".into());
     };
-    let level = match request.headers().get("x-level").and_then(|v| v.to_str().ok()) {
+    let level = match request
+        .headers()
+        .get("x-level")
+        .and_then(|v| v.to_str().ok())
+    {
         Some("0") => pdit_mupdf::Level::BestQuality,
         Some("1") => pdit_mupdf::Level::Medium,
         Some("2") => pdit_mupdf::Level::Smallest,
@@ -201,7 +212,12 @@ pub async fn set_page_labels(request: Request<'_>) -> Result<Response, String> {
             let style = next()?.bytes().next().unwrap_or(0);
             let start = next()?.parse().map_err(|_| "bad start")?;
             let prefix = next()?.to_owned();
-            Ok(pdit_mupdf::LabelRange { first, style, prefix, start })
+            Ok(pdit_mupdf::LabelRange {
+                first,
+                style,
+                prefix,
+                start,
+            })
         })
         .collect::<Result<Vec<_>, String>>()?;
     let out = pdit_mupdf::set_page_labels(pdf, &ranges).map_err(|e| e.to_string())?;
@@ -222,12 +238,15 @@ pub async fn to_office(request: Request<'_>) -> Result<Response, String> {
             .and_then(|v| v.to_str().ok())
             .ok_or(format!("missing {name}"))
     };
-    let page = |name: &str| -> Result<i32, String> { header(name)?.parse().map_err(|_| format!("bad {name}")) };
+    let page = |name: &str| -> Result<i32, String> {
+        header(name)?.parse().map_err(|_| format!("bad {name}"))
+    };
     let odt = match header("x-format")? {
         "docx" => false,
         "odt" => true,
         _ => return Err("bad x-format".into()),
     };
-    let out = pdit_mupdf::to_office(pdf, page("x-first")?, page("x-last")?, odt).map_err(|e| e.to_string())?;
+    let out = pdit_mupdf::to_office(pdf, page("x-first")?, page("x-last")?, odt)
+        .map_err(|e| e.to_string())?;
     Ok(Response::new(out))
 }

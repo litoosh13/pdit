@@ -234,7 +234,13 @@ impl Editing {
                 encode(selection.expected.as_deref().unwrap_or(&selection.text)),
             ),
             ("x-text", encode(text)),
-        ];
+        ]
+        .into_iter()
+        .chain(
+            pdit_core::text_box_for(selection.page, Some(selection.object_index))
+                .map(|n| ("x-box", n.to_string())),
+        )
+        .collect::<Vec<_>>();
         let edited = crate::ai_ui::desktop::invoke_raw("edit_paragraph", &before, &headers)
             .await
             .map_err(|e| e.as_string().unwrap_or_else(|| format!("{e:?}")))?;
@@ -279,7 +285,10 @@ impl Editing {
             ("x-size", size.to_string()),
             ("x-color", format!("{r},{g},{b}")),
             ("x-text", String::from(js_sys::encode_uri_component(text))),
-        ];
+        ]
+        .into_iter()
+        .chain(pdit_core::text_box_for(selection.page, None).map(|n| ("x-box", n.to_string())))
+        .collect::<Vec<_>>();
         let added = crate::ai_ui::desktop::invoke_raw("add_text", &before, &headers)
             .await
             .map_err(|e| e.as_string().unwrap_or_else(|| format!("{e:?}")))?;

@@ -62,10 +62,11 @@ static fz_buffer *rename_names(fz_context *ctx, fz_buffer *src, char (*old)[64],
  * so the fonts it adds can't take the names of the page's own fonts, and the text stays on the page itself (not
  * inside a form XObject), where every reader and editor finds it.
  * `filled` gets the area used; `more` is set to 1 when the text did not fit in `where`; `xname` gets the new font
- * resource names, separated by spaces (`xn` bytes).
+ * resource names, separated by spaces (`xn` bytes). `mark`, when not NULL, is a marked-content opening
+ * (`/Tag <<…>> BDC`) put around the new text, closed with EMC.
  * Returns 0, or -1 with the error message in `err` (`n` bytes). */
 int pdit_story_onto_page(fz_context *ctx, pdf_document *doc, pdf_page *page, fz_rect where, const char *html,
-                         const char *css, const char **names, const unsigned char **datas, const size_t *lens,
+                         const char *css, const char *mark, const char **names, const unsigned char **datas, const size_t *lens,
                          int nfonts, fz_rect *filled, int *more, char *xname, size_t xn, char *err, size_t n)
 {
     fz_archive *arch = NULL;
@@ -160,8 +161,12 @@ int pdit_story_onto_page(fz_context *ctx, pdf_document *doc, pdf_page *page, fz_
         contents = renamed;
         show = fz_new_buffer(ctx, fz_buffer_storage(ctx, contents, NULL) + 8);
         fz_append_string(ctx, show, "q\n");
+        if (mark)
+        {
+            fz_append_printf(ctx, show, "%s\n", mark);
+        }
         fz_append_buffer(ctx, show, contents);
-        fz_append_string(ctx, show, "\nQ\n");
+        fz_append_string(ctx, show, mark ? "\nEMC\nQ\n" : "\nQ\n");
         stream = pdf_add_stream(ctx, doc, show, NULL, 0);
         pdf_obj *old = pdf_dict_get(ctx, page->obj, PDF_NAME(Contents));
         if (pdf_is_array(ctx, old))

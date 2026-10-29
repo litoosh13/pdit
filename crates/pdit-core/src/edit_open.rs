@@ -1210,15 +1210,7 @@ fn tag_text_box(page: u16, index: usize, added: usize, text_box: i32) -> Result<
         unsafe {
             let count = bindings.FPDFPage_CountObjects(handle);
             let text_box = match text_box {
-                NEW_TEXT_BOX => {
-                    (0..count)
-                        .filter_map(|i| {
-                            crate::marks::text_box(bindings, bindings.FPDFPage_GetObject(handle, i))
-                        })
-                        .max()
-                        .unwrap_or(0)
-                        + 1
-                }
+                NEW_TEXT_BOX => next_text_box(bindings, handle),
                 n => n,
             };
             for i in index..(index + added).min(count as usize) {
@@ -1239,6 +1231,35 @@ fn tag_text_box(page: u16, index: usize, added: usize, text_box: i32) -> Result<
         }
         Ok(())
     })
+}
+
+/// The text box for text that the desktop's MuPDF writes (D-081): the box the edited text object `index` is in
+/// (`None` when it is in none), or for new text (`index` `None`) a new box's number.
+pub fn text_box_for(page: u16, index: Option<usize>) -> Option<i32> {
+    with_open(|document| {
+        let pdf_page = document.pages().get(page.into())?;
+        Ok(match index {
+            Some(index) => text_box_at(&pdf_page, index),
+            // SAFETY: the page handle comes from this open page.
+            None => {
+                Some(unsafe { next_text_box(crate::pdfium().bindings(), pdf_page.page_handle()) })
+            }
+        })
+    })
+    .ok()
+    .flatten()
+}
+
+/// One more than the highest text box number on the page.
+unsafe fn next_text_box(bindings: &dyn PdfiumLibraryBindings, page: FPDF_PAGE) -> i32 {
+    // SAFETY: the caller's page handle is open; its objects are only read.
+    unsafe {
+        (0..bindings.FPDFPage_CountObjects(page))
+            .filter_map(|i| crate::marks::text_box(bindings, bindings.FPDFPage_GetObject(page, i)))
+            .max()
+            .unwrap_or(0)
+            + 1
+    }
 }
 
 /// Undoes the previewed edit, if there is one, putting the original object back
