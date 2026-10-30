@@ -1004,6 +1004,106 @@ fn placed_text_session(font: &[u8]) {
             && word("Other").is_some(),
         format!("{deleted:?}"),
     );
+    // A kept box with several paragraphs edits again as a whole: line breaks stay, a long line wraps in it.
+    let added =
+        pdit_core::preview_add_wrapped(0, 72.0, 300.0, "Head\n\nOne\nTwo", None, &fonts, 200.0);
+    pdit_core::keep_edit();
+    let first = added.as_ref().map(|a| a.object_index).unwrap_or(0);
+    let objects = pdit_core::text_box_objects(0, first);
+    let long = "Head\n\nOne grows into a much longer line that cannot fit\nTwo";
+    let edited = pdit_core::preview_reflow(0, &objects, long, None, &fonts);
+    pdit_core::keep_edit();
+    let lines = pdit_core::text_lines(0)
+        .map(|l| {
+            l.into_iter()
+                .filter(|l| l.bounds[3] < 320.0 && l.bounds[1] > 150.0)
+                .count()
+        })
+        .unwrap_or(0);
+    let right = word("fit").map_or(f32::MAX, |b| b[2]);
+    check(
+        "a kept box edits again with its line breaks; long lines wrap",
+        objects.len() == 3 && edited.is_ok() && lines >= 4 && right < 72.0 + 200.0 + 1.0,
+        format!("{objects:?} {edited:?}; {lines} lines; right edge {right}"),
+    );
+    // Side handles: a box re-wraps narrower with its letters kept and its text read back the same; a shape
+    // stretches one way only.
+    let source = "Head\n\nalpha beta gamma delta epsilon zeta\nOne\nTwo";
+    let _ = pdit_core::preview_add_wrapped(0, 72.0, 600.0, source, None, &fonts, 400.0);
+    pdit_core::keep_edit();
+    let number = pages::text_box_at(0, 80.0, 597.0)
+        .ok()
+        .flatten()
+        .map_or(-1, |h| h.object_index as i32);
+    let read = pdit_core::text_box_text(0, number).ok();
+    let rewrapped = read
+        .as_ref()
+        .map(|t| pdit_core::rewrap_text_box(0, number, t, 90.0, &fonts));
+    let read_again = pdit_core::text_box_text(0, number).ok();
+    check(
+        "a side handle re-wraps a box; its text reads back the same",
+        read.as_deref() == Some(source)
+            && rewrapped.as_ref().is_some_and(|r| {
+                r.as_ref()
+                    .is_ok_and(|b| b[2] - b[0] <= 91.0 && b[3] - b[1] > 60.0)
+            })
+            && read_again.as_deref() == Some(source),
+        format!("{read:?} → {rewrapped:?} → {read_again:?}"),
+    );
+    let _ = pages::add_shape(
+        0,
+        pdit_core::ShapeKind::Rectangle,
+        300.0,
+        100.0,
+        400.0,
+        150.0,
+        [0, 0, 0],
+        1.0,
+        None,
+    );
+    let shape = pages::shape_at(0, 350.0, 101.0).ok().flatten();
+    let stretched = shape
+        .as_ref()
+        .map(|h| pages::stretch_image(0, h.object_index, h.bounds[2] - h.bounds[0], 120.0));
+    check(
+        "a side handle stretches a shape one way",
+        shape
+            .as_ref()
+            .zip(stretched.as_ref())
+            .is_some_and(|(h, s)| {
+                s.as_ref().is_ok_and(|s| {
+                    ((s[2] - s[0]) - (h.bounds[2] - h.bounds[0])).abs() < 0.5
+                        && ((s[3] - s[1]) - 120.0).abs() < 0.5
+                })
+            }),
+        format!("{shape:?} → {stretched:?}"),
+    );
+    let _ = pages::delete_text_box(0, number as usize);
+    if let Some(h) = shape {
+        let _ = pages::delete_image(0, h.object_index);
+    }
+    // Text too long for its page continues on a new page after it.
+    let long = (1..=40)
+        .map(|i| format!("Line {i}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let added = pdit_core::preview_add_wrapped(0, 72.0, 200.0, &long, None, &fonts, 300.0);
+    let rest = added.as_ref().ok().and_then(|a| a.rest.clone());
+    let last = rest
+        .clone()
+        .map(|rest| pdit_core::continue_on_new_pages(0, 72.0, rest, None, &fonts, 300.0));
+    let page_two =
+        |text: &str| annotations::words(1).is_ok_and(|w| w.iter().any(|w| w.text == text));
+    check(
+        "a long paste continues on a new page",
+        rest.as_deref()
+            .is_some_and(|r| r.starts_with("Line ") && r.ends_with("Line 40"))
+            && matches!(last, Some(Ok(1)))
+            && pages::page_sizes().is_ok_and(|s| s.len() == 2)
+            && page_two("40")
+            && word("1").is_some(),
+        format!("{last:?}; rest {:?}", rest.map(|r| r.len())),
+    );
     // A note moves (its icon keeps its size).
     let note = annotations::add_note(0, 400.0, 500.0, "Synthetic note");
     let moved_note = note

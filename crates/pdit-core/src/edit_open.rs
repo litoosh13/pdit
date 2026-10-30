@@ -38,6 +38,8 @@ pub struct AddPreview {
     /// Where the new object sits in the page's object list.
     pub object_index: usize,
     pub preview: EditPreview,
+    /// The text that didn't fit above the page's bottom margin, for [`continue_on_new_pages`].
+    pub rest: Option<String>,
 }
 
 /// What is needed to undo a previewed edit: the original objects, taken off
@@ -55,6 +57,10 @@ struct Pending {
     /// The text box (D-081) the new text belongs to when kept: the one the replaced text was in, or
     /// [`NEW_TEXT_BOX`] for added text.
     text_box: Option<i32>,
+    /// The box's wrap width in points, kept in its tag (for reading its text back, [`text_box_text`]).
+    width: Option<f32>,
+    /// The box's text as typed, kept in its tag too ([`text_box_text`]).
+    source: Option<String>,
 }
 
 /// A text box number not given yet: added text becomes a new box when kept.
@@ -721,6 +727,8 @@ fn preview_replace(
                         removed,
                         added: added + cover,
                         text_box,
+                        width: None,
+                        source: None,
                     })
                 });
                 Ok(EditPreview {
@@ -828,7 +836,7 @@ pub fn preview_reflow(
     style: Option<&TextStyle>,
     fonts: &Fonts<'_>,
 ) -> Result<EditPreview, Error> {
-    reflow(page, indices, new_text, style, fonts, true)
+    reflow(page, indices, new_text, style, fonts, true, None)
 }
 
 /// Replaces one visual line (its text objects `indices`, from
@@ -842,7 +850,7 @@ pub fn preview_line(
     new_text: &str,
     fonts: &Fonts<'_>,
 ) -> Result<EditPreview, Error> {
-    reflow(page, indices, new_text, None, fonts, false)
+    reflow(page, indices, new_text, None, fonts, false, None)
 }
 
 fn reflow(
@@ -852,6 +860,7 @@ fn reflow(
     style: Option<&TextStyle>,
     fonts: &Fonts<'_>,
     wrap: bool,
+    width: Option<f32>,
 ) -> Result<EditPreview, Error> {
     crate::history::before_change()?;
     let mut idx: Vec<usize> = indices.to_vec();
@@ -860,8 +869,8 @@ fn reflow(
     let Some(&min) = idx.first() else {
         return Err(Error::Pdfium("no lines to reflow".into()));
     };
-    // A single object is edited as one line.
-    if idx.len() < 2 {
+    // A single object is edited as one line (unless the new text has line breaks).
+    if idx.len() < 2 && !new_text.contains('\n') {
         return preview_replace(page, min, new_text, style, fonts);
     }
     with_open(|document| {
@@ -908,13 +917,18 @@ fn reflow(
         baselines.sort_by(|a, b| b.total_cmp(a));
         // Pieces of one line share its baseline: one per line.
         baselines.dedup_by(|a, b| (*b - *a).abs() < 0.3 * base.size.value * base.scale());
+        // The smallest step between lines (a blank line between paragraphs is two).
         let line_height = if baselines.len() >= 2 {
-            baselines[0] - baselines[1]
+            baselines
+                .windows(2)
+                .map(|w| w[0] - w[1])
+                .fold(f32::MAX, f32::min)
+                .max(base.size.value * base.scale())
         } else {
             base.size.value * base.scale() * 1.2
         };
         let wrap_width = if wrap {
-            (max_right - left_x).max(1.0)
+            width.unwrap_or(max_right - left_x).max(1.0)
         } else {
             f32::INFINITY
         };
@@ -928,23 +942,31 @@ fn reflow(
             removed.push((i, pdf_page.objects_mut().remove_object_at_index(i)?));
         }
         removed.reverse();
-        // Wrap the new text to the column.
-        let Some(lines) = wrap_lines(
-            document,
-            &mut pdf_page,
-            &base,
-            &style,
-            fonts,
-            new_text,
-            wrap_width,
-        )?
-        else {
-            put_back(&mut pdf_page, removed)?;
-            return Err(Error::UnsupportedCharacters {
-                intended: new_text.to_owned(),
-                reads_back_as: String::new(),
-            });
-        };
+        // Wrap the new text to the column; each typed line break starts a new line.
+        let mut lines = Vec::new();
+        for paragraph in new_text.split('\n') {
+            if paragraph.trim().is_empty() {
+                lines.push(String::new());
+                continue;
+            }
+            let Some(wrapped) = wrap_lines(
+                document,
+                &mut pdf_page,
+                &base,
+                &style,
+                fonts,
+                paragraph,
+                wrap_width,
+            )?
+            else {
+                put_back(&mut pdf_page, removed)?;
+                return Err(Error::UnsupportedCharacters {
+                    intended: new_text.to_owned(),
+                    reads_back_as: String::new(),
+                });
+            };
+            lines.extend(wrapped);
+        }
         // Draw the new lines where the block's last-drawn piece was: anything
         // drawn between its pieces (a white box, a table) stays under the text,
         // as it was under that piece.
@@ -959,6 +981,10 @@ fn reflow(
         for (i, line) in lines.iter().enumerate() {
             base.matrix.set_e(left_x);
             base.matrix.set_f(top_baseline - i as f32 * line_height);
+            // An empty line is only space between paragraphs.
+            if line.trim().is_empty() {
+                continue;
+            }
             match insert_text(
                 document,
                 &mut pdf_page,
@@ -1002,6 +1028,8 @@ fn reflow(
                 removed,
                 added,
                 text_box,
+                width: wrap_width.is_finite().then_some(wrap_width),
+                source: wrap_width.is_finite().then(|| new_text.to_owned()),
             })
         });
         Ok(EditPreview {
@@ -1051,8 +1079,12 @@ pub fn preview_add_wrapped(
         let height = style.map_or(base.size.value * base.scale(), |s| s.size);
         let first_baseline = y - height * 0.35;
         let line_style = style.copied().unwrap_or(base.style());
+        // Lines below the page's bottom margin go to the next page; `starts` marks a paragraph's first line.
+        let bottom = pdf_page.boundaries().bounding()?.bounds.bottom().value + PAGE_MARGIN_PT;
         let mut lines = Vec::new();
+        let mut starts = Vec::new();
         for paragraph in text.split('\n') {
+            starts.push(true);
             if !width.is_finite() || paragraph.trim().is_empty() {
                 lines.push(paragraph.trim_end_matches('\r').to_owned());
                 continue;
@@ -1070,8 +1102,22 @@ pub fn preview_add_wrapped(
                 intended: text.to_owned(),
                 reads_back_as: String::new(),
             })?;
+            starts.resize(starts.len() + wrapped.len().saturating_sub(1), false);
             lines.extend(wrapped);
         }
+        let fits = (1..lines.len())
+            .find(|&i| first_baseline - i as f32 * height * 1.2 < bottom)
+            .unwrap_or(lines.len());
+        let rest =
+            (fits < lines.len() && lines[fits..].iter().any(|l| !l.trim().is_empty())).then(|| {
+                let mut rest = lines[fits].clone();
+                for (line, &start) in lines[fits + 1..].iter().zip(&starts[fits + 1..]) {
+                    rest.push(if start { '\n' } else { ' ' });
+                    rest.push_str(line);
+                }
+                rest
+            });
+        lines.truncate(fits);
         let index = pdf_page.objects().len();
         let mut added = 0usize;
         let mut method = EditMethod::Native;
@@ -1127,6 +1173,8 @@ pub fn preview_add_wrapped(
                 removed: Vec::new(),
                 added,
                 text_box: Some(NEW_TEXT_BOX),
+                width: width.is_finite().then_some(width),
+                source: Some(text.to_owned()),
             })
         });
         Ok(AddPreview {
@@ -1136,8 +1184,54 @@ pub fn preview_add_wrapped(
                 text: text.to_owned(),
                 bounds: [l, b, r, t],
             },
+            rest,
         })
     })
+}
+
+/// The space kept free at a page's bottom (new text continues on the next page) and above continued text.
+const PAGE_MARGIN_PT: f32 = 72.0;
+
+/// Puts `rest`, text that didn't fit on `page` ([`AddPreview::rest`]), on new pages after it: each the same size,
+/// the text at `x` from the top margin, `width` wide, in `style`. Each part is kept as its own text box.
+/// Returns the last page used.
+pub fn continue_on_new_pages(
+    mut page: u16,
+    x: f32,
+    mut rest: String,
+    style: Option<&TextStyle>,
+    fonts: &Fonts<'_>,
+    width: f32,
+) -> Result<u16, Error> {
+    loop {
+        keep_edit();
+        crate::page_ops::insert_blank_page(page)?;
+        page += 1;
+        let top = with_open(|d| {
+            Ok(d.pages()
+                .get(page.into())?
+                .boundaries()
+                .bounding()?
+                .bounds
+                .top()
+                .value)
+        })?;
+        let size = style.map_or(12.0, |s| s.size);
+        let added = preview_add_wrapped(
+            page,
+            x,
+            top - PAGE_MARGIN_PT - size * 0.6,
+            &rest,
+            style,
+            fonts,
+            width,
+        )?;
+        keep_edit();
+        match added.rest {
+            Some(more) => rest = more,
+            None => return Ok(page),
+        }
+    }
 }
 
 /// The style new text at (`x`, `y`) on `page` starts with: the nearest text's
@@ -1193,7 +1287,14 @@ pub fn keep_edit() {
         return;
     };
     if let Some(text_box) = pending.text_box
-        && let Err(error) = tag_text_box(pending.page, pending.index, pending.added, text_box)
+        && let Err(error) = tag_text_box(
+            pending.page,
+            pending.index,
+            pending.added,
+            text_box,
+            pending.width,
+            pending.source.as_deref(),
+        )
     {
         log::warn!("pdit: could not tag the text box: {error}");
     }
@@ -1201,7 +1302,14 @@ pub fn keep_edit() {
 
 /// Tags the kept text objects `index..index + added` on `page` as text box `text_box` (a new number for
 /// [`NEW_TEXT_BOX`]), so the box can be picked, moved and resized (D-081).
-fn tag_text_box(page: u16, index: usize, added: usize, text_box: i32) -> Result<(), Error> {
+fn tag_text_box(
+    page: u16,
+    index: usize,
+    added: usize,
+    text_box: i32,
+    width: Option<f32>,
+    source: Option<&str>,
+) -> Result<(), Error> {
     with_open(|document| {
         let pdf_page = document.pages().get(page.into())?;
         let bindings = crate::pdfium().bindings();
@@ -1222,7 +1330,12 @@ fn tag_text_box(page: u16, index: usize, added: usize, text_box: i32) -> Result<
                         object,
                         crate::marks::TEXT_BOX,
                         Some(text_box),
+                        width.map(|w| w.round() as i32),
                     );
+                    // The typed text goes on the box's first line only.
+                    if let Some(source) = source.filter(|_| i == index) {
+                        crate::marks::set_box_source(bindings, document.handle(), object, source);
+                    }
                 }
             }
             if !bindings.is_true(bindings.FPDFPage_GenerateContent(handle)) {
@@ -1248,6 +1361,116 @@ pub fn text_box_for(page: u16, index: Option<usize>) -> Option<i32> {
     })
     .ok()
     .flatten()
+}
+
+/// The text objects of the text box (D-081) the object at `index` is in; just `index` when it is in none.
+pub fn text_box_objects(page: u16, index: usize) -> Vec<usize> {
+    with_open(|document| {
+        let pdf_page = document.pages().get(page.into())?;
+        Ok(match text_box_at(&pdf_page, index) {
+            Some(n) => (0..pdf_page.objects().len())
+                .filter(|&i| text_box_at(&pdf_page, i) == Some(n))
+                .collect(),
+            None => vec![index],
+        })
+    })
+    .unwrap_or_else(|_| vec![index])
+}
+
+/// Text box `number`'s text (D-081), read back from its lines: a line ends its paragraph when the next line's
+/// first word would have fitted on it, and a gap of a line or more is a blank line. For [`rewrap_text_box`].
+pub fn text_box_text(page: u16, number: i32) -> Result<String, Error> {
+    with_open(|document| {
+        let pdf_page = document.pages().get(page.into())?;
+        let mine: Vec<Piece> = pieces(&pdf_page)?
+            .into_iter()
+            .filter(|p| text_box_at(&pdf_page, p.index) == Some(number))
+            .collect();
+        let bindings = crate::pdfium().bindings();
+        // SAFETY: the object handles come from this open page and are only read.
+        let stored = mine
+            .iter()
+            .filter_map(|p| unsafe {
+                crate::marks::box_width(
+                    bindings,
+                    bindings.FPDFPage_GetObject(pdf_page.page_handle(), p.index as i32),
+                )
+            })
+            .max();
+        let indices: Vec<usize> = mine.iter().map(|p| p.index).collect();
+        let mut lines: Vec<(String, [f32; 4])> = visual_lines(mine)
+            .into_iter()
+            .map(|l| (l.text().trim().to_owned(), l.bounds()))
+            .collect();
+        lines.sort_by(|a, b| b.1[3].total_cmp(&a.1[3]));
+        // The text as typed, when the tag keeps it and the box still shows those letters.
+        let letters = |t: &str| {
+            t.chars()
+                .filter(|c| !c.is_whitespace() && *c != '-')
+                .collect::<String>()
+        };
+        let shown: String = lines.iter().map(|(t, _)| letters(t)).collect();
+        // SAFETY: as above.
+        let source = indices.iter().find_map(|&i| unsafe {
+            crate::marks::box_source(
+                bindings,
+                bindings.FPDFPage_GetObject(pdf_page.page_handle(), i as i32),
+            )
+        });
+        if let Some(source) = source.filter(|s| letters(s) == shown) {
+            return Ok(source);
+        }
+        // The box's width as kept in its tag; else (MuPDF's boxes) its widest line.
+        let widest = stored.map_or_else(
+            || lines.iter().map(|(_, b)| b[2] - b[0]).fold(0.0, f32::max),
+            |w| w as f32,
+        );
+        let mut text = String::new();
+        for (i, (line, b)) in lines.iter().enumerate() {
+            if i > 0 {
+                let (prev, p) = &lines[i - 1];
+                let height = p[3] - p[1];
+                // ponytail: the first word's width is guessed from its share of the line's letters.
+                let chars = line.chars().count().max(1) as f32;
+                let first = line
+                    .split_whitespace()
+                    .next()
+                    .map_or(0, |w| w.chars().count()) as f32;
+                let first_width = (b[2] - b[0]) * first / chars;
+                text.push_str(if p[1] - b[3] > 0.8 * height {
+                    "\n\n"
+                } else if (p[2] - p[0]) + 0.3 * height + first_width <= widest {
+                    "\n"
+                } else if prev.ends_with('-') {
+                    ""
+                } else {
+                    " "
+                });
+            }
+            text.push_str(line);
+        }
+        Ok(text)
+    })
+}
+
+/// Re-wraps text box `number` (its `text`, from [`text_box_text`]) to `width` points wide at its left edge — a
+/// side handle: the letters keep their size. Kept at once; returns the box's new bounds.
+pub fn rewrap_text_box(
+    page: u16,
+    number: i32,
+    text: &str,
+    width: f32,
+    fonts: &Fonts<'_>,
+) -> Result<[f32; 4], Error> {
+    let objects = with_open(|document| {
+        let pdf_page = document.pages().get(page.into())?;
+        Ok((0..pdf_page.objects().len())
+            .filter(|&i| text_box_at(&pdf_page, i) == Some(number))
+            .collect::<Vec<_>>())
+    })?;
+    let preview = reflow(page, &objects, text, None, fonts, true, Some(width))?;
+    keep_edit();
+    Ok(preview.bounds)
 }
 
 /// One more than the highest text box number on the page.

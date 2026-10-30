@@ -39,6 +39,15 @@
 .pdit-img-handle.bl {
   cursor: nesw-resize;
 }
+/* Side handles (the Crop frame's): stretch one way; a text box re-wraps. */
+.pdit-img-handle.t,
+.pdit-img-handle.b {
+  cursor: ns-resize;
+}
+.pdit-img-handle.l,
+.pdit-img-handle.r {
+  cursor: ew-resize;
+}
 
 /* Mirror an icon horizontally (Rotate right shows Rotate left, flipped), the
    same trick the context menu uses (.cm-mirror). selection-actions.css has no

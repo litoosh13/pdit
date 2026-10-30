@@ -364,7 +364,7 @@ pub fn drawn_at(
 /// Moves stamp, pen drawing or note `index` on `page` by (`dx`, `dy`) PDF points; returns its new bounds.
 pub fn move_drawn(page: u16, index: usize, dx: f32, dy: f32) -> Result<[f32; 4], Error> {
     crate::history::before_change()?;
-    transform_drawn(page, index, 1.0, dx, dy)
+    transform_drawn(page, index, [1.0, 1.0], dx, dy)
 }
 
 /// Resizes stamp or pen drawing `index` on `page` to `width_pt` wide (its shape kept), its bottom-left corner
@@ -380,15 +380,42 @@ pub fn resize_drawn(page: u16, index: usize, width_pt: f32) -> Result<[f32; 4], 
         return Err(Error::Pdfium("invalid width".into()));
     }
     let k = width_pt / (r - l);
-    transform_drawn(page, index, k, l - k * l, b - k * b)
+    transform_drawn(page, index, [k, k], l - k * l, b - k * b)
 }
 
-/// Scales stamp or pen drawing `index` by `k` and moves it by (`e`, `f`). The drawing itself isn't touched: every
+/// Stretches stamp or pen drawing `index` on `page` to `width_pt` × `height_pt` (its shape not kept: a side
+/// handle), its bottom-left corner staying put; returns its new bounds. The caller moves it to the side it holds.
+pub fn stretch_drawn(
+    page: u16,
+    index: usize,
+    width_pt: f32,
+    height_pt: f32,
+) -> Result<[f32; 4], Error> {
+    crate::history::before_change()?;
+    let [l, b, r, t] = annotations(page)?
+        .into_iter()
+        .find(|a| a.index == index)
+        .map(|a| a.bounds)
+        .ok_or_else(|| Error::Pdfium("that stamp or drawing has changed".into()))?;
+    if r <= l || t <= b || width_pt <= 0.0 || height_pt <= 0.0 {
+        return Err(Error::Pdfium("invalid size".into()));
+    }
+    let (kx, ky) = (width_pt / (r - l), height_pt / (t - b));
+    transform_drawn(page, index, [kx, ky], l - kx * l, b - ky * b)
+}
+
+/// Scales stamp or pen drawing `index` by `k` (across, up) and moves it by (`e`, `f`). The drawing itself isn't touched: every
 /// viewer fits its own box (the appearance's /BBox) into the annotation's box (/Rect), which is what changes.
 /// (Moving the drawn objects instead left them clipped to their old place.) A pen drawing's strokes (/InkList),
 /// which some viewers draw from, move along. pdfium-render has no wrapper for these, so PDFium is called directly
 /// (the page handle and bindings are public in our copy, D-036).
-fn transform_drawn(page: u16, index: usize, k: f32, e: f32, f: f32) -> Result<[f32; 4], Error> {
+fn transform_drawn(
+    page: u16,
+    index: usize,
+    k: [f32; 2],
+    e: f32,
+    f: f32,
+) -> Result<[f32; 4], Error> {
     with_open(|document| {
         let pdf_page = document.pages().get(page.into())?;
         let ink = kind_of(&pdf_page.annotations().get(index)?) == Some(AnnotationKind::Ink);
@@ -397,7 +424,7 @@ fn transform_drawn(page: u16, index: usize, k: f32, e: f32, f: f32) -> Result<[f
             drawn(k) || k == AnnotationKind::Note
         })?;
         let bindings = crate::pdfium().bindings();
-        let at = |v: f32, by: f32| v * k + by;
+        let (at_x, at_y) = (|v: f32| v * k[0] + e, |v: f32| v * k[1] + f);
         // SAFETY: the annotation handle comes from this open page and is closed before returning; the stroke
         // buffers outlive the calls that fill or read them.
         unsafe {
@@ -415,8 +442,8 @@ fn transform_drawn(page: u16, index: usize, k: f32, e: f32, f: f32) -> Result<[f
                         points
                             .into_iter()
                             .map(|p| FS_POINTF {
-                                x: at(p.x, e),
-                                y: at(p.y, f),
+                                x: at_x(p.x),
+                                y: at_y(p.y),
                             })
                             .collect()
                     })
@@ -434,10 +461,10 @@ fn transform_drawn(page: u16, index: usize, k: f32, e: f32, f: f32) -> Result<[f
             };
             bindings.FPDFAnnot_GetRect(annot, &mut rect);
             let moved = FS_RECTF {
-                left: at(rect.left, e),
-                right: at(rect.right, e),
-                bottom: at(rect.bottom, f),
-                top: at(rect.top, f),
+                left: at_x(rect.left),
+                right: at_x(rect.right),
+                bottom: at_y(rect.bottom),
+                top: at_y(rect.top),
             };
             let set = bindings.FPDFAnnot_SetRect(annot, &moved);
             bindings.FPDFPage_CloseAnnot(annot);

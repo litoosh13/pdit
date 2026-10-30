@@ -288,6 +288,7 @@ fn mark_last_as_shape(document: &PdfDocument, pdf_page: &PdfPage) -> Result<(), 
                 object,
                 crate::marks::SHAPE,
                 None,
+                None,
             )
         {
             return Err(Error::Pdfium("could not tag the shape".into()));
@@ -729,6 +730,27 @@ pub fn resize_image(page: u16, object_index: usize, width_pt: f32) -> Result<[f3
         }
         let factor = width_pt / current;
         object.scale(factor, factor)?;
+        Ok(crate::inspect::rect(object.bounds()?))
+    })
+}
+
+/// Stretches the object at `object_index` on `page` to `width_pt` × `height_pt` (its shape not kept: a side
+/// handle), scaled about the page origin like [`resize_image`]; returns its new bounds.
+pub fn stretch_image(
+    page: u16,
+    object_index: usize,
+    width_pt: f32,
+    height_pt: f32,
+) -> Result<[f32; 4], Error> {
+    crate::history::before_change()?;
+    with_open(|document| {
+        let mut pdf_page = document.pages().get(page.into())?;
+        let mut object = pdf_page.objects_mut().get(object_index)?;
+        let [l, b, r, t] = crate::inspect::rect(object.bounds()?);
+        if r <= l || t <= b || width_pt <= 0.0 || height_pt <= 0.0 {
+            return Err(Error::Pdfium("invalid size".into()));
+        }
+        object.scale(width_pt / (r - l), height_pt / (t - b))?;
         Ok(crate::inspect::rect(object.bounds()?))
     })
 }

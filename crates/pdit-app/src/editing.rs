@@ -472,7 +472,10 @@ impl Editing {
         let style = *self.style.peek();
         // A multi-line block re-wraps as one (reflow); a single object edits in
         // place. `None` new index means "keep the anchor" (reflow / restyle / edit).
-        let is_reflow = selection.adding.is_none() && selection.object_indices.len() > 1;
+        let is_reflow = selection.adding.is_none()
+            && (selection.object_indices.len() > 1 || state.draft.contains('\n'));
+        // New text that didn't fit on its page (continued on new pages once kept).
+        let mut rest = None;
         let outcome: Result<(Option<usize>, pdit_core::EditPreview), pdit_core::Error> =
             if is_reflow {
                 pdit_core::preview_reflow(
@@ -496,7 +499,10 @@ impl Editing {
                             .peek()
                             .unwrap_or_else(|| default_add_width(selection.page, x)),
                     )
-                    .map(|added| (Some(added.object_index), added.preview)),
+                    .map(|added| {
+                        rest = added.rest;
+                        (Some(added.object_index), added.preview)
+                    }),
                     (None, Some(style)) => pdit_core::preview_styled(
                         selection.page,
                         selection.object_index,
@@ -528,11 +534,26 @@ impl Editing {
                 self.redraw(selection.page);
                 self.typing.set(false);
                 self.keep();
-                consume_context::<crate::page_tools::PageTools>().show(
-                    "Text changed".to_owned(),
-                    ICON_TEXT_CHANGED,
-                    undo,
-                );
+                let tools = consume_context::<crate::page_tools::PageTools>();
+                if let (Some(rest), Some((x, _))) = (rest, selection.adding) {
+                    let width = self
+                        .add_width
+                        .peek()
+                        .unwrap_or_else(|| default_add_width(selection.page, x));
+                    let continued = pdit_core::continue_on_new_pages(
+                        selection.page,
+                        x,
+                        rest,
+                        style.as_ref(),
+                        &fonts,
+                        width,
+                    );
+                    if let Err(error) = continued {
+                        crate::log(&format!("pdit: the rest of the text wasn't added: {error}"));
+                    }
+                    tools.refresh_pages();
+                }
+                tools.show("Text changed".to_owned(), ICON_TEXT_CHANGED, undo);
             }
             Err(pdit_core::Error::UnsupportedCharacters { .. }) => show_error(),
             Err(error) => crate::log(&format!("pdit: {error}")),
@@ -544,16 +565,23 @@ impl Editing {
     fn keep(mut self) {
         pdit_core::keep_edit();
         let state = self.state.peek().clone();
-        let reflow = state
-            .selection
-            .as_ref()
-            .is_some_and(|s| s.adding.is_none() && s.object_indices.len() > 1);
+        let reflow = state.selection.as_ref().is_some_and(|s| {
+            s.adding.is_none() && (s.object_indices.len() > 1 || state.draft.contains('\n'))
+        });
         if reflow {
             // The block was re-wrapped, so its object list changed. Re-find it at
             // its (invariant) top-left corner to refresh indices, text and bounds.
             let sel = state.selection.unwrap();
             let (ax, ay) = (sel.bounds[0] + 2.0, sel.bounds[3] - 2.0);
-            if let Some(fresh) = paragraph_selection(sel.page, ax, ay) {
+            if let Some(mut fresh) = paragraph_selection(sel.page, ax, ay) {
+                // A text box with several paragraphs stays one selection, its line breaks kept.
+                let boxed = pdit_core::text_box_objects(sel.page, fresh.object_index);
+                if boxed.len() > fresh.object_indices.len() {
+                    fresh.object_indices = boxed;
+                    fresh.text = state.draft.clone();
+                    fresh.shown = state.draft.clone();
+                    fresh.bounds = sel.bounds;
+                }
                 self.style
                     .set(pdit_core::text_style(sel.page, fresh.object_index).ok());
                 self.state.with_mut(|s| {
@@ -569,6 +597,10 @@ impl Editing {
             if let Some(sel) = s.selection.as_mut() {
                 sel.text = s.draft.clone();
                 sel.shown = s.draft.clone();
+                // Kept new text is a box: later edits change all its lines (reflow), not just the first.
+                if sel.adding.is_some() {
+                    sel.object_indices = pdit_core::text_box_objects(sel.page, sel.object_index);
+                }
                 sel.adding = None;
             }
         });

@@ -871,6 +871,54 @@ impl PageTools {
         }
     }
 
+    /// Live step of a side-handle drag: stretches the selection to `width_pt` × `height_pt` (a text box instead
+    /// re-wraps its `text` to the width, its letters kept) and keeps the held side put, as [`Self::drag_resize`].
+    #[allow(clippy::too_many_arguments)]
+    pub fn drag_stretch(
+        self,
+        page: u16,
+        width_pt: f32,
+        height_pt: f32,
+        text: Option<&str>,
+        fixed_left: bool,
+        fixed_top: bool,
+        anchor: (f32, f32),
+    ) {
+        let Some(sel) = self.image_selection.peek().clone() else {
+            return;
+        };
+        let stretched = match (sel.kind, text) {
+            (Placed::Stamp | Placed::Drawing, _) => {
+                pdit_core::annotations::stretch_drawn(page, sel.object_index, width_pt, height_pt)
+            }
+            (Placed::TextBox, Some(text)) => {
+                let Some(noto) = consume_context::<Editing>().fallback_font.peek().clone() else {
+                    return;
+                };
+                pdit_core::rewrap_text_box(
+                    page,
+                    sel.object_index as i32,
+                    text,
+                    width_pt,
+                    &pdit_core::Fonts::noto(&noto),
+                )
+            }
+            (Placed::TextBox, None) => return,
+            (Placed::Picture | Placed::Shape, _) => {
+                page_ops::stretch_image(page, sel.object_index, width_pt, height_pt)
+            }
+        };
+        let Ok([l, b, r, t]) = stretched else {
+            return;
+        };
+        let fx = if fixed_left { l } else { r };
+        let fy = if fixed_top { t } else { b };
+        if let Ok(bounds) = move_selected(&sel, anchor.0 - fx, anchor.1 - fy) {
+            self.set_selection_bounds(bounds);
+            self.redraw(page);
+        }
+    }
+
     /// Ends an image drag: shows the Undo toast for the whole gesture. `resized`
     /// picks the message/icon (moved vs resized). The page canvas is already
     /// current from the live redraws, so we don't `refresh` here — that would
@@ -1162,6 +1210,9 @@ struct ResizeDrag {
     fixed_top: bool,
     anchor: (f32, f32),
     page_left: f64,
+    page_top: f64,
+    /// A side handle ('l', 'r', 't', 'b'): the shape isn't kept; `None` for a corner.
+    side: Option<char>,
 }
 
 /// The selected image's metal ring, four corner resize handles, and the shared
@@ -1174,6 +1225,8 @@ struct ResizeDrag {
 pub fn ImageOverlay(page: u16, page_height_pt: f32, scale: f32) -> Element {
     let tools = use_context::<PageTools>();
     let mut resize = use_signal(|| None::<ResizeDrag>);
+    // A text box's text while a side handle re-wraps it (read once when the drag starts).
+    let mut box_text = use_signal(|| None::<String>);
     // Cropping (D-073): the dragged part ("tl", "t", …, "move") and the pointer's last spot.
     let mut crop_drag = use_signal(|| None::<(&'static str, f64, f64)>);
     let Some(sel) = tools.image_selection().filter(|s| s.page == page) else {
@@ -1294,21 +1347,61 @@ pub fn ImageOverlay(page: u16, page_height_pt: f32, scale: f32) -> Element {
             }
         };
     }
-    // (css class, corner x px, corner y px, fixed_left, fixed_top, anchor pt).
-    // The fixed corner is the one diagonally opposite the dragged handle.
+    // (css class, handle x px, handle y px, fixed_left, fixed_top, anchor pt, side).
+    // A corner holds the one diagonally opposite; a side holds the opposite side.
+    // A text box has no top/bottom handles: its height follows its text.
+    let text_box = sel.kind == Placed::TextBox;
     let corners = [
-        ("tl", x, y, false, false, (right, bottom)),
-        ("tr", x + width, y, true, false, (left, bottom)),
-        ("bl", x, y + height, false, true, (right, top)),
-        ("br", x + width, y + height, true, true, (left, top)),
-    ];
+        ("tl", x, y, false, false, (right, bottom), None),
+        ("tr", x + width, y, true, false, (left, bottom), None),
+        ("bl", x, y + height, false, true, (right, top), None),
+        ("br", x + width, y + height, true, true, (left, top), None),
+        (
+            "t",
+            x + width / 2.0,
+            y,
+            true,
+            false,
+            (left, bottom),
+            Some('t'),
+        ),
+        (
+            "r",
+            x + width,
+            y + height / 2.0,
+            true,
+            true,
+            (left, top),
+            Some('r'),
+        ),
+        (
+            "b",
+            x + width / 2.0,
+            y + height,
+            true,
+            true,
+            (left, top),
+            Some('b'),
+        ),
+        (
+            "l",
+            x,
+            y + height / 2.0,
+            false,
+            true,
+            (right, top),
+            Some('l'),
+        ),
+    ]
+    .into_iter()
+    .filter(|c| !(text_box && matches!(c.6, Some('t' | 'b'))));
     rsx! {
         div { class: "sa-root",
             div {
                 class: "pdit-img-ring",
                 style: "left: {x}px; top: {y}px; width: {width}px; height: {height}px;",
             }
-            for (cls, cx, cy, fixed_left, fixed_top, anchor) in corners {
+            for (cls, cx, cy, fixed_left, fixed_top, anchor, side) in corners {
                 div {
                     class: "pdit-img-handle {cls}",
                     style: "left: {cx}px; top: {cy}px;",
@@ -1321,12 +1414,13 @@ pub fn ImageOverlay(page: u16, page_height_pt: f32, scale: f32) -> Element {
                         else {
                             return;
                         };
-                        let page_left = pe
+                        let page_rect = pe
                             .target()
                             .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
                             .and_then(|el| el.closest(".page").ok().flatten())
-                            .map(|p| p.get_bounding_client_rect().left())
-                            .unwrap_or(0.0);
+                            .map(|p| p.get_bounding_client_rect());
+                        let page_left = page_rect.as_ref().map_or(0.0, |r| r.left());
+                        let page_top = page_rect.as_ref().map_or(0.0, |r| r.top());
                         if let Some(el) = pe
                             .target()
                             .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
@@ -1334,14 +1428,47 @@ pub fn ImageOverlay(page: u16, page_height_pt: f32, scale: f32) -> Element {
                             let _ = el.set_pointer_capture(pe.pointer_id());
                         }
                         tools.begin_image_drag();
-                        resize.set(Some(ResizeDrag { fixed_left, fixed_top, anchor, page_left }));
+                        box_text.set(
+                            (text_box && side.is_some())
+                                .then(|| pdit_core::text_box_text(page, sel.object_index as i32).ok())
+                                .flatten(),
+                        );
+                        resize.set(Some(ResizeDrag {
+                            fixed_left,
+                            fixed_top,
+                            anchor,
+                            page_left,
+                            page_top,
+                            side,
+                        }));
                     },
                     onpointermove: move |event| {
                         let Some(rd) = resize() else { return };
                         let pointer_x_pt =
                             ((event.client_coordinates().x - rd.page_left) / f64::from(scale)) as f32;
                         let width_pt = (pointer_x_pt - rd.anchor.0).abs().max(8.0);
-                        tools.drag_resize(page, width_pt, rd.fixed_left, rd.fixed_top, rd.anchor);
+                        let Some(side) = rd.side else {
+                            tools.drag_resize(page, width_pt, rd.fixed_left, rd.fixed_top, rd.anchor);
+                            return;
+                        };
+                        let pointer_y_pt = page_height_pt
+                            - ((event.client_coordinates().y - rd.page_top) / f64::from(scale)) as f32;
+                        let [l, b, r, t] = tools
+                            .image_selection()
+                            .map_or([0.0, 0.0, 1.0, 1.0], |s| s.bounds);
+                        let (w, h) = match side {
+                            'l' | 'r' => (width_pt, t - b),
+                            _ => (r - l, (pointer_y_pt - rd.anchor.1).abs().max(8.0)),
+                        };
+                        tools.drag_stretch(
+                            page,
+                            w,
+                            h,
+                            box_text.peek().as_deref(),
+                            rd.fixed_left,
+                            rd.fixed_top,
+                            rd.anchor,
+                        );
                     },
                     onpointerup: move |_| {
                         if resize.peek().is_some() {
