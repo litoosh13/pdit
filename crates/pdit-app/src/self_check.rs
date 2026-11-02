@@ -1026,6 +1026,23 @@ fn placed_text_session(font: &[u8]) {
         objects.len() == 3 && edited.is_ok() && lines >= 4 && right < 72.0 + 200.0 + 1.0,
         format!("{objects:?} {edited:?}; {lines} lines; right edge {right}"),
     );
+    // A box re-wraps at its own width, not at its widest line.
+    let added = pdit_core::preview_add_wrapped(0, 72.0, 480.0, "Short\nBrief", None, &fonts, 400.0);
+    pdit_core::keep_edit();
+    let first = added.as_ref().map(|a| a.object_index).unwrap_or(0);
+    let objects = pdit_core::text_box_objects(0, first);
+    let wider = "Short grows longer than either line was\nBrief";
+    let edited = pdit_core::preview_reflow(0, &objects, wider, None, &fonts);
+    pdit_core::keep_edit();
+    let after = pdit_core::text_box_objects(0, first);
+    check(
+        "a box re-wraps at its own width",
+        objects.len() == 2 && edited.is_ok() && after.len() == 2,
+        format!("{objects:?} → {after:?}: {edited:?}"),
+    );
+    if let Some(number) = pdit_core::text_box_for(0, Some(first)) {
+        let _ = pages::delete_text_box(0, number as usize);
+    }
     // Side handles: a box re-wraps narrower with its letters kept and its text read back the same; a shape
     // stretches one way only.
     let source = "Head\n\nalpha beta gamma delta epsilon zeta\nOne\nTwo";
@@ -1078,6 +1095,82 @@ fn placed_text_session(font: &[u8]) {
             }),
         format!("{shape:?} → {stretched:?}"),
     );
+    // Colours: a shape's line and fill (and taking the fill away), a text box after it re-wraps, a stamp and a pen
+    // drawing; a line can't be filled.
+    let index = shape.as_ref().map_or(0, |h| h.object_index);
+    let blue_on_yellow = pages::set_shape_colors(0, index, [0, 0, 255], Some([255, 255, 0]));
+    let filled = pages::shape_colors(0, index).ok();
+    let unfilled = pages::set_shape_colors(0, index, [0, 0, 255], None);
+    let empty = pages::shape_colors(0, index).ok();
+    check(
+        "a shape's outline and fill change; the fill can be taken away",
+        blue_on_yellow.is_ok()
+            && unfilled.is_ok()
+            && filled.is_some_and(|c| {
+                c.stroke == [0, 0, 255] && c.fill == Some([255, 255, 0]) && c.can_fill
+            })
+            && empty.is_some_and(|c| c.stroke == [0, 0, 255] && c.fill.is_none()),
+        format!("{filled:?}; {empty:?}"),
+    );
+    let _ = pages::add_shape(
+        0,
+        pdit_core::ShapeKind::Line,
+        300.0,
+        60.0,
+        400.0,
+        90.0,
+        [0, 0, 0],
+        1.0,
+        None,
+    );
+    let line = pages::last_object(0).ok().flatten();
+    let line_colors = line
+        .as_ref()
+        .and_then(|h| pages::shape_colors(0, h.object_index).ok());
+    check(
+        "a line has one colour, no fill",
+        line_colors.is_some_and(|c| !c.can_fill),
+        format!("{line_colors:?}"),
+    );
+    if let Some(h) = line {
+        let _ = pages::delete_image(0, h.object_index);
+    }
+    let boxed = pages::set_text_box_color(0, number as usize, [200, 0, 0]);
+    let read = pages::text_box_color(0, number as usize).ok();
+    let _ = pdit_core::rewrap_text_box(0, number, source, 150.0, &fonts);
+    let wrapped = pages::text_box_color(0, number as usize).ok();
+    check(
+        "a text box changes colour and keeps it when it re-wraps",
+        boxed.is_ok() && read == Some([200, 0, 0]) && wrapped == Some([200, 0, 0]),
+        format!("{boxed:?} {read:?} {wrapped:?}"),
+    );
+    let stamp = annotations::add_stamp(0, 72.0, 700.0, "Draft", "2026", [0, 0, 0]);
+    let ink = annotations::add_ink(
+        0,
+        &[(72.0, 90.0), (90.0, 110.0), (120.0, 95.0)],
+        [0, 0, 0],
+        2.0,
+    );
+    let recolored: Vec<_> = [&stamp, &ink]
+        .into_iter()
+        .map(|i| {
+            i.as_ref().ok().map(|&i| {
+                let set = annotations::set_drawn_color(0, i, [0, 150, 0]).is_ok();
+                (set, annotations::drawn_color(0, i).ok().flatten())
+            })
+        })
+        .collect();
+    check(
+        "a stamp and a pen drawing change colour",
+        recolored
+            .iter()
+            .all(|r| *r == Some((true, Some([0, 150, 0])))),
+        format!("{recolored:?}"),
+    );
+    // The drawing was added last: delete it first, so the stamp's index still holds.
+    for i in [ink, stamp].into_iter().flatten() {
+        let _ = annotations::delete_annotation(0, i);
+    }
     let _ = pages::delete_text_box(0, number as usize);
     if let Some(h) = shape {
         let _ = pages::delete_image(0, h.object_index);
@@ -3618,6 +3711,53 @@ async fn look_alike_session(noto: &[u8]) {
             "FAIL"
         }
     ));
+    // The menu's fonts: a pick goes in as that font, in place of the PDF's own, in its real bold face.
+    use pdit_core::FontChoice as F;
+    for (font, name) in [
+        (F::LiberationSans, "LiberationSans"),
+        (F::LiberationSerif, "LiberationSerif"),
+        (F::LiberationMono, "LiberationMono"),
+        (F::Carlito, "Carlito"),
+        (F::Caladea, "Caladea"),
+    ] {
+        let Some(family) = crate::font_catalog::family_of(font) else {
+            log(&format!(
+                "pdit self-check FAIL: font menu: {name} has no family"
+            ));
+            continue;
+        };
+        let Ok(bytes) = load(family, true, false).await else {
+            log(&format!(
+                "pdit self-check FAIL: font menu: could not load {name}"
+            ));
+            continue;
+        };
+        let fonts = pdit_core::Fonts {
+            look_alike: Some(pdit_core::LookAlike {
+                bytes: &bytes,
+                bold: true,
+                italic: false,
+            }),
+            noto_sans: noto,
+        };
+        let added = pdit_core::style_near(0, 300.0, 600.0).and_then(|near| {
+            let style = pdit_core::TextStyle {
+                font,
+                bold: true,
+                ..near
+            };
+            pdit_core::preview_add(0, 300.0, 600.0, "Rent", Some(&style), &fonts)
+        });
+        pdit_core::keep_edit();
+        let index = added.as_ref().map(|a| a.object_index).unwrap_or(usize::MAX);
+        let traits = pdit_core::font_traits(0, index);
+        let named = matches!(&traits, Ok(Some(t)) if t.name.contains(name) && t.bold);
+        log(&format!(
+            "pdit self-check {}: font menu: {name}: {traits:?}",
+            if named { "PASS" } else { "FAIL" }
+        ));
+        let _ = pdit_core::page_ops::delete_image(0, index);
+    }
     pdit_core::close_document();
 }
 

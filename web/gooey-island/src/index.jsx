@@ -237,6 +237,11 @@ export function mountSelectionDock(element, callbacks = {}) {
 const FONTS = [
   ['Document', 'PDF font'],
   ['NotoSans', 'Noto Sans'],
+  ['LiberationSans', 'Liberation Sans (Arial)'],
+  ['LiberationSerif', 'Liberation Serif (Times)'],
+  ['LiberationMono', 'Liberation Mono (Courier)'],
+  ['Carlito', 'Carlito (Calibri)'],
+  ['Caladea', 'Caladea (Cambria)'],
 ];
 const COLORS = [
   ['Black', [0, 0, 0]],
@@ -403,7 +408,7 @@ function FormatBar({ visible, style, onChange, inline }) {
             </span>
             <div className="fb-group">
               <button type="button" className="sa-control" aria-haspopup="menu" onClick={() => setMenu(menu === 'font' ? null : 'font')}>
-                {FONTS.find(([key]) => key === style.font)?.[1] ?? 'PDF font'} <Icon svg={chevronIcon} />
+                {(FONTS.find(([key]) => key === style.font)?.[1] ?? 'PDF font').replace(/ \(.*/, '')} <Icon svg={chevronIcon} />
               </button>
               {menu === 'font' && (
                 <Dropdown

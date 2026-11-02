@@ -136,6 +136,9 @@ pub struct PageTools {
     image_selection: Signal<Option<ImageSelection>>,
     /// Cropping the selected image (D-073): the frame [left, bottom, right, top] in PDF points.
     image_crop: Signal<Option<[f32; 4]>>,
+    /// The open colour pill: which object, and whether it's for the fill. Kept here: a colour change redraws the
+    /// pages, and the pill stays open to try another.
+    color_open: Signal<Option<(usize, Placed, bool)>>,
     /// The document snapshot taken when an image drag (move or resize) begins,
     /// so the whole drag is a single Undo (D-023a). The drag itself edits the
     /// document live and redraws the page; the toast + Undo land on release.
@@ -158,6 +161,7 @@ impl PageTools {
             image_at: Signal::new(None),
             image_selection: Signal::new(None),
             image_crop: Signal::new(None),
+            color_open: Signal::new(None),
             drag_undo: Signal::new(None),
             table: Signal::new(None),
             table_before: Signal::new(None),
@@ -288,7 +292,10 @@ impl PageTools {
         fill: Option<[u8; 3]>,
     ) {
         match self.change(|| page_ops::add_shape(page, kind, x1, y1, x2, y2, stroke, width, fill)) {
-            Ok(undo) => self.show("Shape added".to_owned(), ICON_SHAPE, Some(undo)),
+            Ok(undo) => {
+                self.select_last(page, Placed::Shape);
+                self.show("Shape added".to_owned(), ICON_SHAPE, Some(undo));
+            }
             Err(error) => crate::log(&format!("pdit: could not draw the shape: {error}")),
         }
     }
@@ -613,7 +620,10 @@ impl PageTools {
             return;
         }
         match self.change(|| page_ops::add_image(page, bytes, x_pt, top_pt, width_pt)) {
-            Ok(undo) => self.show("Image added".to_owned(), ICON_IMAGE, Some(undo)),
+            Ok(undo) => {
+                self.select_last(page, Placed::Picture);
+                self.show("Image added".to_owned(), ICON_IMAGE, Some(undo));
+            }
             Err(error) => crate::log(&format!("pdit: could not add the image: {error}")),
         }
     }
@@ -623,7 +633,30 @@ impl PageTools {
     pub fn select_image(mut self, page: u16, x: f32, y: f32) {
         consume_context::<Editing>().cancel();
         self.image_crop.set(None);
+        self.color_open.set(None);
         self.image_selection.set(placed_at(page, x, y));
+    }
+
+    /// Selects what was just added on `page`, so its frame and handles show at once.
+    pub(crate) fn select_last(mut self, page: u16, kind: Placed) {
+        let hit = match kind {
+            Placed::Stamp | Placed::Drawing => pdit_core::annotations::annotations(page)
+                .ok()
+                .and_then(|a| a.last().map(|a| (a.index, a.bounds))),
+            _ => page_ops::last_object(page)
+                .ok()
+                .flatten()
+                .map(|h| (h.object_index, h.bounds)),
+        };
+        if let Some((object_index, bounds)) = hit {
+            self.color_open.set(None);
+            self.image_selection.set(Some(ImageSelection {
+                page,
+                object_index,
+                bounds,
+                kind,
+            }));
+        }
     }
 
     /// Something that can be selected, moved and resized is under (x, y) on `page` (D-081).
@@ -797,6 +830,39 @@ impl PageTools {
                 self.show(message, ICON_TRASH, Some(undo));
             }
             Err(error) => crate::log(&format!("pdit: could not delete the image: {error}")),
+        }
+    }
+
+    /// Changes the selected object's colour, or its fill when `fill` (`None`: no fill), with an Undo toast.
+    fn recolor_selection(self, fill: bool, color: Option<[u8; 3]>) {
+        let Some(sel) = self.image_selection.peek().clone() else {
+            return;
+        };
+        let Some(mut now) = colors_of(sel.page, sel.object_index, sel.kind) else {
+            return;
+        };
+        match (fill, color) {
+            (true, _) => now.fill = color,
+            (false, Some(color)) => now.main = color,
+            (false, None) => return,
+        }
+        let result = self.change(|| match sel.kind {
+            Placed::Shape => {
+                page_ops::set_shape_colors(sel.page, sel.object_index, now.main, now.fill)
+            }
+            Placed::TextBox => page_ops::set_text_box_color(sel.page, sel.object_index, now.main),
+            Placed::Stamp | Placed::Drawing => {
+                pdit_core::annotations::set_drawn_color(sel.page, sel.object_index, now.main)
+            }
+            Placed::Picture => Ok(()),
+        });
+        match result {
+            Ok(undo) => self.show(
+                "Colour changed".to_owned(),
+                crate::doc_ui::ICON_WM,
+                Some(undo),
+            ),
+            Err(error) => crate::log(&format!("pdit: could not change the colour: {error}")),
         }
     }
 
@@ -1201,6 +1267,48 @@ pub fn PageToolsUi() -> Element {
     }
 }
 
+/// The colours in the colour pill (the rainbow circle gives any other).
+const OBJECT_COLORS: [(&str, [u8; 3]); 6] = [
+    ("Black", [31, 33, 36]),
+    ("Red", [211, 58, 44]),
+    ("Blue", [29, 111, 216]),
+    ("Green", [31, 157, 85]),
+    ("Yellow", [255, 225, 77]),
+    ("White", [255, 255, 255]),
+];
+
+/// An object's colours, for its bar.
+#[derive(Clone, Copy, PartialEq)]
+struct ObjectColors {
+    main: [u8; 3],
+    fill: Option<[u8; 3]>,
+    can_fill: bool,
+}
+
+/// The colours of an added object; `None` if it has none to change (a picture, another app's picture stamp).
+fn colors_of(page: u16, index: usize, kind: Placed) -> Option<ObjectColors> {
+    let main = |main| ObjectColors {
+        main,
+        fill: None,
+        can_fill: false,
+    };
+    match kind {
+        Placed::Picture => None,
+        Placed::Shape => page_ops::shape_colors(page, index)
+            .ok()
+            .map(|c| ObjectColors {
+                main: c.stroke,
+                fill: c.fill,
+                can_fill: c.can_fill,
+            }),
+        Placed::TextBox => page_ops::text_box_color(page, index).ok().map(main),
+        Placed::Stamp | Placed::Drawing => pdit_core::annotations::drawn_color(page, index)
+            .ok()
+            .flatten()
+            .map(main),
+    }
+}
+
 /// An in-progress corner-resize drag (D-023a): which corner stays fixed and
 /// where it is held (PDF points), plus the page's left edge in CSS px for
 /// converting pointer x to points.
@@ -1229,9 +1337,31 @@ pub fn ImageOverlay(page: u16, page_height_pt: f32, scale: f32) -> Element {
     let mut box_text = use_signal(|| None::<String>);
     // Cropping (D-073): the dragged part ("tl", "t", …, "move") and the pointer's last spot.
     let mut crop_drag = use_signal(|| None::<(&'static str, f64, f64)>);
+    // Read from the document once per object and document change, not on every step of a drag.
+    let color_key = use_memo(move || {
+        let id = document_signal().read().as_ref().map(|d| d.id);
+        tools
+            .image_selection()
+            .filter(|s| s.page == page)
+            .map(|s| (id, s.object_index, s.kind))
+    });
+    let colors =
+        use_memo(move || color_key().and_then(|(_, index, kind)| colors_of(page, index, kind)));
+    let mut color_open = tools.color_open;
     let Some(sel) = tools.image_selection().filter(|s| s.page == page) else {
         return rsx! {};
     };
+    let open_for = color_open()
+        .filter(|o| o.0 == sel.object_index && o.1 == sel.kind)
+        .map(|o| o.2);
+    // (is the fill, label, colour now): a shape that can be filled has both, anything else one colour.
+    let color_buttons: Vec<(bool, &str, Option<[u8; 3]>)> = match colors() {
+        Some(c) if c.can_fill => vec![(false, "Outline", Some(c.main)), (true, "Fill", c.fill)],
+        Some(c) => vec![(false, "Colour", Some(c.main))],
+        None => Vec::new(),
+    };
+    let picked =
+        open_for.and_then(|fill| colors().map(|c| if fill { c.fill } else { Some(c.main) }));
     let [left, bottom, right, top] = sel.bounds;
     // A few px of air around the image, like the text line's outline.
     let pad = 3.0_f32;
@@ -1531,6 +1661,26 @@ pub fn ImageOverlay(page: u16, page_height_pt: f32, scale: f32) -> Element {
                             span { dangerous_inner_html: ICON_REMOVE_BACKGROUND, style: "display: contents" }
                         }
                     }
+                    for (fill, label, color) in color_buttons {
+                        button {
+                            key: "{label}",
+                            r#type: "button",
+                            class: "sa-control",
+                            "aria-expanded": if open_for == Some(fill) { "true" } else { "false" },
+                            onclick: move |event| {
+                                event.stop_propagation();
+                                let this = (sel.object_index, sel.kind, fill);
+                                color_open.set((color_open() != Some(this)).then_some(this));
+                            },
+                            match color {
+                                Some([r, g, b]) => rsx! {
+                                    span { class: "pdit-color-dot", style: "background: rgb({r}, {g}, {b});" }
+                                },
+                                None => rsx! { span { class: "pdit-color-dot pdit-no-fill" } },
+                            }
+                            "{label}"
+                        }
+                    }
                     button {
                         r#type: "button",
                         class: "sa-primary",
@@ -1540,6 +1690,50 @@ pub fn ImageOverlay(page: u16, page_height_pt: f32, scale: f32) -> Element {
                         },
                         span { class: "sa-danger", dangerous_inner_html: ICON_PERMANENT_DELETE, style: "display: contents" }
                         "Delete"
+                    }
+                }
+                if let Some(fill) = open_for {
+                    div { class: "pdit-color-pop",
+                        div { class: "sa-bar",
+                            if fill {
+                                button {
+                                    r#type: "button",
+                                    class: "pdit-swatch pdit-no-fill",
+                                    title: "No fill",
+                                    "aria-label": "No fill",
+                                    "aria-pressed": if picked == Some(None) { "true" } else { "false" },
+                                    onclick: move |event| {
+                                        event.stop_propagation();
+                                        tools.recolor_selection(true, None);
+                                    },
+                                }
+                            }
+                            for (name, color) in OBJECT_COLORS {
+                                button {
+                                    key: "{name}",
+                                    r#type: "button",
+                                    class: "pdit-swatch",
+                                    title: name,
+                                    "aria-label": name,
+                                    "aria-pressed": if picked == Some(Some(color)) { "true" } else { "false" },
+                                    style: "background: {crate::shapes_ui::hex(color)};",
+                                    onclick: move |event| {
+                                        event.stop_propagation();
+                                        tools.recolor_selection(fill, Some(color));
+                                    },
+                                }
+                            }
+                            label { class: "pdit-color-any", title: "Any colour",
+                                input {
+                                    r#type: "color",
+                                    "aria-label": "Any colour",
+                                    value: crate::shapes_ui::hex(picked.flatten().unwrap_or([207, 227, 255])),
+                                    onchange: move |event| {
+                                        tools.recolor_selection(fill, Some(crate::shapes_ui::from_hex(&event.value())));
+                                    },
+                                }
+                            }
+                        }
                     }
                 }
             }

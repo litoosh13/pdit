@@ -16,10 +16,10 @@ const ICON_ARROW: &str = include_str!("../assets/icons/devigner/ArrowRightUp.svg
 pub const TABLE_INK: [u8; 3] = [31, 33, 36];
 pub const TABLE_WIDTH_PT: f32 = 1.0;
 
-fn hex(c: [u8; 3]) -> String {
+pub(crate) fn hex(c: [u8; 3]) -> String {
     format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2])
 }
-fn from_hex(s: &str) -> [u8; 3] {
+pub(crate) fn from_hex(s: &str) -> [u8; 3] {
     let p = s.trim_start_matches('#');
     let n = |i: usize| u8::from_str_radix(p.get(i..i + 2).unwrap_or("00"), 16).unwrap_or(0);
     [n(0), n(2), n(4)]

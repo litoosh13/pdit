@@ -130,6 +130,19 @@ pub fn family_for(traits: &pdit_core::FontTraits) -> Option<Family> {
     })
 }
 
+/// The family of a font picked in the format bar's menu.
+pub fn family_of(font: pdit_core::FontChoice) -> Option<Family> {
+    use pdit_core::FontChoice as F;
+    match font {
+        F::Document | F::NotoSans => None,
+        F::LiberationSans => Some(Family::Sans),
+        F::LiberationSerif => Some(Family::Serif),
+        F::LiberationMono => Some(Family::Mono),
+        F::Carlito => Some(Family::Carlito),
+        F::Caladea => Some(Family::Caladea),
+    }
+}
+
 /// The font file for `family` in the given style, fetched on first use.
 pub async fn load(family: Family, bold: bool, italic: bool) -> Result<Rc<Vec<u8>>, String> {
     let key = (family, bold, italic);

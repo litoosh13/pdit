@@ -242,6 +242,7 @@ fn PageView(index: u16, count: usize, width_pt: f32, height_pt: f32) -> Element 
                 // click: not an edit.
                 // A tool armed in the tools rail (D-050) is placed here.
                 if let Some(action) = rail.take_placing() {
+                    tools.clear_image_selection();
                     return crate::context_menu::run(action, index, x, y);
                 }
                 if annotate.take_click() || shapes.pen_armed() || forms.editing() {

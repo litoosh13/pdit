@@ -12,6 +12,17 @@ use std::rc::Rc;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 
+/// The menu's fonts, by the island's keys (`FONTS` in web/gooey-island/src/index.jsx).
+const FONTS: [(&str, FontChoice); 7] = [
+    ("Document", FontChoice::Document),
+    ("NotoSans", FontChoice::NotoSans),
+    ("LiberationSans", FontChoice::LiberationSans),
+    ("LiberationSerif", FontChoice::LiberationSerif),
+    ("LiberationMono", FontChoice::LiberationMono),
+    ("Carlito", FontChoice::Carlito),
+    ("Caladea", FontChoice::Caladea),
+];
+
 #[component]
 pub fn FormatBar() -> Element {
     let editing = use_context::<Editing>();
@@ -76,10 +87,10 @@ fn state_to_js(visible: bool, style: Option<TextStyle>) -> JsValue {
     let _ = Reflect::set(&state, &"visible".into(), &visible.into());
     let style = style.map_or(JsValue::NULL, |style| {
         let object = Object::new();
-        let font = match style.font {
-            FontChoice::Document => "Document",
-            FontChoice::NotoSans => "NotoSans",
-        };
+        let font = FONTS
+            .iter()
+            .find(|(_, font)| *font == style.font)
+            .map_or("Document", |(key, _)| key);
         let color = Array::of3(
             &style.color[0].into(),
             &style.color[1].into(),
@@ -99,10 +110,11 @@ fn state_to_js(visible: bool, style: Option<TextStyle>) -> JsValue {
 
 fn style_from_js(value: &JsValue) -> Option<TextStyle> {
     let get = |key: &str| Reflect::get(value, &key.into()).ok();
-    let font = match get("font")?.as_string()?.as_str() {
-        "NotoSans" => FontChoice::NotoSans,
-        _ => FontChoice::Document,
-    };
+    let key = get("font")?.as_string()?;
+    let font = FONTS
+        .iter()
+        .find(|(name, _)| *name == key)
+        .map_or(FontChoice::Document, |(_, font)| *font);
     let color = Array::from(&get("color")?);
     let channel = |i: u32| color.get(i).as_f64().map(|v| v.clamp(0.0, 255.0) as u8);
     Some(TextStyle {

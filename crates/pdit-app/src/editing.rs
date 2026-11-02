@@ -390,6 +390,22 @@ impl Editing {
         if selection.adding.is_some() && state.draft.trim().is_empty() {
             return;
         }
+        // A text box restyles as a whole, its line breaks kept (a click selects only a paragraph of it).
+        if selection.adding.is_none()
+            && state.draft == selection.shown
+            && let Some(number) =
+                pdit_core::text_box_for(selection.page, Some(selection.object_index))
+            && let Ok(text) = pdit_core::text_box_text(selection.page, number)
+        {
+            let objects = pdit_core::text_box_objects(selection.page, selection.object_index);
+            this.state.with_mut(|s| {
+                s.draft = text.clone();
+                if let Some(sel) = s.selection.as_mut() {
+                    sel.shown = text;
+                    sel.object_indices = objects;
+                }
+            });
+        }
         clear_error();
         self.preview_and_keep();
     }
@@ -420,11 +436,17 @@ impl Editing {
         }
         .ok()
         .flatten();
-        let face = traits.as_ref().and_then(|traits| {
-            let family = crate::font_catalog::family_for(traits)?;
-            let bold = style.map_or(traits.bold, |s| s.bold);
-            let italic = style.map_or(traits.italic, |s| s.italic);
-            Some((family, bold, italic))
+        // A font picked in the menu; otherwise the look-alike of the line's font.
+        let picked = style.and_then(|s| {
+            crate::font_catalog::family_of(s.font).map(|family| (family, s.bold, s.italic))
+        });
+        let face = picked.or_else(|| {
+            traits.as_ref().and_then(|traits| {
+                let family = crate::font_catalog::family_for(traits)?;
+                let bold = style.map_or(traits.bold, |s| s.bold);
+                let italic = style.map_or(traits.italic, |s| s.italic);
+                Some((family, bold, italic))
+            })
         });
         spawn(async move {
             let look_alike = match face {
@@ -576,14 +598,22 @@ impl Editing {
             if let Some(mut fresh) = paragraph_selection(sel.page, ax, ay) {
                 // A text box with several paragraphs stays one selection, its line breaks kept.
                 let boxed = pdit_core::text_box_objects(sel.page, fresh.object_index);
-                if boxed.len() > fresh.object_indices.len() {
+                if pdit_core::text_box_for(sel.page, Some(fresh.object_index)).is_some() {
                     fresh.object_indices = boxed;
                     fresh.text = state.draft.clone();
                     fresh.shown = state.draft.clone();
                     fresh.bounds = sel.bounds;
                 }
-                self.style
-                    .set(pdit_core::text_style(sel.page, fresh.object_index).ok());
+                // The menu keeps showing the font just picked (the PDF only knows it as its own font).
+                let font = (*self.style.peek()).map(|s| s.font);
+                self.style.set(
+                    pdit_core::text_style(sel.page, fresh.object_index)
+                        .ok()
+                        .map(|s| pdit_core::TextStyle {
+                            font: font.unwrap_or(s.font),
+                            ..s
+                        }),
+                );
                 self.state.with_mut(|s| {
                     s.mode = BarMode::Editing;
                     s.draft = fresh.shown.clone();

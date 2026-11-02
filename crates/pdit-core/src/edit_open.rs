@@ -182,6 +182,12 @@ pub enum FontChoice {
     Document,
     /// The bundled Noto Sans.
     NotoSans,
+    /// A bundled font from the menu, passed as [`Fonts::look_alike`] (Noto Sans if it cannot show the characters).
+    LiberationSans,
+    LiberationSerif,
+    LiberationMono,
+    Carlito,
+    Caladea,
 }
 
 /// How a text line looks (D-027). Bold and italic are simulated: bold is the
@@ -288,6 +294,7 @@ const UNDERLINE_THICKNESS: f32 = 0.05;
 
 /// The look a new or replaced text object starts from: copied from an existing
 /// object, or the defaults for a page without text.
+#[derive(Clone)]
 struct Base {
     /// The object's matrix without pdit's italic slant.
     matrix: PdfMatrix,
@@ -584,7 +591,9 @@ fn insert_text(
         .font_data
         .as_ref()
         .is_none_or(|data| !crate::subset::lacks_glyph(data, text));
-    if let (Some(font), false, true, true) = (base.font, wants_noto, own_fits, own_draws) {
+    if let (Some(font), FontChoice::Document, true, true) =
+        (base.font, style.font, own_fits, own_draws)
+    {
         candidates.push((EditMethod::Native, Some(font), None, (own_bold, own_italic)));
     }
     if let (Some(look), false) = (fonts.look_alike, wants_noto) {
@@ -763,15 +772,21 @@ fn measure_width(
     text: &str,
 ) -> Result<Option<f32>, Error> {
     let index = pdf_page.objects().len();
-    match insert_text(document, pdf_page, index, text, base, Some(style), fonts)? {
-        Ok(Placed { bounds, added, .. }) => {
-            for _ in 0..added {
-                pdf_page.objects_mut().remove_object_at_index(index)?;
-            }
-            Ok(Some(bounds[2] - bounds[0]))
-        }
-        Err(_) => Ok(None),
+    let mut placed = insert_text(document, pdf_page, index, text, base, Some(style), fonts)?;
+    // PDFium's text reading drops text drawn twice in one place, so a word over the same word in the line that lends
+    // its look reads back empty: then try again a few lines away.
+    if placed.is_err() {
+        let mut beside = base.clone();
+        beside.matrix.set_f(base.matrix.f() + 3.0 * style.size);
+        placed = insert_text(document, pdf_page, index, text, &beside, Some(style), fonts)?;
     }
+    let Ok(Placed { bounds, added, .. }) = placed else {
+        return Ok(None);
+    };
+    for _ in 0..added {
+        pdf_page.objects_mut().remove_object_at_index(index)?;
+    }
+    Ok(Some(bounds[2] - bounds[0]))
 }
 
 /// Greedily wraps `text` into lines no wider than `wrap_width`, using per-word
@@ -927,8 +942,21 @@ fn reflow(
         } else {
             base.size.value * base.scale() * 1.2
         };
+        // A text box keeps its own width; other text wraps at its widest line.
+        let bindings = crate::pdfium().bindings();
+        // SAFETY: the object handles come from this open page and are only read.
+        let box_width = idx
+            .iter()
+            .filter_map(|&i| unsafe {
+                crate::marks::box_width(
+                    bindings,
+                    bindings.FPDFPage_GetObject(pdf_page.page_handle(), i as i32),
+                )
+            })
+            .max()
+            .map(|w| w as f32);
         let wrap_width = if wrap {
-            width.unwrap_or(max_right - left_x).max(1.0)
+            width.or(box_width).unwrap_or(max_right - left_x).max(1.0)
         } else {
             f32::INFINITY
         };

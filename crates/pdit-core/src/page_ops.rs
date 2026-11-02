@@ -432,6 +432,202 @@ fn transform_text_box(
     })
 }
 
+/// The colour `object` shows: a text's letters or a path's line.
+///
+/// # Safety
+/// `object` must be a live page object handle.
+pub(crate) unsafe fn object_color(
+    bindings: &dyn PdfiumLibraryBindings,
+    object: FPDF_PAGEOBJECT,
+) -> Option<[u8; 3]> {
+    let (mut r, mut g, mut b, mut a) = (0, 0, 0, 0);
+    // SAFETY: as the caller promises.
+    let read = unsafe {
+        match bindings.FPDFPageObj_GetType(object) as u32 {
+            FPDF_PAGEOBJ_TEXT => {
+                bindings.FPDFPageObj_GetFillColor(object, &mut r, &mut g, &mut b, &mut a)
+            }
+            FPDF_PAGEOBJ_PATH => {
+                bindings.FPDFPageObj_GetStrokeColor(object, &mut r, &mut g, &mut b, &mut a)
+            }
+            _ => return None,
+        }
+    };
+    bindings
+        .is_true(read)
+        .then_some([r as u8, g as u8, b as u8])
+}
+
+/// Sets the colour `object` shows ([`object_color`]). Other kinds of object are left alone.
+///
+/// # Safety
+/// `object` must be a live page object handle.
+pub(crate) unsafe fn set_object_color(
+    bindings: &dyn PdfiumLibraryBindings,
+    object: FPDF_PAGEOBJECT,
+    [r, g, b]: [u8; 3],
+) {
+    let (r, g, b) = (u32::from(r), u32::from(g), u32::from(b));
+    // SAFETY: as the caller promises.
+    unsafe {
+        match bindings.FPDFPageObj_GetType(object) as u32 {
+            FPDF_PAGEOBJ_TEXT => {
+                bindings.FPDFPageObj_SetFillColor(object, r, g, b, 255);
+            }
+            FPDF_PAGEOBJ_PATH => {
+                bindings.FPDFPageObj_SetStrokeColor(object, r, g, b, 255);
+            }
+            _ => {}
+        }
+    }
+}
+
+/// PDFium's path fill modes (not in pdfium-render's prelude).
+const FPDF_FILLMODE_NONE: i32 = 0;
+const FPDF_FILLMODE_WINDING: i32 = 2;
+
+/// A shape's colours: its line, its fill (`None`: no fill now), and whether it can have a fill (a line or arrow
+/// can't: only closed paths do).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ShapeColors {
+    pub stroke: [u8; 3],
+    pub fill: Option<[u8; 3]>,
+    pub can_fill: bool,
+}
+
+/// Runs `f` on shape `index` of `page`, within one load of the page.
+fn with_shape<R>(
+    page: u16,
+    index: usize,
+    f: impl FnOnce(&dyn PdfiumLibraryBindings, FPDF_PAGE, FPDF_PAGEOBJECT) -> Result<R, Error>,
+) -> Result<R, Error> {
+    with_open(|document| {
+        let pdf_page = document.pages().get(page.into())?;
+        let bindings = pdfium().bindings();
+        let handle = pdf_page.page_handle();
+        // SAFETY: the handles come from this open page, which stays loaded while `f` runs.
+        unsafe {
+            let object = bindings.FPDFPage_GetObject(handle, index as i32);
+            if object.is_null()
+                || crate::marks::find(bindings, object, crate::marks::SHAPE).is_none()
+            {
+                return Err(Error::Pdfium("that shape has changed".into()));
+            }
+            f(bindings, handle, object)
+        }
+    })
+}
+
+/// The colours of shape `index` on `page`.
+pub fn shape_colors(page: u16, index: usize) -> Result<ShapeColors, Error> {
+    with_shape(page, index, |bindings, _, object| {
+        // SAFETY: `object` is live for this call; the out-values outlive the calls that fill them.
+        unsafe {
+            let stroke = object_color(bindings, object)
+                .ok_or_else(|| Error::Pdfium("that shape has no colour".into()))?;
+            let (mut mode, mut stroked) = (0, 0);
+            bindings.FPDFPath_GetDrawMode(object, &mut mode, &mut stroked);
+            let (mut r, mut g, mut b, mut a) = (0, 0, 0, 0);
+            let filled = mode != FPDF_FILLMODE_NONE
+                && bindings.is_true(
+                    bindings.FPDFPageObj_GetFillColor(object, &mut r, &mut g, &mut b, &mut a),
+                );
+            let can_fill = (0..bindings.FPDFPath_CountSegments(object)).any(|i| {
+                let segment = bindings.FPDFPath_GetPathSegment(object, i);
+                !segment.is_null() && bindings.is_true(bindings.FPDFPathSegment_GetClose(segment))
+            });
+            Ok(ShapeColors {
+                stroke,
+                fill: filled.then_some([r as u8, g as u8, b as u8]),
+                can_fill,
+            })
+        }
+    })
+}
+
+/// Sets the line and fill (`None`: no fill) of shape `index` on `page`.
+pub fn set_shape_colors(
+    page: u16,
+    index: usize,
+    stroke: [u8; 3],
+    fill: Option<[u8; 3]>,
+) -> Result<(), Error> {
+    crate::history::before_change()?;
+    with_shape(page, index, |bindings, handle, object| {
+        // SAFETY: the handles are live for this call.
+        unsafe {
+            set_object_color(bindings, object, stroke);
+            if let Some([r, g, b]) = fill {
+                bindings.FPDFPageObj_SetFillColor(
+                    object,
+                    u32::from(r),
+                    u32::from(g),
+                    u32::from(b),
+                    255,
+                );
+            }
+            let mode = if fill.is_some() {
+                FPDF_FILLMODE_WINDING
+            } else {
+                FPDF_FILLMODE_NONE
+            };
+            let stroked = bindings.bool_to_pdfium(true);
+            if !bindings.is_true(bindings.FPDFPath_SetDrawMode(object, mode, stroked))
+                || !bindings.is_true(bindings.FPDFPage_GenerateContent(handle))
+            {
+                return Err(Error::Pdfium("could not write the page".into()));
+            }
+        }
+        Ok(())
+    })
+}
+
+/// The colour of text box `number` on `page` (its first line's).
+pub fn text_box_color(page: u16, number: usize) -> Result<[u8; 3], Error> {
+    with_text_boxes(page, |bindings, _, objects| {
+        objects
+            .iter()
+            .find(|(_, n, _)| *n as usize == number)
+            // SAFETY: the handles come from this loaded page.
+            .and_then(|&(object, _, _)| unsafe { object_color(bindings, object) })
+            .ok_or_else(|| Error::Pdfium("that text box has changed".into()))
+    })
+}
+
+/// Sets the colour of every line of text box `number` on `page`.
+pub fn set_text_box_color(page: u16, number: usize, color: [u8; 3]) -> Result<(), Error> {
+    crate::history::before_change()?;
+    with_text_boxes(page, |bindings, handle, objects| {
+        // SAFETY: the handles come from this loaded page.
+        unsafe {
+            for &(object, n, _) in objects {
+                if n as usize == number {
+                    set_object_color(bindings, object, color);
+                }
+            }
+            if !bindings.is_true(bindings.FPDFPage_GenerateContent(handle)) {
+                return Err(Error::Pdfium("could not write the page".into()));
+            }
+        }
+        Ok(())
+    })
+}
+
+/// The object drawn last on `page` (what was just added): its index and bounds.
+pub fn last_object(page: u16) -> Result<Option<ImageHit>, Error> {
+    with_open(|document| {
+        let pdf_page = document.pages().get(page.into())?;
+        let Some(index) = pdf_page.objects().len().checked_sub(1) else {
+            return Ok(None);
+        };
+        let bounds = crate::inspect::rect(pdf_page.objects().get(index)?.bounds()?);
+        Ok(Some(ImageHit {
+            object_index: index,
+            bounds,
+        }))
+    })
+}
+
 /// The shape pdit drew under (`x_pt`, `y_pt`) on `page` (the top one; a few points of slack for thin lines).
 pub fn shape_at(page: u16, x_pt: f32, y_pt: f32) -> Result<Option<ImageHit>, Error> {
     const SLACK: f32 = 4.0;

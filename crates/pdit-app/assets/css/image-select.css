@@ -75,6 +75,48 @@
 :is(.cm-menu, .pdit-toast, .sa-root, .pdit-panel, .pdit-rail, .pdit-dock, .pdit-shape-bar, .doc-box, .sig-root) .sa-primary svg {
   color: var(--icon-on-ink);
 }
+/* An added object's colours (D-083): a button with a dot opens the swatches in a second pill under the bar. */
+.pdit-color-dot {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.14);
+}
+.pdit-no-fill {
+  background: linear-gradient(135deg, #fff 46%, #d33a2c 46%, #d33a2c 54%, #fff 54%) !important;
+}
+.pdit-color-pop {
+  position: absolute;
+  top: 44px;
+  left: 50%;
+  width: max-content;
+  transform: translateX(-50%);
+}
+.pdit-color-pop .sa-bar {
+  gap: 4px;
+  padding: 4px 10px;
+}
+.pdit-color-pop .sa-bar button {
+  cursor: pointer;
+}
+.pdit-color-any {
+  position: relative;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  overflow: hidden;
+  border-radius: 50%;
+  background: conic-gradient(red, #ff0, #0f0, #0ff, #00f, #f0f, red);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.14);
+  cursor: pointer;
+}
+.pdit-color-any input {
+  position: absolute;
+  inset: -6px;
+  opacity: 0;
+  cursor: pointer;
+}
 /* Delete image: the trash in Material red (the user, D-023). */
 .sa-bar .sa-primary .sa-danger svg {
   color: #f44336;

@@ -318,9 +318,12 @@ impl Annotate {
         self.dismiss();
         let (label, color) = STAMPS[i];
         let date = today();
-        consume_context::<PageTools>().apply(&format!("Stamp added: {label}"), ICON_STAMP, || {
+        let tools = consume_context::<PageTools>();
+        if tools.apply(&format!("Stamp added: {label}"), ICON_STAMP, || {
             annots::add_stamp(page, x, top, label, &date, color).map(|_| ())
-        });
+        }) {
+            tools.select_last(page, crate::page_tools::Placed::Stamp);
+        }
     }
 
     /// All comments (D-041): opens the list on the right.

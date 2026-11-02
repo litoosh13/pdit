@@ -4,7 +4,7 @@
 //! Drag to place a text field or dropdown (a click gives a default size),
 //! click to place a checkbox or radio button (a radio joins the selected
 //! radio's group). Click a field to select it: the image ring + corner
-//! handles (drag the field to move it, a corner to resize) and a bar with
+//! handles (drag the field to move it, a corner or side to resize) and a bar with
 //! Settings · Delete. Done returns to filling. Every change goes through the
 //! page tools' snapshot + Undo toast; the engine is pdit-core's form_edit.
 
@@ -68,7 +68,7 @@ impl Tool {
     }
 }
 
-/// Corner handles (resize) only where they fit: text fields and dropdowns.
+/// Corner and side handles (resize) only where they fit: text fields and dropdowns.
 /// Checkboxes and radio buttons are too small; they are moved by dragging.
 fn has_handles(kind: FieldKind) -> bool {
     !matches!(kind, FieldKind::Checkbox | FieldKind::Radio)
@@ -92,7 +92,7 @@ enum Drag {
         from: (f32, f32),
         now: (f32, f32),
     },
-    /// Moving (corner `None`) or resizing (corner 0 tl, 1 tr, 2 bl, 3 br) the
+    /// Moving (corner `None`) or resizing (0–3 corners tl, tr, bl, br; 4–7 sides t, r, b, l) the
     /// selected field; `rect` is where it is now, `orig` where it was.
     Shape {
         page: u16,
@@ -216,7 +216,17 @@ impl FormEdit {
             && has_handles(f.kind)
         {
             let [l, b, r, t] = rect_of(f);
-            let corners = [(l, t), (r, t), (l, b), (r, b)];
+            let (mx, my) = ((l + r) / 2.0, (b + t) / 2.0);
+            let corners = [
+                (l, t),
+                (r, t),
+                (l, b),
+                (r, b),
+                (mx, t),
+                (r, my),
+                (mx, b),
+                (l, my),
+            ];
             if let Some(c) = corners
                 .iter()
                 .position(|&(cx, cy)| (cx - x).abs() <= grab && (cy - y).abs() <= grab)
@@ -275,14 +285,17 @@ impl FormEdit {
                     Some(c) => {
                         let min = 8.0;
                         let (mut l2, mut b2, mut r2, mut t2) = (l, b, r, t);
-                        if c % 2 == 0 {
+                        // 0–3 corners (tl, tr, bl, br), 4–7 sides (t, r, b, l).
+                        if matches!(c, 0 | 2 | 7) {
                             l2 = (l + dx).min(r - min)
-                        } else {
+                        }
+                        if matches!(c, 1 | 3 | 5) {
                             r2 = (r + dx).max(l + min)
                         }
-                        if c < 2 {
+                        if matches!(c, 0 | 1 | 4) {
                             t2 = (t + dy).max(b + min)
-                        } else {
+                        }
+                        if matches!(c, 2 | 3 | 6) {
                             b2 = (b + dy).min(t - min)
                         }
                         [l2, b2, r2, t2]
@@ -647,7 +660,16 @@ pub fn FormEditOverlay(page: u16, page_width_pt: f32, page_height_pt: f32, scale
                     (FieldKind::Radio, Some(c)) => format!("{} · {c}", f.name.clone().unwrap_or_default()),
                     _ => f.name.clone().unwrap_or_default(),
                 };
-                let corners = [("tl", x, y), ("tr", x + w, y), ("bl", x, y + h), ("br", x + w, y + h)];
+                let corners = [
+                    ("tl", x, y),
+                    ("tr", x + w, y),
+                    ("bl", x, y + h),
+                    ("br", x + w, y + h),
+                    ("t", x + w / 2.0, y),
+                    ("r", x + w, y + h / 2.0),
+                    ("b", x + w / 2.0, y + h),
+                    ("l", x, y + h / 2.0),
+                ];
                 let width_px = page_width_pt * scale;
                 rsx! {
                     div {

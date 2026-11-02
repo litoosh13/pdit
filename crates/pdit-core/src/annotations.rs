@@ -361,6 +361,61 @@ pub fn drawn_at(
         .map(|a| (a.index, a.kind, a.bounds)))
 }
 
+/// The colour stamp or pen drawing `index` on `page` is drawn in (its first object's), or `None` if it isn't drawn
+/// with objects pdit can recolour (another app's stamp may be a picture).
+pub fn drawn_color(page: u16, index: usize) -> Result<Option<[u8; 3]>, Error> {
+    with_open(|document| {
+        let pdf_page = document.pages().get(page.into())?;
+        expect(&pdf_page.annotations().get(index)?, drawn)?;
+        let bindings = crate::pdfium().bindings();
+        // SAFETY: the annotation handle comes from this open page and is closed before returning.
+        unsafe {
+            let annot = bindings.FPDFPage_GetAnnot(pdf_page.page_handle(), index as i32);
+            if annot.is_null() {
+                return Err(Error::Pdfium("the stamp or drawing was not found".into()));
+            }
+            let color = (0..bindings.FPDFAnnot_GetObjectCount(annot)).find_map(|i| {
+                crate::page_ops::object_color(bindings, bindings.FPDFAnnot_GetObject(annot, i))
+            });
+            bindings.FPDFPage_CloseAnnot(annot);
+            Ok(color)
+        }
+    })
+}
+
+/// Redraws stamp or pen drawing `index` on `page` in `color`.
+// ponytail: only the appearance changes, not a drawing's /C: FPDFAnnot_SetColor would delete the appearance. Viewers
+// show the appearance; an app that redraws from /C would bring back the old colour.
+pub fn set_drawn_color(page: u16, index: usize, color: [u8; 3]) -> Result<(), Error> {
+    crate::history::before_change()?;
+    with_open(|document| {
+        let pdf_page = document.pages().get(page.into())?;
+        expect(&pdf_page.annotations().get(index)?, drawn)?;
+        let bindings = crate::pdfium().bindings();
+        // SAFETY: the annotation handle comes from this open page and is closed before returning; the objects are
+        // its own.
+        unsafe {
+            let annot = bindings.FPDFPage_GetAnnot(pdf_page.page_handle(), index as i32);
+            if annot.is_null() {
+                return Err(Error::Pdfium("the stamp or drawing was not found".into()));
+            }
+            let mut written = true;
+            for i in 0..bindings.FPDFAnnot_GetObjectCount(annot) {
+                let object = bindings.FPDFAnnot_GetObject(annot, i);
+                crate::page_ops::set_object_color(bindings, object, color);
+                written &= bindings.is_true(bindings.FPDFAnnot_UpdateObject(annot, object));
+            }
+            bindings.FPDFPage_CloseAnnot(annot);
+            if !written {
+                return Err(Error::Pdfium(
+                    "could not recolour the stamp or drawing".into(),
+                ));
+            }
+        }
+        Ok(())
+    })
+}
+
 /// Moves stamp, pen drawing or note `index` on `page` by (`dx`, `dy`) PDF points; returns its new bounds.
 pub fn move_drawn(page: u16, index: usize, dx: f32, dy: f32) -> Result<[f32; 4], Error> {
     crate::history::before_change()?;
