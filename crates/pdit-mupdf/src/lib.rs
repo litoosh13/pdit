@@ -10,7 +10,7 @@ use std::ffi::{CString, c_char};
 
 use mupdf::pdf::{
     PdfDocument, PdfPage, PdfRedactImageMethod, PdfRedactLineArtMethod, PdfRedactOptions,
-    PdfRedactTextMethod,
+    PdfRedactTextMethod, PdfWriteOptions,
 };
 use mupdf::{Rect, TextPageFlags};
 use mupdf_sys::{fz_buffer, fz_context, fz_rect, pdf_document, pdf_page};
@@ -24,6 +24,8 @@ pub enum Error {
     DoesNotFit,
     /// Compressing failed (MuPDF's message).
     Compress(String),
+    /// Text is still in a redacted area of the saved file: the copy must not be used.
+    RedactCheck(String),
 }
 
 impl From<mupdf::Error> for Error {
@@ -39,6 +41,7 @@ impl std::fmt::Display for Error {
             Error::Story(e) => write!(f, "laying out the text: {e}"),
             Error::DoesNotFit => write!(f, "the new text doesn't fit on the page"),
             Error::Compress(e) => write!(f, "compressing: {e}"),
+            Error::RedactCheck(e) => write!(f, "redaction check failed: {e}"),
         }
     }
 }
@@ -646,6 +649,187 @@ fn fix_story_unicode<'a>(
     Ok(())
 }
 
+/// An area to remove (D-086): a page from 0 and [x0, y0, x1, y1] in page space.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RedactArea {
+    pub page: i32,
+    pub rect: [f32; 4],
+}
+
+/// `pdf` with `areas` really removed (RESEARCH.md 2026-11-03), behind black boxes: every glyph touching an area, the
+/// pixels and lines under it, annotations and form fields in it. Always gone too, since they can repeat redacted
+/// content: tags, XFA form data and the thumbnails of redacted pages. `hidden`: also the title and author, XMP,
+/// bookmarks, attachments and private application data. The file is rewritten without unused objects or old revisions, and
+/// read back: text still in an area is an error, so the copy is never handed out.
+// ponytail: /Alt on marked content around a partly redacted image stays; stripping it needs a content-stream filter.
+pub fn redact(pdf: &[u8], areas: &[RedactArea], hidden: bool) -> Result<Vec<u8>, Error> {
+    let doc = PdfDocument::from_bytes(pdf)?;
+    let mut pages: Vec<i32> = areas.iter().map(|a| a.page).collect();
+    pages.sort_unstable();
+    pages.dedup();
+    for &number in &pages {
+        let mut page = doc.load_pdf_page(number)?;
+        let rects: Vec<Rect> = areas
+            .iter()
+            .filter(|a| a.page == number)
+            .map(|a| Rect::new(a.rect[0], a.rect[1], a.rect[2], a.rect[3]))
+            .collect();
+        for rect in &rects {
+            page.add_redact_annotation(*rect)?;
+        }
+        page.apply_redactions_with_options(PdfRedactOptions {
+            black_boxes: true,
+            image_method: PdfRedactImageMethod::Pixels,
+            line_art: PdfRedactLineArtMethod::RemoveIfTouched,
+            text: PdfRedactTextMethod::Remove,
+        })?;
+        // MuPDF's redaction leaves form fields alone.
+        let mut doomed = Vec::new();
+        for widget in page.widgets() {
+            let bounds = widget.annotation().bounds()?;
+            if rects.iter().any(|r| overlaps(r, &bounds)) {
+                doomed.push(widget);
+            }
+        }
+        for widget in doomed {
+            forget_in_parents(widget.annotation().object())?;
+            page.delete_widget(widget)?;
+        }
+        // Nor does it take every kind of annotation; a popup holds its parent's note.
+        let mut popups = Vec::new();
+        let mut comments = Vec::new();
+        for annotation in page.annotations() {
+            if rects.iter().any(|r| {
+                overlaps(
+                    r,
+                    &annotation.bounds().unwrap_or(Rect::new(0.0, 0.0, 0.0, 0.0)),
+                )
+            }) {
+                if let Some(popup) = annotation.object().get_dict("Popup")? {
+                    popups.push(popup.as_indirect()?);
+                }
+                comments.push(annotation);
+            }
+        }
+        for annotation in comments {
+            page.delete_annotation(annotation)?;
+        }
+        if let Some(mut list) = page.object().get_dict("Annots")? {
+            for i in (0..list.len()? as i32).rev() {
+                if list
+                    .get_array(i)?
+                    .is_some_and(|a| a.as_indirect().is_ok_and(|n| popups.contains(&n)))
+                {
+                    list.array_delete(i)?;
+                }
+            }
+        }
+        page.object().dict_delete("Thumb")?;
+    }
+    let mut root = doc.catalog()?;
+    for key in ["StructTreeRoot", "MarkInfo"] {
+        root.dict_delete(key)?;
+    }
+    if let Some(mut form) = root.get_dict("AcroForm")? {
+        form.dict_delete("XFA")?;
+    }
+    if hidden {
+        doc.trailer()?.dict_delete("Info")?;
+        for key in ["Metadata", "Outlines", "PieceInfo", "AF", "Collection"] {
+            root.dict_delete(key)?;
+        }
+        if let Some(mut names) = root.get_dict("Names")? {
+            names.dict_delete("EmbeddedFiles")?;
+        }
+        for number in 0..doc.page_count()? {
+            let mut page = doc.load_pdf_page(number)?;
+            for key in ["Metadata", "PieceInfo", "AF"] {
+                page.object().dict_delete(key)?;
+            }
+            let attached: Vec<_> = page
+                .annotations()
+                .filter(|a| {
+                    matches!(
+                        a.r#type(),
+                        Ok(mupdf::pdf::PdfAnnotationType::FileAttachment)
+                    )
+                })
+                .collect();
+            for annotation in attached {
+                page.delete_annotation(annotation)?;
+            }
+        }
+    }
+    let mut options = PdfWriteOptions::default();
+    options
+        .set_garbage_level(4)
+        .set_clean(true)
+        .set_sanitize(true)
+        .set_compress(true)
+        .set_compress_images(true);
+    let mut clean = Vec::new();
+    doc.write_to_with_options(&mut clean, options)?;
+    // Best quality keeps every picture as it is and drops the removed letters from embedded fonts.
+    let out = compress(&clean, Level::BestQuality)?;
+    check_redacted(&out, areas)?;
+    Ok(out)
+}
+
+/// A grouped field's name and value live on its parents, which outlive the widget. Other widgets of the group keep
+/// showing what they drew, but the value itself goes.
+fn forget_in_parents(mut field: mupdf::pdf::PdfObject) -> Result<(), Error> {
+    while let Some(mut parent) = field.get_dict("Parent")? {
+        for key in ["V", "DV"] {
+            parent.dict_delete(key)?;
+        }
+        if let Some(mut kids) = parent.get_dict("Kids")? {
+            let number = field.as_indirect()?;
+            for i in (0..kids.len()? as i32).rev() {
+                if kids
+                    .get_array(i)?
+                    .is_some_and(|k| k.as_indirect().ok() == Some(number))
+                {
+                    kids.array_delete(i)?;
+                }
+            }
+            if kids.len()? == 0 {
+                for key in ["T", "TU", "TM", "Opt"] {
+                    parent.dict_delete(key)?;
+                }
+            }
+        }
+        field = parent;
+    }
+    Ok(())
+}
+
+fn overlaps(a: &Rect, b: &Rect) -> bool {
+    a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1
+}
+
+/// No character's centre is in an area of the saved file.
+fn check_redacted(pdf: &[u8], areas: &[RedactArea]) -> Result<(), Error> {
+    let doc = PdfDocument::from_bytes(pdf)?;
+    for area in areas {
+        let text = doc
+            .load_pdf_page(area.page)?
+            .to_text_page(TextPageFlags::empty())?;
+        let [x0, y0, x1, y1] = area.rect;
+        for block in text.blocks() {
+            for line in block.lines() {
+                for c in line.chars() {
+                    let q = c.quad();
+                    let (x, y) = ((q.ul.x + q.lr.x) / 2.0, (q.ul.y + q.lr.y) / 2.0);
+                    if x > x0 && x < x1 && y > y0 && y < y1 {
+                        return Err(Error::RedactCheck(format!("page {}", area.page + 1)));
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 /// How hard Compress PDF (D-069) works: pictures are only touched by Medium and Smallest.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Level {
@@ -999,6 +1183,136 @@ mod tests {
         }
         assert!(fields(FORM) >= 4, "the form fixture has its fields");
     }
+    /// The area of a word on a page, as the page shows it (also on a rotated page).
+    fn word_area(pdf: &[u8], page: i32, word: &str) -> RedactArea {
+        let doc = PdfDocument::from_bytes(pdf).unwrap();
+        let text = doc
+            .load_pdf_page(page)
+            .unwrap()
+            .to_text_page(TextPageFlags::empty())
+            .unwrap();
+        for block in text.blocks() {
+            for line in block.lines() {
+                let chars: Vec<_> = line.chars().collect();
+                let s: String = chars.iter().filter_map(|c| c.char()).collect();
+                if let Some(at) = s.find(word) {
+                    let (first, last) = (chars[at].quad(), chars[at + word.len() - 1].quad());
+                    let xs = [
+                        first.ul.x, first.ll.x, last.ur.x, last.lr.x, first.ur.x, last.ul.x,
+                    ];
+                    let ys = [
+                        first.ul.y, first.ur.y, last.ll.y, last.lr.y, first.ll.y, last.ul.y,
+                    ];
+                    let min = |v: &[f32]| v.iter().cloned().fold(f32::MAX, f32::min);
+                    let max = |v: &[f32]| v.iter().cloned().fold(f32::MIN, f32::max);
+                    return RedactArea {
+                        page,
+                        rect: [min(&xs), min(&ys) + 2.0, max(&xs), max(&ys) - 2.0],
+                    };
+                }
+            }
+        }
+        panic!("{word} is not on page {page}");
+    }
+
+    /// The file with its streams unpacked, as bytes to search.
+    fn unpacked(pdf: &[u8]) -> String {
+        let doc = PdfDocument::from_bytes(pdf).unwrap();
+        let mut options = PdfWriteOptions::default();
+        options.set_decompress(true);
+        let mut out = Vec::new();
+        doc.write_to_with_options(&mut out, options).unwrap();
+        String::from_utf8_lossy(&out).into_owned()
+    }
+
+    const REDACT: &[u8] = include_bytes!("../../../fixtures/synthetic-redact.pdf");
+    /// Everything marked on the redaction fixture. y counts from the top of the 792 pt page.
+    fn redact_areas() -> Vec<RedactArea> {
+        let r = |x0: f32, y0: f32, x1: f32, y1: f32| RedactArea {
+            page: 0,
+            rect: [x0, 792.0 - y1, x1, 792.0 - y0],
+        };
+        vec![
+            word_area(REDACT, 0, "SECRET-MIDLINE"),
+            r(70.0, 656.0, 300.0, 674.0),  // kerned
+            r(70.0, 636.0, 300.0, 652.0),  // invisible
+            r(70.0, 616.0, 300.0, 633.0),  // under a white cover
+            r(70.0, 587.0, 150.0, 604.0),  // ActualText
+            r(70.0, 567.0, 150.0, 584.0),  // Alt
+            r(70.0, 537.0, 300.0, 555.0),  // form XObject
+            r(70.0, 517.0, 300.0, 534.0),  // hidden layer
+            r(320.0, 300.0, 520.0, 330.0), // pattern
+            r(72.0, 300.0, 172.0, 500.0),  // left half of the picture
+            r(330.0, 700.0, 560.0, 730.0), // FreeText
+            r(330.0, 660.0, 560.0, 690.0), // link
+            r(330.0, 620.0, 560.0, 650.0), // field
+            r(330.0, 580.0, 560.0, 610.0), // field with a parent
+            r(330.0, 540.0, 560.0, 570.0), // highlight
+            word_area(REDACT, 2, "SECRET-ROTATED"),
+        ]
+    }
+
+    #[test]
+    fn redact_removes_what_is_marked_and_nothing_else() {
+        let out = redact(REDACT, &redact_areas(), false).unwrap();
+        let file = unpacked(&out);
+        for gone in [
+            "SECRET-MIDLINE",
+            "-KERNED",
+            "SECRET-INVISIBLE",
+            "SECRET-COVERED",
+            "SECRET-ACTUALTEXT",
+            "SECRET-ALT-TEXT",
+            "SECRET-FORMXOBJECT",
+            "SECRET-LAYER",
+            "SECRET-PATTERN",
+            "SECRET-ANNOT-INSIDE",
+            "SECRET-LINK",
+            "SECRET-FIELDNAME",
+            "SECRET-FIELDVALUE",
+            "SECRET-PARENTFIELD",
+            "SECRET-KIDVALUE",
+            "SECRET-HIGHLIGHT",
+            "SECRET-POPUP",
+            "SECRET-ROTATED",
+            "SECRET-STRUCT",
+            "SECRET-XFA",
+            "SECRET-THUMB",
+            "SECRET-OLDREVISION",
+            "SECRET-ORPHAN",
+        ] {
+            assert!(!file.contains(gone), "{gone} is still in the file");
+        }
+        for kept in [
+            "KEEP-LINE-ONE",
+            "keep-after",
+            "KEEP-LINE-LAST",
+            "KEEP-PAGE-TWO",
+            "KEEP-ROTATED",
+            "SECRET-OTHERPAGE",
+            "SECRET-ANNOT-OUTSIDE",
+            "SECRET-INFO-TITLE",
+            "SECRET-BOOKMARK",
+            "SECRET-ATTACHED-CONTENT",
+        ] {
+            assert!(file.contains(kept), "{kept} was removed");
+        }
+    }
+
+    #[test]
+    fn redact_can_remove_hidden_data_too() {
+        let file = unpacked(&redact(REDACT, &redact_areas(), true).unwrap());
+        for gone in [
+            "SECRET-INFO-TITLE",
+            "SECRET-XMP",
+            "SECRET-BOOKMARK",
+            "SECRET-ATTACH",
+        ] {
+            assert!(!file.contains(gone), "{gone} is still in the file");
+        }
+        assert!(file.contains("KEEP-LINE-ONE"));
+    }
+
     const NOTO: &[u8] = include_bytes!("../../pdit-app/assets/fonts/NotoSans-Regular.ttf");
 
     fn normalize(s: &str) -> String {

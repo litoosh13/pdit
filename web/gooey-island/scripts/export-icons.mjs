@@ -10,6 +10,8 @@ const ISLAND = 'src/icons/devigner';
 // [out dir, name] (Outline variant)
 const ICONS = [
   [APP, 'Folder'],
+  [APP, 'Eraser'],
+  [APP, 'TextSelection'],
   [APP, 'File'],
   [APP, 'Printer'],
   [APP, 'ArrowLeft'],

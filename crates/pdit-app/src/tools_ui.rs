@@ -31,7 +31,7 @@ const ABOUT: usize = SECTIONS.len();
 const PAGE: usize = 7;
 
 /// Rail sections: (title, rail label, icon).
-const SECTIONS: [(&str, &str, &str); 8] = [
+const SECTIONS: [(&str, &str, &str); 9] = [
     // Find opens the find card instead of a flyout (D-051).
     ("Find", "Find", crate::search_ui::ICON_FIND),
     ("Text", "Text", ICON_TEXT),
@@ -41,6 +41,8 @@ const SECTIONS: [(&str, &str, &str); 8] = [
     ("Form", "Form", crate::form_edit_ui::ICON_FORM),
     ("Document", "Document", ICON_DOCUMENT),
     ("Pages", "Page", ICON_PAGE),
+    // Opens the bar under the centre bar instead of a flyout (D-087); online the flyout says it's a desktop tool.
+    ("Redact", "Redact", crate::redact_ui::ICON_REDACT),
 ];
 
 /// The rows of section `i` (some depend on the document's state).
@@ -93,6 +95,7 @@ fn rows(i: usize, stamps: bool) -> Vec<Action> {
                 ])
                 .collect()
         }
+        "Redact" => Vec::new(),
         _ => page_actions(),
     }
 }
@@ -229,6 +232,8 @@ pub fn ToolRail(has_document: bool) -> Element {
     let stamps = (tools.stamps)();
     let placing = (tools.placing)();
     let armed = shapes.armed();
+    let redact = use_context::<crate::redact_ui::Redact>();
+    let redact_open = redact.is_open();
     let title = match (section, stamps) {
         (_, true) => "Stamp",
         (Some(ABOUT), false) => "About",
@@ -242,6 +247,7 @@ pub fn ToolRail(has_document: bool) -> Element {
     rsx! {
         document::Stylesheet { href: PANEL_CSS }
         document::Stylesheet { href: TOOLS_CSS }
+        document::Stylesheet { href: crate::redact_ui::REDACT_CSS }
         document::Stylesheet { href: crate::update_ui::UPDATE_CSS }
         aside {
             class: "pdit-rail t-panel-slide",
@@ -292,12 +298,19 @@ pub fn ToolRail(has_document: bool) -> Element {
                         r#type: "button",
                         title: name,
                         "data-section": "{i}",
-                        "aria-expanded": if section == Some(i) && shown { "true" } else { "false" },
+                        "aria-expanded": if (section == Some(i) && shown) || (SECTIONS[i].0 == "Redact" && redact_open) { "true" } else { "false" },
                         onmouseenter: move |event| highlight(rail_hl, &event),
                         onclick: move |_| {
+                            let desktop_redact = SECTIONS[i].0 == "Redact" && crate::ai_ui::desktop::available();
+                            if !desktop_redact {
+                                redact.hide();
+                            }
                             if SECTIONS[i].0 == "Find" {
                                 tools.close();
                                 consume_context::<crate::search_ui::Find>().open();
+                            } else if desktop_redact {
+                                tools.close();
+                                redact.toggle();
                             } else if *tools.section.peek() == Some(i) && *tools.shown.peek() {
                                 tools.close();
                             } else {
@@ -331,6 +344,7 @@ pub fn ToolRail(has_document: bool) -> Element {
                     "data-section": "{ABOUT}",
                     "aria-expanded": if section == Some(ABOUT) && shown { "true" } else { "false" },
                     onclick: move |_| {
+                        redact.hide();
                         if *tools.section.peek() == Some(ABOUT) && *tools.shown.peek() {
                             tools.close();
                         } else {
@@ -389,6 +403,9 @@ pub fn ToolRail(has_document: bool) -> Element {
                 }
                 if i == PAGE && !stamps {
                     crate::thumbnails::PageThumbs {}
+                }
+                if SECTIONS[i].0 == "Redact" {
+                    div { class: "rx-online", "Redaction is made in the desktop app." }
                 }
             }
             }

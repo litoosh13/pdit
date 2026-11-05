@@ -189,6 +189,7 @@ fn PageView(index: u16, count: usize, width_pt: f32, height_pt: f32) -> Element 
     // Where the visible area starts in PDF points (a cropped page, D-070): clicks
     // add it, and the overlays below are shifted by it.
     let (ox, oy) = pdit_core::page_ops::page_origin(index).unwrap_or((0.0, 0.0));
+    let redact = use_context::<crate::redact_ui::Redact>();
     let arming = shapes.drawing() || rail.placing();
     let page_class = match (revealed(), arming) {
         (true, true) => "page t-skel is-revealed pdit-arming",
@@ -206,6 +207,7 @@ fn PageView(index: u16, count: usize, width_pt: f32, height_pt: f32) -> Element 
         div {
             class: if locked { format!("{page_class} is-locked") } else { page_class.to_owned() },
             "data-page": "{index}",
+            "data-redact": redact.page_mode(),
             // Up to 100 % a page also shrinks to fit a narrow window; zoomed
             // in, it may be wider than the window (the list scrolls sideways).
             style: if percent <= 100.0 {
@@ -238,6 +240,9 @@ fn PageView(index: u16, count: usize, width_pt: f32, height_pt: f32) -> Element 
                 let per_pt = rect.width() / f64::from(width_pt);
                 let x = ((point.x - rect.left()) / per_pt) as f32 + ox;
                 let y = height_pt - ((point.y - rect.top()) / per_pt) as f32 + oy;
+                if redact.armed() {
+                    return;
+                }
                 // A drag across words (D-040) or a pen stroke (D-041) ends in a
                 // click: not an edit.
                 // A tool armed in the tools rail (D-050) is placed here.
@@ -309,6 +314,13 @@ fn PageView(index: u16, count: usize, width_pt: f32, height_pt: f32) -> Element 
                 let per_pt = rect.width() / f64::from(width_pt);
                 let x = ((point.x - rect.left()) / per_pt) as f32 + ox;
                 let y = height_pt - ((point.y - rect.top()) / per_pt) as f32 + oy;
+                if redact.armed() {
+                    redact.begin(index, x, y);
+                    if let Some(pe) = event.data().downcast::<web_sys::PointerEvent>() {
+                        let _ = slot.set_pointer_capture(pe.pointer_id());
+                    }
+                    return;
+                }
                 // An armed rail tool waits for the click (onclick).
                 if rail.placing() {
                     return;
@@ -366,6 +378,17 @@ fn PageView(index: u16, count: usize, width_pt: f32, height_pt: f32) -> Element 
                 }
             },
             onpointermove: move |event| {
+                if redact.dragging() {
+                    if let Some(slot) = slot_element.peek().clone() {
+                        let rect = slot.get_bounding_client_rect();
+                        let point = event.client_coordinates();
+                        let per_pt = rect.width() / f64::from(width_pt);
+                        let x = ((point.x - rect.left()) / per_pt) as f32 + ox;
+                        let y = height_pt - ((point.y - rect.top()) / per_pt) as f32 + oy;
+                        redact.drag_to(x, y);
+                    }
+                    return;
+                }
                 if forms.busy() {
                     if let Some(slot) = slot_element.peek().clone() {
                         let rect = slot.get_bounding_client_rect();
@@ -429,6 +452,10 @@ fn PageView(index: u16, count: usize, width_pt: f32, height_pt: f32) -> Element 
                 });
             },
             onpointerup: move |_| {
+                if redact.dragging() {
+                    redact.release();
+                    return;
+                }
                 if forms.busy() {
                     forms.release();
                     return;
@@ -531,6 +558,11 @@ fn PageView(index: u16, count: usize, width_pt: f32, height_pt: f32) -> Element 
                     scale,
                 }
                 crate::crop_ui::CropOverlay {
+                    page: index,
+                    page_height_pt: height_pt,
+                    scale,
+                }
+                crate::redact_ui::RedactOverlay {
                     page: index,
                     page_height_pt: height_pt,
                     scale,

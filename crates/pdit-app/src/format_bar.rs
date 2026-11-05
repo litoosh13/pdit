@@ -13,7 +13,7 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 
 /// The menu's fonts, by the island's keys (`FONTS` in web/gooey-island/src/index.jsx).
-const FONTS: [(&str, FontChoice); 7] = [
+const FONTS: [(&str, FontChoice); 11] = [
     ("Document", FontChoice::Document),
     ("NotoSans", FontChoice::NotoSans),
     ("LiberationSans", FontChoice::LiberationSans),
@@ -21,6 +21,10 @@ const FONTS: [(&str, FontChoice); 7] = [
     ("LiberationMono", FontChoice::LiberationMono),
     ("Carlito", FontChoice::Carlito),
     ("Caladea", FontChoice::Caladea),
+    ("Roboto", FontChoice::Roboto),
+    ("OpenSans", FontChoice::OpenSans),
+    ("Montserrat", FontChoice::Montserrat),
+    ("Lato", FontChoice::Lato),
 ];
 
 #[component]

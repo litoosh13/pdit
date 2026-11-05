@@ -1,6 +1,7 @@
-//! The look-alike fonts bundled for fallback text (D-028): Liberation Sans,
-//! Serif and Mono, Carlito and Caladea, each in four styles. They are fetched
-//! from pdit's own site only when first needed, then kept in memory.
+//! The fonts bundled for the font menu (D-084, D-085) and for fallback text
+//! (D-028): Liberation Sans, Serif and Mono, Carlito, Caladea, Roboto, Open Sans,
+//! Montserrat and Lato, each in four styles. They are fetched from pdit's own
+//! site only when first needed, then kept in memory.
 //! Sources and licences: assets/fonts/*/SOURCE.md.
 
 use dioxus::prelude::*;
@@ -28,6 +29,22 @@ const CALADEA_REGULAR: Asset = asset!("/assets/fonts/caladea/Caladea-Regular.ttf
 const CALADEA_BOLD: Asset = asset!("/assets/fonts/caladea/Caladea-Bold.ttf");
 const CALADEA_ITALIC: Asset = asset!("/assets/fonts/caladea/Caladea-Italic.ttf");
 const CALADEA_BOLDITALIC: Asset = asset!("/assets/fonts/caladea/Caladea-BoldItalic.ttf");
+const ROBOTO_REGULAR: Asset = asset!("/assets/fonts/roboto/Roboto-Regular.ttf");
+const ROBOTO_BOLD: Asset = asset!("/assets/fonts/roboto/Roboto-Bold.ttf");
+const ROBOTO_ITALIC: Asset = asset!("/assets/fonts/roboto/Roboto-Italic.ttf");
+const ROBOTO_BOLDITALIC: Asset = asset!("/assets/fonts/roboto/Roboto-BoldItalic.ttf");
+const OPENSANS_REGULAR: Asset = asset!("/assets/fonts/opensans/OpenSans-Regular.ttf");
+const OPENSANS_BOLD: Asset = asset!("/assets/fonts/opensans/OpenSans-Bold.ttf");
+const OPENSANS_ITALIC: Asset = asset!("/assets/fonts/opensans/OpenSans-Italic.ttf");
+const OPENSANS_BOLDITALIC: Asset = asset!("/assets/fonts/opensans/OpenSans-BoldItalic.ttf");
+const MONTSERRAT_REGULAR: Asset = asset!("/assets/fonts/montserrat/Montserrat-Regular.ttf");
+const MONTSERRAT_BOLD: Asset = asset!("/assets/fonts/montserrat/Montserrat-Bold.ttf");
+const MONTSERRAT_ITALIC: Asset = asset!("/assets/fonts/montserrat/Montserrat-Italic.ttf");
+const MONTSERRAT_BOLDITALIC: Asset = asset!("/assets/fonts/montserrat/Montserrat-BoldItalic.ttf");
+const LATO_REGULAR: Asset = asset!("/assets/fonts/lato/Lato-Regular.ttf");
+const LATO_BOLD: Asset = asset!("/assets/fonts/lato/Lato-Bold.ttf");
+const LATO_ITALIC: Asset = asset!("/assets/fonts/lato/Lato-Italic.ttf");
+const LATO_BOLDITALIC: Asset = asset!("/assets/fonts/lato/Lato-BoldItalic.ttf");
 
 /// A bundled look-alike family.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -42,17 +59,25 @@ pub enum Family {
     Carlito,
     /// Caladea: Cambria.
     Caladea,
+    Roboto,
+    OpenSans,
+    Montserrat,
+    Lato,
 }
 
 impl Family {
     /// Every family (used by the debug self-check).
     #[cfg(any(debug_assertions, feature = "self-check"))]
-    pub const ALL: [Family; 5] = [
+    pub const ALL: [Family; 9] = [
         Family::Sans,
         Family::Serif,
         Family::Mono,
         Family::Carlito,
         Family::Caladea,
+        Family::Roboto,
+        Family::OpenSans,
+        Family::Montserrat,
+        Family::Lato,
     ];
 }
 
@@ -78,6 +103,22 @@ fn asset(family: Family, bold: bool, italic: bool) -> Asset {
         (Family::Caladea, true, false) => CALADEA_BOLD,
         (Family::Caladea, false, true) => CALADEA_ITALIC,
         (Family::Caladea, true, true) => CALADEA_BOLDITALIC,
+        (Family::Roboto, false, false) => ROBOTO_REGULAR,
+        (Family::Roboto, true, false) => ROBOTO_BOLD,
+        (Family::Roboto, false, true) => ROBOTO_ITALIC,
+        (Family::Roboto, true, true) => ROBOTO_BOLDITALIC,
+        (Family::OpenSans, false, false) => OPENSANS_REGULAR,
+        (Family::OpenSans, true, false) => OPENSANS_BOLD,
+        (Family::OpenSans, false, true) => OPENSANS_ITALIC,
+        (Family::OpenSans, true, true) => OPENSANS_BOLDITALIC,
+        (Family::Montserrat, false, false) => MONTSERRAT_REGULAR,
+        (Family::Montserrat, true, false) => MONTSERRAT_BOLD,
+        (Family::Montserrat, false, true) => MONTSERRAT_ITALIC,
+        (Family::Montserrat, true, true) => MONTSERRAT_BOLDITALIC,
+        (Family::Lato, false, false) => LATO_REGULAR,
+        (Family::Lato, true, false) => LATO_BOLD,
+        (Family::Lato, false, true) => LATO_ITALIC,
+        (Family::Lato, true, true) => LATO_BOLDITALIC,
     }
 }
 
@@ -105,7 +146,15 @@ pub fn family_for(traits: &pdit_core::FontTraits) -> Option<Family> {
         // Noto Sans itself is the general fallback.
         return None;
     }
-    Some(if has(&["calibri", "carlito"]) {
+    Some(if has(&["roboto"]) {
+        Family::Roboto
+    } else if has(&["opensans"]) {
+        Family::OpenSans
+    } else if has(&["montserrat"]) {
+        Family::Montserrat
+    } else if name.starts_with("lato") {
+        Family::Lato
+    } else if has(&["calibri", "carlito"]) {
         Family::Carlito
     } else if has(&["cambria", "caladea"]) {
         Family::Caladea
@@ -140,6 +189,10 @@ pub fn family_of(font: pdit_core::FontChoice) -> Option<Family> {
         F::LiberationMono => Some(Family::Mono),
         F::Carlito => Some(Family::Carlito),
         F::Caladea => Some(Family::Caladea),
+        F::Roboto => Some(Family::Roboto),
+        F::OpenSans => Some(Family::OpenSans),
+        F::Montserrat => Some(Family::Montserrat),
+        F::Lato => Some(Family::Lato),
     }
 }
 

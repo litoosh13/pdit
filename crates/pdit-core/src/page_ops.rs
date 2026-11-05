@@ -863,6 +863,19 @@ pub struct ImageHit {
     pub bounds: [f32; 4],
 }
 
+/// `page`'s rotation in degrees, clockwise: 0, 90, 180 or 270.
+pub fn page_rotation(page: u16) -> Result<u32, Error> {
+    use pdfium_render::prelude::PdfPageRenderRotation as R;
+    with_open(|document| {
+        Ok(match document.pages().get(page.into())?.rotation()? {
+            R::None => 0,
+            R::Degrees90 => 90,
+            R::Degrees180 => 180,
+            R::Degrees270 => 270,
+        })
+    })
+}
+
 /// The topmost image object on `page` whose bounds contain (`x_pt`, `y_pt`)
 /// (PDF points from the page's bottom-left), if any. Later objects paint over
 /// earlier ones, so the last match wins. Used to select a placed image

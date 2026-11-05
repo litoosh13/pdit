@@ -31,6 +31,7 @@ mod links_ui;
 mod page_tools;
 mod pages;
 mod print_ui;
+mod redact_ui;
 mod save;
 mod search_ui;
 #[cfg(any(debug_assertions, feature = "self-check"))]
@@ -89,6 +90,7 @@ fn App() -> Element {
     search_ui::Find::provide();
     print_ui::Print::provide();
     compress_ui::Compress::provide();
+    redact_ui::Redact::provide();
     crop_ui::Crop::provide();
     split_ui::SplitFiles::provide();
     labels_ui::PageNumbers::provide();
@@ -176,6 +178,7 @@ fn App() -> Element {
         search_ui::FindCard {}
         print_ui::PrintUi {}
         compress_ui::CompressUi {}
+        redact_ui::RedactUi {}
         crop_ui::CropUi {}
         split_ui::SplitUi {}
         labels_ui::LabelsUi {}
@@ -190,6 +193,11 @@ fn App() -> Element {
         doc_ui::DocWindow {}
         editing::SelectionUi {}
     }
+}
+
+/// Opens a copy just saved by a tool as the document on screen (redaction: nothing to undo into).
+pub(crate) fn show_saved_copy(bytes: Vec<u8>, name: String) {
+    show_document(consume_context(), consume_context(), bytes, name);
 }
 
 /// Opens `bytes` as the document on screen, named `name`.

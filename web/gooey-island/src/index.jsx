@@ -8,7 +8,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Liquid } from 'liquid-gooey';
-import { Slider, Badge, DeleteButton, MenuDock } from 'devignerui';
+import { Slider, Badge, DeleteButton, GooSwitch, MenuDock } from 'devignerui';
 import { IconRedo } from '../node_modules/@devigner-ui/icons/dist/icons/Redo.js';
 import { IconEdit } from '../node_modules/@devigner-ui/icons/dist/icons/Edit.js';
 import { IconMagicStar } from '../node_modules/@devigner-ui/icons/dist/icons/MagicStar.js';
@@ -242,6 +242,10 @@ const FONTS = [
   ['LiberationMono', 'Liberation Mono (Courier)'],
   ['Carlito', 'Carlito (Calibri)'],
   ['Caladea', 'Caladea (Cambria)'],
+  ['Roboto', 'Roboto'],
+  ['OpenSans', 'Open Sans'],
+  ['Montserrat', 'Montserrat'],
+  ['Lato', 'Lato'],
 ];
 const COLORS = [
   ['Black', [0, 0, 0]],
@@ -472,4 +476,17 @@ export function mountFormatBar(element, { onChange, inline = false } = {}) {
   const render = (state) => root.render(<FormatBar {...state} onChange={onChange} inline={inline} />);
   render({ visible: false, style: null });
   return { update: render, unmount: () => root.unmount() };
+}
+
+// ---------- a switch (Devigner GooSwitch), for the Dioxus side ----------
+
+function Switch({ checked, onChange }) {
+  const [on, setOn] = useState(checked);
+  return <GooSwitch size="sm" checked={on} onCheckedChange={(next) => { setOn(next); onChange?.(next); }} />;
+}
+
+export function mountSwitch(element, { checked = false, onChange } = {}) {
+  const root = createRoot(element);
+  root.render(<Switch checked={checked} onChange={onChange} />);
+  return { unmount: () => root.unmount() };
 }

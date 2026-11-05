@@ -16,7 +16,7 @@ Full licence texts are in [licenses/](licenses).
 | Beautiful UI components (ported) | MIT | [licenses/other.md](licenses/other.md) |
 | Tesseract OCR and its language files; Leptonica (macOS app) | Apache-2.0; BSD-2-Clause | [licenses/other.md](licenses/other.md) |
 | Form-field models `form-field-v1-nano`, `form-field-v1-state` by Nutrient | Apache-2.0 | [crates/pdit-app/assets/models/SOURCES.md](crates/pdit-app/assets/models/SOURCES.md), [licenses/apache-2.0.txt](licenses/apache-2.0.txt) |
-| Fonts: Inter, Noto Sans, Liberation, Carlito, Caladea; Vazirmatn (desktop app) | SIL Open Font License 1.1 | [licenses/fonts.md](licenses/fonts.md) |
+| Fonts: Inter, Noto Sans, Liberation, Carlito, Caladea, Roboto, Open Sans, Montserrat, Lato; Vazirmatn (desktop app) | SIL Open Font License 1.1 | [licenses/fonts.md](licenses/fonts.md) |
 | Animations from [Transitions.dev](https://transitions.dev) | Transitions.dev's terms | noted in each CSS file that uses one |
 
 The CSS taken from Transitions.dev is used under its authors' own terms. It is **not** covered by pdit's AGPL-3.0

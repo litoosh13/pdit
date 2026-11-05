@@ -108,6 +108,7 @@ pub async fn run(font_url: &str) {
     mupdf_session().await;
     mupdf_text_box_session(&font).await;
     compress_session().await;
+    redact_session().await;
     labels_session().await;
     office_session().await;
     about_session().await;
@@ -2280,6 +2281,104 @@ async fn compress_session() {
     }
 }
 
+/// Redaction (D-086, desktop): the real `redact_pdf` command on the redaction fixture. PDFium opens the copy with the
+/// same pages, the marked words are gone from its text, the others stay, the marked form fields are gone.
+async fn redact_session() {
+    use crate::ai_ui::desktop;
+    if !desktop::available() {
+        return log("pdit self-check: redact: skipped (not the desktop app)");
+    }
+    const REDACT: &[u8] = include_bytes!("../../../fixtures/synthetic-redact.pdf");
+    // Mid-line word, kerned text, invisible text, a form field, a field in a group (y from the page's top).
+    let areas =
+        "0 116.5 78 236 95;0 70 118 300 136;0 70 140 300 156;0 330 142 560 172;0 330 182 560 212";
+    let headers = [
+        ("x-areas", areas.to_string()),
+        ("x-hidden", "1".to_string()),
+    ];
+    let (ok, detail) = match desktop::invoke_raw("redact_pdf", REDACT, &headers).await {
+        Ok(value) => {
+            let out = js_sys::Uint8Array::new(&value).to_vec();
+            let opened = pdit_core::open_document(out.clone()).is_ok();
+            let pages = pdit_core::page_ops::page_sizes()
+                .map(|s| s.len())
+                .unwrap_or(0);
+            let text: String = pdit_core::text_lines(0)
+                .map(|lines| lines.into_iter().map(|l| l.text + "\n").collect())
+                .unwrap_or_default();
+            let fields = pdit_core::form_fields(0).map(|f| f.len()).unwrap_or(99);
+            let gone = !["MIDLINE", "KERNED", "INVISIBLE"]
+                .iter()
+                .any(|w| text.contains(w));
+            let kept = ["KEEP-LINE-ONE", "keep-after", "SECRET-COVERED"]
+                .iter()
+                .all(|w| text.contains(w));
+            pdit_core::close_document();
+            (
+                opened && pages == 3 && gone && kept && fields == 0,
+                format!(
+                    "{} B, {pages} pages, {fields} fields, words gone {gone}, others kept {kept}",
+                    out.len()
+                ),
+            )
+        }
+        Err(error) => (false, format!("{error:?}")),
+    };
+    log(&format!(
+        "pdit self-check {}: redact: real removal, copy opens in PDFium: {detail}",
+        if ok { "PASS" } else { "FAIL" }
+    ));
+    // Text marks as the page makes them: a rotated page, and words in single-spaced lines. Exactly those words go.
+    for (name, input, page, count) in [
+        ("rotated page", REDACT, 2u16, 1usize),
+        ("words between lines", WRAPPED, 0, 12),
+    ] {
+        let _ = pdit_core::open_document(input.to_vec());
+        let words = || -> Vec<String> {
+            pdit_core::annotations::words(page)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|w| w.text)
+                .collect()
+        };
+        let before = words();
+        // The rotated page's marked word, or a run from the middle of the paragraph.
+        let first = before
+            .iter()
+            .position(|w| w == "SECRET-ROTATED")
+            .unwrap_or(before.len() / 3);
+        let last = first + count - 1;
+        let headers = [
+            (
+                "x-areas",
+                crate::redact_ui::text_mark_areas(page, first, last),
+            ),
+            ("x-hidden", "0".to_string()),
+        ];
+        let mut want = before.clone();
+        want.drain(first..=last);
+        let (ok, detail) = match desktop::invoke_raw("redact_pdf", input, &headers).await {
+            Ok(value) => {
+                let _ = pdit_core::open_document(js_sys::Uint8Array::new(&value).to_vec());
+                let after = words();
+                let detail = format!(
+                    "{} words → {}, wanted {}",
+                    before.len(),
+                    after.len(),
+                    want.len()
+                );
+                (after == want, detail)
+            }
+            Err(error) => (false, format!("{error:?}")),
+        };
+        pdit_core::close_document();
+        log(&format!(
+            "pdit self-check {}: redact: {name}: {detail}",
+            if ok { "PASS" } else { "FAIL" }
+        ));
+    }
+}
+
 /// Page numbers (D-070, desktop): the real `set_page_labels` command on the 2-page
 /// scan; PDFium reads the labels back, and they read back as the same ranges.
 async fn labels_session() {
@@ -3666,6 +3765,17 @@ async fn look_alike_session(noto: &[u8]) {
         (traits("CourierNewPSMT", false, true), Some(Family::Mono)),
         (traits("Calibri-Light", false, false), Some(Family::Carlito)),
         (traits("Cambria", true, false), Some(Family::Caladea)),
+        (traits("Roboto-Bold", false, false), Some(Family::Roboto)),
+        (
+            traits("OpenSansRoman-Bold", false, false),
+            Some(Family::OpenSans),
+        ),
+        (
+            traits("Montserrat-Regular", false, false),
+            Some(Family::Montserrat),
+        ),
+        (traits("Lato-Italic", false, false), Some(Family::Lato)),
+        (traits("Plato", true, false), Some(Family::Serif)),
         (traits("Garamond", true, false), Some(Family::Serif)),
         (traits("Consolas", false, true), Some(Family::Mono)),
         (traits("NotoSans-Regular", false, false), None),
@@ -3719,6 +3829,10 @@ async fn look_alike_session(noto: &[u8]) {
         (F::LiberationMono, "LiberationMono"),
         (F::Carlito, "Carlito"),
         (F::Caladea, "Caladea"),
+        (F::Roboto, "Roboto"),
+        (F::OpenSans, "OpenSans"),
+        (F::Montserrat, "Montserrat"),
+        (F::Lato, "Lato"),
     ] {
         let Some(family) = crate::font_catalog::family_of(font) else {
             log(&format!(

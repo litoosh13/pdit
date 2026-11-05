@@ -11,6 +11,8 @@ interface icons only, never as user-insertable stamps. Picks approved by the use
 |---|---|
 | `devigner/Folder.svg` | Tools rail: Open |
 | `devigner/File.svg` | Tools rail: New |
+| `devigner/Eraser.svg` | Tools rail: Redact |
+| `devigner/TextSelection.svg` | Redact bar: Mark text |
 | `devigner/Printer.svg` | Tools rail and right-click menu: Print |
 | `devigner/ArrowLeft.svg` | Docked panel: close |
 | `devigner/ArrowUp.svg` | AI chat: Send |

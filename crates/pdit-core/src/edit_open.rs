@@ -188,6 +188,10 @@ pub enum FontChoice {
     LiberationMono,
     Carlito,
     Caladea,
+    Roboto,
+    OpenSans,
+    Montserrat,
+    Lato,
 }
 
 /// How a text line looks (D-027). Bold and italic are simulated: bold is the

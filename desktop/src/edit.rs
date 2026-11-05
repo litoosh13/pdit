@@ -189,6 +189,40 @@ pub async fn compress_pdf(request: Request<'_>) -> Result<Response, String> {
     Ok(Response::new(out))
 }
 
+/// Redaction (D-086). Body: the PDF; header x-areas: "page x0 y0 x1 y1" per area, ";" between, page from 0, page space;
+/// x-hidden: 1 also removes hidden data. Returns the redacted copy; an error means no copy.
+#[tauri::command]
+pub async fn redact_pdf(request: Request<'_>) -> Result<Response, String> {
+    let InvokeBody::Raw(pdf) = request.body() else {
+        return Err("expected the PDF as raw bytes".into());
+    };
+    let header = |name: &str| {
+        request
+            .headers()
+            .get(name)
+            .and_then(|v| v.to_str().ok())
+            .ok_or(format!("missing {name}"))
+    };
+    let areas = header("x-areas")?
+        .split(';')
+        .map(|area| {
+            let v: Vec<f32> = area
+                .split(' ')
+                .map(|n| n.parse().map_err(|_| format!("bad area {area:?}")))
+                .collect::<Result<_, _>>()?;
+            match v[..] {
+                [page, x0, y0, x1, y1] => Ok(pdit_mupdf::RedactArea {
+                    page: page as i32,
+                    rect: [x0, y0, x1, y1],
+                }),
+                _ => Err(format!("bad area {area:?}")),
+            }
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    let out = pdit_mupdf::redact(pdf, &areas, header("x-hidden")? == "1").map_err(|e| e.to_string())?;
+    Ok(Response::new(out))
+}
+
 /// Page numbers (D-070). Body: the PDF; header x-labels: percent-encoded ranges, one per line, each
 /// "first page (from 0) TAB style code (D r R a A, or empty) TAB start TAB prefix"; none: plain 1, 2, 3.
 #[tauri::command]
