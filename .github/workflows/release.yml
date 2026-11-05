@@ -155,6 +155,14 @@ jobs:
           name: web
           path: target/dx/pdit-app/release/web/public
 
+      # Pinned files: kept between releases, so a release doesn't depend on GitHub's file servers for them.
+      - name: OCR files cache (macOS)
+        if: runner.os == 'macOS'
+        uses: actions/cache@v4
+        with:
+          path: desktop/resources/ocr
+          key: ocr-${{ hashFiles('desktop/scripts/fetch-ocr.sh') }}
+
       - name: OCR files (macOS)
         if: runner.os == 'macOS'
         run: desktop/scripts/fetch-ocr.sh

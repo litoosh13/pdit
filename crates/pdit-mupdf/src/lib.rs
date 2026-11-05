@@ -658,10 +658,10 @@ pub struct RedactArea {
 
 /// `pdf` with `areas` really removed (RESEARCH.md 2026-11-03), behind black boxes: every glyph touching an area, the
 /// pixels and lines under it, annotations and form fields in it. Always gone too, since they can repeat redacted
-/// content: tags, XFA form data and the thumbnails of redacted pages. `hidden`: also the title and author, XMP,
+/// content: tags, XFA form data, the thumbnails of redacted pages and the descriptions (/Alt, /ActualText, /E) on those
+/// pages. `hidden`: also the title and author, XMP,
 /// bookmarks, attachments and private application data. The file is rewritten without unused objects or old revisions, and
 /// read back: text still in an area is an error, so the copy is never handed out.
-// ponytail: /Alt on marked content around a partly redacted image stays; stripping it needs a content-stream filter.
 pub fn redact(pdf: &[u8], areas: &[RedactArea], hidden: bool) -> Result<Vec<u8>, Error> {
     let doc = PdfDocument::from_bytes(pdf)?;
     let mut pages: Vec<i32> = areas.iter().map(|a| a.page).collect();
@@ -725,6 +725,7 @@ pub fn redact(pdf: &[u8], areas: &[RedactArea], hidden: bool) -> Result<Vec<u8>,
             }
         }
         page.object().dict_delete("Thumb")?;
+        forget_descriptions(&page.object(), 0)?;
     }
     let mut root = doc.catalog()?;
     for key in ["StructTreeRoot", "MarkInfo"] {
@@ -773,6 +774,201 @@ pub fn redact(pdf: &[u8], areas: &[RedactArea], hidden: bool) -> Result<Vec<u8>,
     let out = compress(&clean, Level::BestQuality)?;
     check_redacted(&out, areas)?;
     Ok(out)
+}
+
+/// Marked-content descriptions on a page or form, and in what it uses: they describe what was there, also for what's
+/// left of a partly redacted picture.
+fn forget_descriptions(owner: &mupdf::pdf::PdfObject, depth: u32) -> Result<(), Error> {
+    if let Some(mut contents) = owner.get_dict("Contents")? {
+        if contents.is_array()? {
+            for i in 0..contents.len()? as i32 {
+                if let Some(mut part) = contents.get_array(i)? {
+                    forget_in_stream(&mut part)?;
+                }
+            }
+        } else {
+            forget_in_stream(&mut contents)?;
+        }
+    }
+    let Some(resources) = owner.get_dict_inheritable("Resources")? else {
+        return Ok(());
+    };
+    if let Some(properties) = resources.get_dict("Properties")? {
+        for i in 0..properties.dict_len()? as i32 {
+            if let Some(mut property) = properties.get_dict_val(i)? {
+                for key in DESCRIPTIONS {
+                    property.dict_delete(key)?;
+                }
+            }
+        }
+    }
+    // Forms can hold forms; a loop of them ends here.
+    if let Some(objects) = resources.get_dict("XObject")?
+        && depth < 8
+    {
+        for i in 0..objects.dict_len()? as i32 {
+            let Some(mut object) = objects.get_dict_val(i)? else {
+                continue;
+            };
+            object.dict_delete("Alt")?;
+            let form = object
+                .get_dict("Subtype")?
+                .is_some_and(|s| s.as_name().is_ok_and(|n| n == b"Form"));
+            if form {
+                forget_in_stream(&mut object)?;
+                forget_descriptions(&object, depth + 1)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn forget_in_stream(stream: &mut mupdf::pdf::PdfObject) -> Result<(), Error> {
+    if let Some(clean) = strip_descriptions(&stream.read_stream()?) {
+        stream.write_stream_buffer(&mupdf::Buffer::from_bytes(&clean)?)?;
+    }
+    Ok(())
+}
+
+const DESCRIPTIONS: [&str; 3] = ["Alt", "ActualText", "E"];
+
+/// A content stream without descriptions in the dictionaries of its BDC operators; None if it has none.
+fn strip_descriptions(c: &[u8]) -> Option<Vec<u8>> {
+    let delimiter = |b: u8| b.is_ascii_whitespace() || b"()<>[]{}/%".contains(&b);
+    let mut out = Vec::new();
+    let mut copied = 0;
+    let mut i = 0;
+    while i < c.len() {
+        if c[i] == b'<' && c.get(i + 1) == Some(&b'<') {
+            let end = skip_object(c, i)?;
+            let mut op = end;
+            while c.get(op).is_some_and(|b| b.is_ascii_whitespace()) {
+                op += 1;
+            }
+            if c[op..].starts_with(b"BDC") && c.get(op + 3).is_none_or(|&b| delimiter(b)) {
+                out.extend_from_slice(&c[copied..i]);
+                strip_dict(&c[i..end], &mut out)?;
+                copied = end;
+            }
+            i = end;
+        } else if matches!(c[i], b'(' | b'<' | b'[' | b'/') {
+            i = skip_object(c, i)?;
+        } else if c[i] == b'%' {
+            while i < c.len() && c[i] != b'\n' && c[i] != b'\r' {
+                i += 1;
+            }
+        } else if c[i..].starts_with(b"ID")
+            && (i == 0 || delimiter(c[i - 1]))
+            && c.get(i + 2).is_some_and(|&b| delimiter(b))
+        {
+            // An inline image's data is binary: on to its EI.
+            i += 2;
+            loop {
+                let ei = c[i..].windows(2).position(|w| w == b"EI")? + i;
+                i = ei + 2;
+                if c[ei - 1].is_ascii_whitespace() && c.get(ei + 2).is_none_or(|&b| delimiter(b)) {
+                    break;
+                }
+            }
+        } else {
+            i += 1;
+        }
+    }
+    if out.is_empty() {
+        return None;
+    }
+    out.extend_from_slice(&c[copied..]);
+    (out != c).then_some(out)
+}
+
+/// `dict` (from << to >>) without the description keys.
+fn strip_dict(dict: &[u8], out: &mut Vec<u8>) -> Option<()> {
+    out.extend_from_slice(b"<<");
+    let end = dict.len() - 2;
+    let mut i = 2;
+    while i < end {
+        if dict[i].is_ascii_whitespace() {
+            i += 1;
+            continue;
+        }
+        let key_end = skip_object(dict, i)?;
+        let mut value = key_end;
+        while dict[value].is_ascii_whitespace() {
+            value += 1;
+        }
+        let value_end = skip_object(dict, value)?;
+        let name = String::from_utf8_lossy(&dict[i + 1..key_end])
+            .replace("#6C", "l")
+            .replace("#6c", "l");
+        if !DESCRIPTIONS.contains(&name.as_str()) {
+            out.push(b' ');
+            out.extend_from_slice(&dict[i..value_end]);
+        }
+        i = value_end;
+    }
+    out.extend_from_slice(b" >>");
+    Some(())
+}
+
+/// The end of the object starting at `i`; None if the stream ends first.
+fn skip_object(c: &[u8], mut i: usize) -> Option<usize> {
+    let regular = |b: u8| !b.is_ascii_whitespace() && !b"()<>[]{}/%".contains(&b);
+    match *c.get(i)? {
+        b'(' => {
+            let mut depth = 0;
+            loop {
+                match *c.get(i)? {
+                    b'\\' => i += 1,
+                    b'(' => depth += 1,
+                    b')' => depth -= 1,
+                    _ => {}
+                }
+                i += 1;
+                if depth == 0 {
+                    return Some(i);
+                }
+            }
+        }
+        b'<' if c.get(i + 1) == Some(&b'<') => {
+            i += 2;
+            loop {
+                while c.get(i)?.is_ascii_whitespace() {
+                    i += 1;
+                }
+                if c[i..].starts_with(b">>") {
+                    return Some(i + 2);
+                }
+                i = skip_object(c, i)?;
+            }
+        }
+        b'<' => Some(i + c[i..].iter().position(|&b| b == b'>')? + 1),
+        b'[' => {
+            i += 1;
+            loop {
+                while c.get(i)?.is_ascii_whitespace() {
+                    i += 1;
+                }
+                if c[i] == b']' {
+                    return Some(i + 1);
+                }
+                i = skip_object(c, i)?;
+            }
+        }
+        b'/' => {
+            i += 1;
+            while c.get(i).is_some_and(|&b| regular(b)) {
+                i += 1;
+            }
+            Some(i)
+        }
+        b if regular(b) => {
+            while c.get(i).is_some_and(|&b| regular(b)) {
+                i += 1;
+            }
+            Some(i)
+        }
+        _ => None,
+    }
 }
 
 /// A grouped field's name and value live on its parents, which outlive the widget. Other widgets of the group keep
@@ -1242,6 +1438,7 @@ mod tests {
             r(70.0, 537.0, 300.0, 555.0),  // form XObject
             r(70.0, 517.0, 300.0, 534.0),  // hidden layer
             r(320.0, 300.0, 520.0, 330.0), // pattern
+            r(330.0, 466.0, 420.0, 484.0), // ActualText in a named property
             r(72.0, 300.0, 172.0, 500.0),  // left half of the picture
             r(330.0, 700.0, 560.0, 730.0), // FreeText
             r(330.0, 660.0, 560.0, 690.0), // link
@@ -1278,6 +1475,9 @@ mod tests {
             "SECRET-STRUCT",
             "SECRET-XFA",
             "SECRET-THUMB",
+            "SECRET-FIGURE-ALT",
+            "SECRET-NAMED",
+            "SECRET-FORM-ALT",
             "SECRET-OLDREVISION",
             "SECRET-ORPHAN",
         ] {
@@ -1297,6 +1497,22 @@ mod tests {
         ] {
             assert!(file.contains(kept), "{kept} was removed");
         }
+    }
+
+    #[test]
+    fn descriptions_go_and_the_rest_of_a_stream_stays() {
+        // A BDC word and an unbalanced parenthesis in an inline image's data mustn't derail the reading.
+        let stream = b"/Span <</ActualText (a \\) b (c)) /Lang (fa) /Alt <41> >> BDC q BI /W 1 /H 1 ID (BDC <</Alt (x)>> BDC EI Q EMC /P <</E(y)>>BDC EMC";
+        let out = String::from_utf8_lossy(&strip_descriptions(stream).unwrap()).into_owned();
+        assert_eq!(
+            out,
+            "/Span << /Lang (fa) >> BDC q BI /W 1 /H 1 ID (BDC <</Alt (x)>> BDC EI Q EMC /P << >>BDC EMC"
+        );
+        assert_eq!(strip_descriptions(b"q (<</Alt (x)>> BDC) Tj Q"), None);
+        assert_eq!(
+            strip_descriptions(b"/P <</Lang (fa)>> BDC EMC").map(|_| ()),
+            Some(())
+        );
     }
 
     #[test]

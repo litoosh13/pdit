@@ -2289,6 +2289,7 @@ async fn redact_session() {
         return log("pdit self-check: redact: skipped (not the desktop app)");
     }
     const REDACT: &[u8] = include_bytes!("../../../fixtures/synthetic-redact.pdf");
+    const PERSIAN: &[u8] = include_bytes!("../../../fixtures/synthetic-persian.pdf");
     // Mid-line word, kerned text, invisible text, a form field, a field in a group (y from the page's top).
     let areas =
         "0 116.5 78 236 95;0 70 118 300 136;0 70 140 300 156;0 330 142 560 172;0 330 182 560 212";
@@ -2332,6 +2333,7 @@ async fn redact_session() {
     for (name, input, page, count) in [
         ("rotated page", REDACT, 2u16, 1usize),
         ("words between lines", WRAPPED, 0, 12),
+        ("Persian words", PERSIAN, 0, 2),
     ] {
         let _ = pdit_core::open_document(input.to_vec());
         let words = || -> Vec<String> {

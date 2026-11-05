@@ -14,6 +14,8 @@ BT /F1 14 Tf 72 620 Td (SECRET-COVERED) Tj ET
 /Span <</Alt (SECRET-ALT-TEXT)>> BDC BT /F1 14 Tf 72 570 Td (y-word) Tj ET EMC
 q 1 0 0 1 72 540 cm /Fm1 Do Q
 q 200 0 0 200 72 300 cm /Figure <</Alt (SECRET-FIGURE-ALT)>> BDC /Im1 Do EMC Q
+/Span /MC0 BDC BT /F1 14 Tf 332 470 Td (z-word) Tj ET EMC
+q 1 0 0 1 72 200 cm /Fm2 Do Q
 /OC /L1 BDC BT /F1 14 Tf 72 520 Td (SECRET-LAYER) Tj ET EMC
 /Pattern cs /P1 scn 320 300 200 30 re f 0 g
 0 0 1 RG 2 w 320 400 m 500 400 l S
@@ -31,7 +33,7 @@ def stream(data, extra=b"", compress=True):
         data = zlib.compress(data); extra += b" /Filter /FlateDecode"
     return b"<< /Length %d%s >>\nstream\n" % (len(data), extra) + data + b"\nendstream"
 
-res = b"<< /Font << /F1 5 0 R >> /XObject << /Im1 6 0 R /Fm1 7 0 R >> /Properties << /L1 28 0 R >> /Pattern << /P1 29 0 R >> >>"
+res = b"<< /Font << /F1 5 0 R >> /XObject << /Im1 6 0 R /Fm1 7 0 R /Fm2 33 0 R >> /Properties << /L1 28 0 R /MC0 34 0 R >> /Pattern << /P1 29 0 R >> >>"
 objs = {
  1: b"<< /Type /Catalog /Pages 2 0 R /Outlines 15 0 R /StructTreeRoot 21 0 R /MarkInfo << /Marked true >> /OCProperties << /OCGs [28 0 R] /D << /OFF [28 0 R] >> >> /AcroForm << /XFA 27 0 R /Fields [14 0 R 23 0 R] /DA (/F1 12 Tf 0 g) /DR << /Font << /F1 5 0 R >> >> >> /Names << /EmbeddedFiles << /Names [(SECRET-ATTACH.txt) 19 0 R] >> >> /Metadata 18 0 R >>",
  2: b"<< /Type /Pages /Kids [3 0 R 4 0 R 30 0 R] /Count 3 >>",
@@ -64,6 +66,8 @@ objs = {
  29: stream(tile, b" /Type /Pattern /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 200 30] /XStep 200 /YStep 30 /Resources << /Font << /F1 5 0 R >> >>"),
  30: b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Rotate 90 /Resources " + res + b" /Contents 31 0 R >>",
  31: stream(page3),
+ 33: stream(b"/Span <</Alt (SECRET-FORM-ALT)>> BDC BT /F1 14 Tf 0 0 Td (KEEP-FORM stays) Tj ET EMC\n", b" /Type /XObject /Subtype /Form /BBox [0 0 300 30] /Resources << /Font << /F1 5 0 R >> >>"),
+ 34: b"<< /ActualText (SECRET-NAMED) >>",
  32: stream(b"SECRET-THUMB", b" /Width 12 /Height 1 /ColorSpace /DeviceGray /BitsPerComponent 8"),
 }
 # First revision: page 2's content is the old text; the appended revision replaces it (a classic leak).

@@ -14,7 +14,8 @@ cd "$(dirname "$0")/.."
 zip="$(mktemp)"
 trap 'rm -f "$zip"' EXIT
 echo "Downloading leafmind-fill $TAG (browser)"
-curl -fsSL -o "$zip" "$URL"
+# GitHub sometimes answers 504 for a while; the default retries are over in seconds.
+curl -fsSL --retry 8 --retry-delay 15 --retry-all-errors --connect-timeout 30 -o "$zip" "$URL"
 
 if command -v sha256sum >/dev/null; then
     echo "$SHA256  $zip" | sha256sum -c -
