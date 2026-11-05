@@ -14,7 +14,8 @@ sha256() { shasum -a 256 "$1" | cut -d' ' -f1; }
 fetch() { # url file sha256
     if [ -f "$2" ] && [ "$(sha256 "$2")" = "$3" ]; then return; fi
     echo "downloading $1"
-    curl -fL --retry 3 -o "$2.part" "$1"
+    # GitHub's file servers sometimes answer 504 for a while; the default retries are over in seconds.
+    curl -fL --retry 8 --retry-delay 15 --retry-all-errors --connect-timeout 30 -o "$2.part" "$1"
     if [ "$(sha256 "$2.part")" != "$3" ]; then echo "checksum mismatch: $2" >&2; rm -f "$2.part"; exit 1; fi
     mv "$2.part" "$2"
 }
