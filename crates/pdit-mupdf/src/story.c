@@ -56,6 +56,186 @@ static fz_buffer *rename_names(fz_context *ctx, fz_buffer *src, char (*old)[64],
     return out;
 }
 
+/* What each glyph the Story shows stands for: the letters HarfBuzz shaped it from (P-046). */
+typedef struct
+{
+    fz_font *font;
+    int gid;
+    int len;
+    int ucs[8];
+} letters;
+
+typedef struct
+{
+    fz_device super;
+    fz_device *target;
+    letters *list;
+    int len, cap;
+} letters_device;
+
+static letters *letters_of(fz_context *ctx, letters_device *d, fz_font *font, int gid)
+{
+    for (int i = 0; i < d->len; i++)
+    {
+        if (d->list[i].font == font && d->list[i].gid == gid)
+        {
+            return &d->list[i];
+        }
+    }
+    if (d->len == d->cap)
+    {
+        d->cap = d->cap ? d->cap * 2 : 256;
+        d->list = fz_realloc_array(ctx, d->list, d->cap, letters);
+    }
+    letters *l = &d->list[d->len++];
+    memset(l, 0, sizeof *l);
+    l->font = font;
+    l->gid = gid;
+    return l;
+}
+
+static void reverse_rtl_spans(fz_text *text)
+{
+    for (fz_text_span *span = text->head; span; span = span->next)
+    {
+        if (span->bidi_level & 1)
+        {
+            for (int a = 0, b = span->len - 1; a < b; a++, b--)
+            {
+                fz_text_item item = span->items[a];
+                span->items[a] = span->items[b];
+                span->items[b] = item;
+            }
+        }
+    }
+}
+
+static void letters_fill_text(fz_context *ctx, fz_device *dev, const fz_text *text, fz_matrix ctm, fz_colorspace *cs,
+                              const float *color, float alpha, fz_color_params params)
+{
+    letters_device *d = (letters_device *)dev;
+    for (const fz_text_span *span = text->head; span; span = span->next)
+    {
+        letters *last = NULL;
+        int fresh = 0;
+        for (int i = 0; i < span->len; i++)
+        {
+            int gid = span->items[i].gid, ucs = span->items[i].ucs;
+            if (gid >= 0)
+            {
+                /* A glyph seen before keeps its first reading. */
+                last = letters_of(ctx, d, span->font, gid);
+                fresh = last->len == 0;
+            }
+            if (last && fresh && ucs > 0 && last->len < 8)
+            {
+                last->ucs[last->len++] = ucs;
+            }
+        }
+    }
+    /* A right-to-left span goes to the PDF left to right, as PDF readers expect it: PDFium mirrors each word otherwise.
+     * MuPDF has no call to copy a text, and this one is only the Story's for this drawing. */
+    reverse_rtl_spans((fz_text *)text);
+    fz_fill_text(ctx, d->target, text, ctm, cs, color, alpha, params);
+    reverse_rtl_spans((fz_text *)text);
+}
+
+/* Adds to font `font_obj`'s ToUnicode what its glyphs really stand for. The font's own map comes from its cmap, which
+ * doesn't know shaped glyphs: joined Persian letters came out as presentation forms or nothing. Definitions further down
+ * a CMap replace earlier ones, so this also works on a font already used by an earlier edit.
+ * ponytail: one glyph used for two different letters reads as the first one, e.g. the half-space (ZWNJ), which HarfBuzz
+ * draws as the space glyph, reads as a space; ActualText per run if that matters. */
+static void add_letters(fz_context *ctx, pdf_document *doc, pdf_obj *font_obj, const letters_device *d)
+{
+    pdf_obj *cmap = pdf_dict_get(ctx, font_obj, PDF_NAME(ToUnicode));
+    const char *base = pdf_to_name(ctx, pdf_dict_get(ctx, font_obj, PDF_NAME(BaseFont)));
+    if (!pdf_is_stream(ctx, cmap))
+    {
+        return;
+    }
+    fz_buffer *old = NULL, *out = NULL;
+    fz_var(old);
+    fz_var(out);
+    fz_try(ctx)
+    {
+        old = pdf_load_stream(ctx, cmap);
+        unsigned char *data;
+        size_t len = fz_buffer_storage(ctx, old, &data);
+        size_t at = len;
+        for (size_t i = 0; i + 7 <= len; i++)
+        {
+            if (memcmp(data + i, "endcmap", 7) == 0)
+            {
+                at = i;
+            }
+        }
+        out = fz_new_buffer(ctx, len + 4096);
+        fz_append_data(ctx, out, data, at);
+        int done = 0, added = 0;
+        while (done < d->len)
+        {
+            int block = 0;
+            fz_buffer *chars = fz_new_buffer(ctx, 2048);
+            fz_try(ctx)
+            {
+                for (; done < d->len && block < 100; done++)
+                {
+                    const letters *l = &d->list[done];
+                    if (l->len == 0 || strcmp(fz_font_name(ctx, l->font), base) != 0)
+                    {
+                        continue;
+                    }
+                    fz_append_printf(ctx, chars, "<%04x> <", l->gid);
+                    for (int k = 0; k < l->len; k++)
+                    {
+                        int c = l->ucs[k];
+                        if (c >= 0x10000)
+                        {
+                            fz_append_printf(ctx, chars, "%04x%04x", 0xD800 + ((c - 0x10000) >> 10),
+                                             0xDC00 + ((c - 0x10000) & 0x3FF));
+                        }
+                        else
+                        {
+                            fz_append_printf(ctx, chars, "%04x", c);
+                        }
+                    }
+                    fz_append_string(ctx, chars, ">\n");
+                    block++;
+                }
+                if (block)
+                {
+                    fz_append_printf(ctx, out, "%d beginbfchar\n", block);
+                    fz_append_buffer(ctx, out, chars);
+                    fz_append_string(ctx, out, "endbfchar\n");
+                    added += block;
+                }
+            }
+            fz_always(ctx)
+            {
+                fz_drop_buffer(ctx, chars);
+            }
+            fz_catch(ctx)
+            {
+                fz_rethrow(ctx);
+            }
+        }
+        if (added)
+        {
+            fz_append_data(ctx, out, data + at, len - at);
+            pdf_update_stream(ctx, doc, cmap, out, 0);
+        }
+    }
+    fz_always(ctx)
+    {
+        fz_drop_buffer(ctx, old);
+        fz_drop_buffer(ctx, out);
+    }
+    fz_catch(ctx)
+    {
+        fz_rethrow(ctx);
+    }
+}
+
 /* Lays out `html` (styled by `css`; fonts named in the CSS come from the `nfonts` buffers, by name) in `where`
  * (page space: points, origin top-left) and appends the drawing to the page's content as a new stream. It is drawn
  * with resources of its own first, which are then added to the page's under new names ("Pdit" + name + number),
@@ -79,6 +259,7 @@ int pdit_story_onto_page(fz_context *ctx, pdf_document *doc, pdf_page *page, fz_
     pdf_obj *array = NULL;
     pdf_obj *xres = NULL;
     fz_buffer *show = NULL;
+    letters_device *seen = NULL;
     int code = 0;
 
     fz_var(arch);
@@ -91,6 +272,7 @@ int pdit_story_onto_page(fz_context *ctx, pdf_document *doc, pdf_page *page, fz_
     fz_var(array);
     fz_var(xres);
     fz_var(show);
+    fz_var(seen);
 
     fz_try(ctx)
     {
@@ -113,7 +295,12 @@ int pdit_story_onto_page(fz_context *ctx, pdf_document *doc, pdf_page *page, fz_
         contents = fz_new_buffer(ctx, 1024);
         xres = pdf_new_dict(ctx, doc, 2);
         dev = pdf_new_pdf_device(ctx, doc, fz_invert_matrix(page_ctm), xres, contents);
-        fz_draw_story(ctx, story, dev, fz_identity);
+        /* Story draws only text here, so that's all this device passes on to the PDF device. */
+        seen = fz_new_derived_device(ctx, letters_device);
+        seen->super.fill_text = letters_fill_text;
+        seen->target = dev;
+        fz_draw_story(ctx, story, &seen->super, fz_identity);
+        fz_close_device(ctx, &seen->super);
         fz_close_device(ctx, dev);
 
         pdf_obj *resources = pdf_page_resources(ctx, page);
@@ -148,6 +335,10 @@ int pdit_story_onto_page(fz_context *ctx, pdf_document *doc, pdf_page *page, fz_
                 }
                 snprintf(old_names[count], 64, "%s", name);
                 pdf_dict_puts(ctx, dst, new_names[count], pdf_dict_get_val(ctx, src, i));
+                if (pdf_name_eq(ctx, kind, PDF_NAME(Font)))
+                {
+                    add_letters(ctx, doc, pdf_dict_get_val(ctx, src, i), seen);
+                }
                 if (pdf_name_eq(ctx, kind, PDF_NAME(Font)) && strlen(xname) + strlen(new_names[count]) + 2 < xn)
                 {
                     strcat(xname, new_names[count]);
@@ -191,6 +382,11 @@ int pdit_story_onto_page(fz_context *ctx, pdf_document *doc, pdf_page *page, fz_
         fz_drop_buffer(ctx, show);
         pdf_drop_obj(ctx, stream);
         fz_drop_device(ctx, dev);
+        if (seen)
+        {
+            fz_free(ctx, seen->list);
+        }
+        fz_drop_device(ctx, seen ? &seen->super : NULL);
         fz_drop_buffer(ctx, contents);
         fz_drop_story(ctx, story);
         fz_drop_buffer(ctx, html_buf);

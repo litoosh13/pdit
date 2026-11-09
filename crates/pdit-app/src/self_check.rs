@@ -2329,6 +2329,27 @@ async fn redact_session() {
         "pdit self-check {}: redact: real removal, copy opens in PDFium: {detail}",
         if ok { "PASS" } else { "FAIL" }
     ));
+    // Persian written by MuPDF reads as the letters typed (P-046), in PDFium too.
+    let _ = pdit_core::open_document(PERSIAN.to_vec());
+    let words: Vec<String> = pdit_core::annotations::words(0)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|w| w.text)
+        .collect();
+    pdit_core::close_document();
+    let wanted = ["ساختگی", "اطلاعات", "شخصی", "آزمایشی", "هیچ"];
+    let shaped = words
+        .iter()
+        .any(|w| w.chars().any(|c| matches!(c as u32, 0xFB50..=0xFEFC)));
+    log(&format!(
+        "pdit self-check {}: Persian reads as typed: {} words, shaped forms {shaped}: {words:?}",
+        if wanted.iter().all(|w| words.iter().any(|r| r == w)) && !shaped {
+            "PASS"
+        } else {
+            "FAIL"
+        },
+        words.len()
+    ));
     // Text marks as the page makes them: a rotated page, and words in single-spaced lines. Exactly those words go.
     for (name, input, page, count) in [
         ("rotated page", REDACT, 2u16, 1usize),

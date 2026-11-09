@@ -136,7 +136,7 @@ impl Editor {
         let mut out = String::new();
         for block in tp.blocks() {
             for line in block.lines() {
-                out.extend(line.chars().filter_map(|c| c.char()));
+                out.push_str(&line_text(line.chars()));
                 out.push('\n');
             }
             out.push('\n');
@@ -161,7 +161,7 @@ impl Editor {
             let mut baselines = Vec::new();
             let (mut font, mut size, mut color) = (String::new(), 0.0, [0, 0, 0]);
             for line in block.lines() {
-                let s: String = line.chars().filter_map(|c| c.char()).collect();
+                let s = line_text(line.chars());
                 let s = s.trim();
                 if s.is_empty() {
                     continue;
@@ -609,6 +609,28 @@ fn escape_html(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
+}
+
+/// A line's letters. MuPDF flips a right-to-left line stored left to right, which also swaps the letters of one joined
+/// glyph (lam-alef). The glyph's extra letter is the one with no width: it goes back after the letter it follows.
+fn line_text<'a>(chars: impl Iterator<Item = mupdf::text_page::TextChar<'a>>) -> String {
+    let mut letters: Vec<(char, f32)> = chars
+        .filter_map(|c| {
+            let q = c.quad();
+            c.char().map(|l| (l, q.ur.x - q.ul.x))
+        })
+        .collect();
+    let arabic = |c: char| matches!(c as u32, 0x0600..=0x06FF);
+    let mut i = 1;
+    while i < letters.len() {
+        let (a, b) = (letters[i - 1], letters[i]);
+        if a.1 == 0.0 && arabic(a.0) && arabic(b.0) {
+            letters.swap(i - 1, i);
+            i += 1;
+        }
+        i += 1;
+    }
+    letters.into_iter().map(|(c, _)| c).collect()
 }
 
 /// The Story's fonts map the space glyph to U+00A0 and "-" to U+00AD in their ToUnicode, so the new text reads
@@ -1497,6 +1519,28 @@ mod tests {
         ] {
             assert!(file.contains(kept), "{kept} was removed");
         }
+    }
+
+    #[test]
+    fn persian_reads_back_as_the_letters_typed() {
+        const VAZIRMATN: &[u8] =
+            include_bytes!("../../../desktop/fonts/vazirmatn/Vazirmatn-Regular.ttf");
+        let typed = "این متن ساختگی هیچ اطلاعات";
+        let fonts = [FallbackFont { data: VAZIRMATN }];
+        let mut ed = Editor::open(WRAPPED).unwrap();
+        ed.add_text(0, 72.0, 500.0, 300.0, typed, 14.0, [0, 0, 0], &fonts)
+            .unwrap();
+        // A second edit shares the font: both must keep their letters.
+        ed.add_text(0, 72.0, 540.0, 300.0, "باغ سیب", 14.0, [0, 0, 0], &fonts)
+            .unwrap();
+        let saved = ed.save().unwrap();
+        let after = Editor::open(&saved).unwrap().page_text(0).unwrap();
+        assert!(after.contains(typed), "{after}");
+        assert!(after.contains("باغ سیب"), "{after}");
+        assert!(
+            !after.chars().any(|c| matches!(c as u32, 0xFB50..=0xFEFC)),
+            "presentation forms: {after}"
+        );
     }
 
     #[test]
