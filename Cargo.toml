@@ -37,7 +37,7 @@ web-sys = "0.3"
 opt-level = "z"
 lto = true
 codegen-units = 1
-# wasm-opt (binaryen 129, run by dx) crashes on the DWARF debug info std ships with.
+# wasm-opt (binaryen 127, run by dx) crashes on the DWARF debug info std ships with.
 strip = "debuginfo"
 
 # pdfium-render 0.9.4 with its form-fill handles made public (visibility only; see
