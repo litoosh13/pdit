@@ -16,7 +16,7 @@ use tauri::ipc::{InvokeBody, Request};
 use tauri::{AppHandle, Manager};
 
 /// (folder, file name, url, size, sha256). The question models are leafmind v0.5.0's vocabulary-pruned gte models
-/// (English, German, Persian, Arabic; scripts/fetch-qa-models.sh there), leafmind-fill's model (v0.9.0), then
+/// (English, German, Persian, Arabic; scripts/fetch-qa-models.sh there), leafmind-fill's model (v0.9.2), then
 /// ONNX Runtime ([`ORT`]) and Needle's engine ([`NEEDLE`]).
 type File = (&'static str, &'static str, &'static str, u64, &'static str);
 const FILES: [File; 7] = [

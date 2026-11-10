@@ -4,8 +4,8 @@
 # are not in it: the online version downloads them only when the user asks (assets/ai-fill/ai-fill.js).
 set -eu
 
-TAG=v0.9.0
-SHA256=05e609c265745c4f29a4e021e24e38d1a2856a403401147cc5067cb536125bad
+TAG=v0.9.2
+SHA256=ca7855ed89af43a799cda0127f0986e4c9800c1ed5f6549c80e565b0a917d74f
 URL="https://github.com/litoosh13/leafmind/releases/download/$TAG/leafmind-fill-wasm-$TAG.zip"
 DEST=crates/pdit-app/assets/ai-fill/leafmind-fill
 
