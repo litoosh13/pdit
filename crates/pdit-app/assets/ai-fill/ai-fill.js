@@ -10,7 +10,7 @@ const BASE = new URL("ai-models/", document.baseURI).href;
 const HF = "https://huggingface.co";
 const ORT = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.30.0/dist";
 
-// [path under ai-models/, url, size, sha256]. gte and Needle as leafmind v0.9.2's scripts/fetch-qa-models.sh pins
+// [path under ai-models/, url, size, sha256]. gte and Needle as leafmind v0.9.3's scripts/fetch-qa-models.sh pins
 // them; ONNX Runtime Web 1.30.0's WebGPU build (the files its ort.webgpu.min.mjs loads).
 const FILES = [
   ["ort/ort.webgpu.min.mjs", `${ORT}/ort.webgpu.min.mjs`, 66349,
